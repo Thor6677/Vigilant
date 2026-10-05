@@ -455,8 +455,16 @@ def test_chain_script_scrolls_a_loaded_detail_into_view_on_phones_only():
     assert gate < get < scroll < tabindex < focus
     guard = body.index("if (!el.hasAttribute('tabindex')) {")
     assert gate < guard < tabindex
-    assert re.search(r"el\.addEventListener\('blur', function\(\) \{ el\.removeAttribute\('tabindex'\); \}, "
-                     r"\{ once: true \}\);", body[tabindex:focus])
+    on_blur = body[tabindex:focus]
+    blur_at = on_blur.index("el.addEventListener('blur', function() {")
+    assert "}, { once: true });" in on_blur[blur_at:]
+    assert "el.removeAttribute('tabindex');" in on_blur[blur_at:]
+    # Turning or widening past 640px while it holds focus drops it, or the
+    # global ring would draw round a desktop panel; the blur that follows
+    # removes the media listener again, so none pile up.
+    assert "var leave = function(e) { if (!e.matches) el.blur(); };" in body[guard:tabindex]
+    assert "phoneMq.removeEventListener('change', leave);" in on_blur[blur_at:]
+    assert "phoneMq.addEventListener('change', leave);" in on_blur
     assert ("behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches "
             "? 'auto' : 'smooth'") in body
     # Every way a detail loads: a tile (htmx), a link inside the detail, a deep link.

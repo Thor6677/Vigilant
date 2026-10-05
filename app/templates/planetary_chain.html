@@ -101,7 +101,9 @@
  * the deep link.
  * The detail is focusable (tabindex=-1) only from here until it loses
  * focus: a static tabindex would let a desktop click inside it take focus,
- * and the next key press would draw the global focus ring. */
+ * and the next key press would draw the global focus ring. For the same
+ * reason it gives up focus if the screen turns or widens past 640px while
+ * it holds it. */
 function piShowChainDetail() {
     if (!(window.matchMedia && window.matchMedia('(max-width: 640px)').matches)) return;
     var el = document.getElementById('chain-detail');
@@ -110,8 +112,14 @@ function piShowChainDetail() {
         behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
         block: 'start' });
     if (!el.hasAttribute('tabindex')) {
+        var phoneMq = window.matchMedia('(max-width: 640px)');
+        var leave = function(e) { if (!e.matches) el.blur(); };
         el.setAttribute('tabindex', '-1');
-        el.addEventListener('blur', function() { el.removeAttribute('tabindex'); }, { once: true });
+        el.addEventListener('blur', function() {
+            el.removeAttribute('tabindex');
+            phoneMq.removeEventListener('change', leave);
+        }, { once: true });
+        phoneMq.addEventListener('change', leave);
     }
     el.focus({ preventScroll: true });
 }
