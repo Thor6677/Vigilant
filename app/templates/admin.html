@@ -19,11 +19,26 @@
     <h1 class="b-page-title">Admin</h1>
 </div>
 
-<div class="b-tab-strip" id="admin-tabs">
+<div class="b-tab-strip m-tabs-desktop" id="admin-tabs">
     {% for key, label in sections %}
     <button type="button" {% if key == initial_section %}class="is-active"{% endif %} data-click="switchTab" data-section="{{ key }}">{{ label }}</button>
     {% endfor %}
 </div>
+
+{# Phones: the same section buttons in a "Section ▾" dropdown (mobile R6).
+   The button variant of partials/_tab_nav.html's tab_dropdown, built here
+   because these are in-page switchTab buttons, not links. switchTab keeps
+   both sets' is-active in step, updates the summary and closes this. Like
+   the strip, it sits OUTSIDE #admin-content, so the section refresh never
+   rebuilds it. #}
+<details class="m-tabs m-only" id="admin-tabs-m">
+    <summary><span class="m-tabs-label">Section</span><span class="m-tabs-current">{% for key, label in sections if key == initial_section %}{{ label }}{% endfor %}</span></summary>
+    <div class="m-tabs-list">
+        {%- for key, label in sections %}
+        <button type="button"{% if key == initial_section %} class="is-active"{% endif %} data-click="switchTab" data-section="{{ key }}">{{ label }}</button>
+        {%- endfor %}
+    </div>
+</details>
 
 {# data-htmx-no-error: this container re-fetches itself every 10s (see
    refreshSections below), so ISS-007's "couldn't load" pill is both unnecessary
@@ -56,8 +71,17 @@ function switchTab() {
     var section = this.dataset.section;
     var el = this;
     currentSection = section;
-    document.querySelectorAll('#admin-tabs button').forEach(function(b) { b.classList.remove('is-active'); });
-    el.classList.add('is-active');
+    /* Two button sets name the same sections: the desktop strip and the
+       phone dropdown. Mark the section active in both, whichever was tapped. */
+    document.querySelectorAll('#admin-tabs button, #admin-tabs-m button').forEach(function(b) {
+        b.classList.toggle('is-active', b.dataset.section === section);
+    });
+    var menu = document.getElementById('admin-tabs-m');
+    if (menu) {
+        var current = menu.querySelector('.m-tabs-current');
+        if (current) current.textContent = el.textContent.trim();
+        menu.open = false;
+    }
     htmx.ajax('GET', '/admin/section/' + section, '#admin-content');
     /* Keep the tab in the URL so a reload — or the app coming back after an
        in-app update — lands on the same tab instead of Overview. */

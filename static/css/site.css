@@ -1777,6 +1777,129 @@
 
 /* ── R6 T6 · admin ── */
 @media (max-width: 640px) {
+    /* Section dropdown (admin.html #admin-tabs-m): the tab_dropdown macro's
+       look, for buttons instead of links. Height comes from the 44px rule. */
+    #admin-tabs-m .m-tabs-list button {
+        display: block; width: 100%; padding: 0.75rem 0.85rem;
+        border: none; border-bottom: 1px solid var(--border); background: none;
+        font-family: inherit; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase;
+        text-align: left; color: var(--text); cursor: pointer;
+    }
+    #admin-tabs-m .m-tabs-list button:last-child { border-bottom: none; }
+    #admin-tabs-m .m-tabs-list button.is-active { color: var(--accent); }
+
+    /* Two-line rows for the lists that re-render themselves (D15 A): ESI
+       logs and the scheduler's sync table. Line 1 is code/badge · main text ·
+       time; the ::after break pushes every adm-2l-sub cell to a muted line 2.
+       Pure CSS, no open state, so a refresh has nothing to lose. !important
+       beats the cells' inline flex-basis, padding and 8-10px sizes. */
+    .adm-2l {
+        flex-wrap: wrap !important; align-items: baseline !important;
+        column-gap: 0.5rem !important; row-gap: 0 !important;
+        padding: 0.45rem 0.75rem !important; min-height: 0 !important;
+    }
+    .adm-2l > * {
+        order: 4; flex: none !important; width: auto !important; min-width: 0 !important; max-width: 100%;
+        font-size: 11px !important; text-align: left !important;
+    }
+    .adm-2l::after { content: ""; order: 3; flex: 0 0 100%; height: 0.2rem; }
+    .adm-2l > .adm-2l-a { order: 0; }
+    .adm-2l > .adm-2l-main {
+        order: 1; flex: 1 1 0 !important; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        font-size: 12px !important; color: var(--text) !important;
+    }
+    .adm-2l > .adm-2l-time { order: 2; margin-left: auto; white-space: nowrap; }
+    .adm-2l > .adm-2l-sub { flex: 0 1 auto !important; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .adm-2l > .adm-2l-act { margin-left: auto; overflow: visible; }
+    .adm-2l > :not(.adm-2l-a, .adm-2l-main, .adm-2l-time, .adm-2l-sub) { display: none !important; }
+    .adm-2l .b-badge { font-size: 9px !important; }
+    .adm-2l > .adm-retry::before { content: "retry "; color: var(--muted); }
+    .adm-2l > .adm-archived::before { content: "archived "; color: var(--muted); }
+    .adm-2l > .adm-stale::before { content: "stale "; color: var(--muted); }
+    .adm-2l-act > button { min-width: 44px; padding: 0 0.75rem !important; font-size: 12px !important; }
+
+    /* Updates › run history: the same two lines, CSS only (the panel's
+       markup is pinned by tests/test_updater_panel.py). Columns are placed
+       by position: When, Kind, Change, Outcome, Delivered. Line 1 is
+       outcome · change · when; kind and delivery go below. */
+    #updater-panel .upd-table, #updater-panel .upd-table tbody { display: block; width: 100%; }
+    #updater-panel .upd-table thead { display: none; }
+    #updater-panel .upd-table tr {
+        display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 0.5rem;
+        padding: 0.45rem 0.75rem; border-bottom: 1px solid var(--border);
+    }
+    #updater-panel .upd-table tr:last-child { border-bottom: none; }
+    #updater-panel .upd-table tr::after { content: ""; order: 3; flex: 0 0 100%; height: 0.2rem; }
+    #updater-panel .upd-table td { order: 4; padding: 0; border-bottom: none; font-size: 11px; color: var(--muted); }
+    #updater-panel .upd-table td:nth-child(4) { order: 0; }
+    #updater-panel .upd-table td:nth-child(3) {
+        order: 1; flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        font-size: 12px; color: var(--text);
+    }
+    #updater-panel .upd-table td:nth-child(1) { order: 2; margin-left: auto; white-space: nowrap; }
+
+    /* Updater tap targets. Buttons, selects and inputs already get 44px;
+       the <summary> toggles don't. The two plain ones keep display:list-item
+       (and so their marker): padding plus min-height, never display:flex. */
+    #updater-panel .updater-outcome details > summary,
+    #updater-panel .updater-schedule-form > summary { min-height: 44px; padding: 0.75rem 0; box-sizing: border-box; }
+    #updater-panel .updater-policy > summary,
+    #updater-panel .updater-notify > summary { min-height: 44px; }
+    /* The "Latest release" link: a 14px line of text otherwise. */
+    #updater-panel .upd-status .b-row-val > a { display: inline-flex; align-items: center; min-height: 40px; }
+
+    /* Users (D16 A): the header row keeps togglePanel; role and Delete are
+       m-hide there and reappear at the top of the opened user. */
+    .adm-user { min-height: 44px; }
+    .adm-user .adm-user-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .adm-user .b-badge { font-size: 9px !important; }
+    .adm-user > .adm-user-age { min-width: 0 !important; font-size: 11px !important; white-space: nowrap; }
+    .adm-user-ctl {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem;
+        padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--border);
+    }
+    .adm-user-ctl > .adm-user-role {
+        display: flex; align-items: center; gap: 0.6rem; flex: 1 1 12rem; min-width: 0;
+        font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    }
+    .adm-user-role > select {
+        flex: 1 1 auto; min-width: 0; padding: 0 0.5rem;
+        background: var(--bg); border: 1px solid var(--border); color: var(--text); font-family: inherit;
+    }
+    .adm-user-ctl > .adm-user-del {
+        flex: none; padding: 0 0.9rem; border: 1px solid var(--danger); color: var(--danger); font-size: 12px;
+    }
+    /* Character sub-rows: portrait · name · Sync ✕, then corp, token, sync
+       state and age below, muted. */
+    .adm-char { flex-wrap: wrap !important; row-gap: 0 !important; padding: 0.4rem 0.75rem !important; }
+    .adm-char::after { content: ""; order: 2; flex: 0 0 100%; height: 0.15rem; }
+    .adm-char > * { order: 3; flex: none !important; font-size: 11px !important; }
+    .adm-char > img, .adm-char > .adm-char-name { order: 0; }
+    .adm-char > .adm-char-name { flex: 1 1 0 !important; min-width: 0; font-size: 12px !important; }
+    .adm-char > .adm-char-btns { order: 1; gap: 0.5rem !important; }
+    .adm-char-btns > .b-btn { min-width: 44px; padding: 0 0.6rem !important; font-size: 12px !important; }
+    /* Corp takes line 2's free space and ellipsises, so token, sync and
+       age never wrap to a third line under a long corporation name. */
+    .adm-char > .adm-char-corp { flex: 1 1 0 !important; min-width: 0 !important; margin-left: calc(18px + 0.5rem); }
+    .adm-char > .adm-char-tok, .adm-char > .adm-char-sync { display: inline-flex; align-items: center; gap: 0.3rem; color: var(--muted); }
+    .adm-char > .adm-char-tok::before { content: "token"; }
+    .adm-char > .adm-char-sync::before { content: "sync"; }
+    .adm-char .b-badge { font-size: 9px !important; }
+    /* Allowlist rows fit once their 80px minimums go; the add form stacks
+       (m-stack on the form row). */
+    .adm-allow > span { min-width: 0 !important; }
+    .adm-allow > .b-btn { min-width: 44px; font-size: 12px !important; }
+    .adm-allow .b-badge { font-size: 9px !important; }
+
+    /* Audit log (D17 A): badge · character · age. A long event type
+       ellipsises so key 1 keeps its room; the open row's Event line has it
+       in full. */
+    .adm-audit-row > [data-m="lead"] .b-badge {
+        font-size: 9px !important; max-width: 8rem; overflow: hidden; text-overflow: ellipsis;
+    }
+    .adm-audit-row > [data-m="key"] { font-size: 12px !important; }
+    .adm-audit-row > [data-m="key"] ~ [data-m="key"] { font-size: 11px !important; color: var(--muted); }
+    .adm-audit-filter { flex: 1 1 100%; width: 100%; }
 }
 /* ── end R6 T6 ── */
 

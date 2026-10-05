@@ -51,13 +51,17 @@
 {% endif %}
 
 {# ── Character sync status table ───────────────────────────────────────────── #}
+{# Phones (mobile R6, D15 A): two-line rows from the adm-2l hooks (see
+   admin_esi.html and site.css's R6 T6 section): status · character · last
+   sync, then stale and issues muted below. No tap-to-open: this section is
+   re-rendered every 5s. #}
 <div class="b-panel">
     <div class="b-panel-head">
         <span class="b-label">Character Sync Status</span>
         <span class="b-muted-sm">{{ char_sync_rows | length }} characters</span>
     </div>
     {% if char_sync_rows %}
-    <div class="b-table-row" style="border-bottom:2px solid var(--border);">
+    <div class="b-table-row m-head" style="border-bottom:2px solid var(--border);">
         <span style="flex:2;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Character</span>
         <span style="flex:0 0 70px;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Last Sync</span>
         <span style="flex:0 0 55px;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);text-align:center;">Status</span>
@@ -65,10 +69,10 @@
         <span style="flex:1;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Issues</span>
     </div>
     {% for row in char_sync_rows %}
-    <div class="b-table-row" style="padding:0.25rem 0.75rem;min-height:24px;">
-        <span style="flex:2;font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ row.character_name }}</span>
-        <span style="flex:0 0 70px;font-size:10px;color:var(--muted);">{{ row.last_synced_str }}</span>
-        <span style="flex:0 0 55px;text-align:center;">
+    <div class="b-table-row adm-2l" style="padding:0.25rem 0.75rem;min-height:24px;">
+        <span class="adm-2l-main" style="flex:2;font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ row.character_name }}</span>
+        <span class="adm-2l-time" style="flex:0 0 70px;font-size:10px;color:var(--muted);">{{ row.last_synced_str }}</span>
+        <span class="adm-2l-a" style="flex:0 0 55px;text-align:center;">
             {% if row.queued and row.sync_status != 'syncing' %}
             <span class="b-badge is-warn" style="font-size:7px;">QUEUE</span>
             {% elif row.sync_status == 'syncing' %}
@@ -79,10 +83,10 @@
             <span class="b-dot is-ok"></span>
             {% endif %}
         </span>
-        <span style="flex:0 0 60px;text-align:center;font-size:10px;{% if row.stale_fields == 0 %}color:var(--success);{% elif row.stale_fields == row.total_fields %}color:var(--danger);{% else %}color:var(--warn);{% endif %}">
+        <span class="adm-2l-sub adm-stale" style="flex:0 0 60px;text-align:center;font-size:10px;{% if row.stale_fields == 0 %}color:var(--success);{% elif row.stale_fields == row.total_fields %}color:var(--danger);{% else %}color:var(--warn);{% endif %}">
             {{ row.stale_fields }}/{{ row.total_fields }}
         </span>
-        <span style="flex:1;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+        <span class="adm-2l-sub" style="flex:1;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
             {% if row.sync_error %}<span style="color:var(--danger);">{{ row.sync_error[:50] }}</span>
             {% elif row.warn_count > 0 %}<span style="color:var(--warn);">{{ row.warn_count }} warning{{ 's' if row.warn_count != 1 else '' }}</span>
             {% else %}—{% endif %}
