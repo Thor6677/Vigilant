@@ -505,6 +505,36 @@
     // either way. The hook below no-ops everywhere the panel is absent.
     //
     // Chart.js is loaded by the page, as it already was.
+    //
+    // Phones (≤640px) get at most 3 unrotated x labels instead of 12 tilted
+    // ones (four full dates overlap at 360px, and Chart.js's own size-based
+    // skipping still draws four). The chart is built for the side the page is on; crossing 640px (a
+    // rotation, a resized window) rewrites the limit in place, and a change
+    // that lands on the side it was last laid out for is skipped. Desktop's
+    // options are exactly what they were. One listener, not one per panel
+    // swap: it reaches whichever chart the newest swap built, and a chart
+    // whose canvas has left the page is never touched.
+    var HIST_MQ = window.matchMedia ? window.matchMedia('(max-width: 640px)') : null;
+    function histPhone() { return !!(HIST_MQ && HIST_MQ.matches); }
+    function histXTicks(ticks, phone) {
+        if (phone) { ticks.maxTicksLimit = 3; ticks.maxRotation = 0; }
+        else { ticks.maxTicksLimit = 12; delete ticks.maxRotation; }
+        return ticks;
+    }
+    var histLive = null;   // { chart, side } for the chart on the page now
+    if (HIST_MQ) {
+        var _histRelayout = function () {
+            var h = histLive;
+            if (!h || !h.chart.canvas || !h.chart.canvas.isConnected) return;
+            var side = histPhone();
+            if (side === h.side) return;
+            h.side = side;
+            histXTicks(h.chart.config.options.scales.x.ticks, side);
+            h.chart.update('none');
+        };
+        if (HIST_MQ.addEventListener) HIST_MQ.addEventListener('change', _histRelayout);
+        else if (HIST_MQ.addListener) HIST_MQ.addListener(_histRelayout);
+    }
     function initActivityHistory(panel) {
         if (typeof Chart === 'undefined') return;
         var VIEW = 365, H = null, chart = null;
@@ -540,6 +570,7 @@
             slider.value = maxStart;  // open on the most recent year
             var existing = Chart.getChart ? Chart.getChart(canvas) : null;
             if (existing) existing.destroy();
+            var side = histPhone();
             chart = new Chart(canvas, {
                 type: 'line',
                 data: { labels: [], datasets: [
@@ -554,7 +585,7 @@
                     responsive: true, maintainAspectRatio: false, animation: false,
                     interaction: { mode: 'index', intersect: false },
                     scales: {
-                        x: { ticks: { maxTicksLimit: 12, color: '#888' }, grid: { color: '#1a1a1a' } },
+                        x: { ticks: histXTicks({ color: '#888' }, side), grid: { color: '#1a1a1a' } },
                         y: { position: 'left', ticks: { color: '#c8a951' }, grid: { color: '#1a1a1a' } },
                         y1: { position: 'right', ticks: { color: '#8899aa', callback: function (v) { return v >= 1e9 ? fmtIsk(v) : v; } }, grid: { drawOnChartArea: false } }
                     },
@@ -565,6 +596,7 @@
                         } } } }
                 }
             });
+            histLive = { chart: chart, side: side };
             render(maxStart);
             // Direct listeners rather than the data-* dispatcher: these
             // elements are re-created by every swap, and so is this closure,

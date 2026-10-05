@@ -19,7 +19,10 @@ scripts/mobile-audit.js. Every CSS rule here sits inside a
 5. The drawn .b-switch / .b-check keep their own size instead of the 44px
    every phone input gets; the label around them keeps 44px. Native
    checkboxes and radios keep the 44px box (Chrome draws them centred in it,
-   and it is what gives their labels a 44px tap height)."""
+   and it is what gives their labels a 44px tap height).
+6. The Server Activity history chart (initActivityHistory in actions.js)
+   shows at most 3 unrotated x labels on phones, follows the 640px
+   breakpoint in place, and builds desktop with exactly its old options."""
 import json
 import os
 import re
@@ -379,3 +382,126 @@ def test_native_checkboxes_and_radios_keep_the_44px_box():
     assert not re.search(r"\[type=[\"']?(?:checkbox|radio)", block)
     r1 = "\n".join(_media_bodies(_r1_layer(), PHONE))
     assert not re.search(r"input\[type=[\"']?(?:checkbox|radio)[^{]*\{[^}]*min-height:\s*0", r1)
+
+
+# ── 6. history chart: phone ticks and the breakpoint redraw ───────────
+
+_HIST_HARNESS = r"""
+const fs = require('fs');
+const vm = require('vm');
+const src = fs.readFileSync(process.argv[process.argv.length - 1], 'utf8');
+const tick = () => new Promise(r => setImmediate(r));
+
+let phone = process.argv[process.argv.length - 2] === 'phone';
+const mqs = [];
+function matchMedia(q) {
+  const mq = { media: q, listeners: [], get matches() { return phone; },
+               addEventListener(type, fn) { if (type === 'change') this.listeners.push(fn); } };
+  mqs.push(mq);
+  return mq;
+}
+const charts = [];
+function Chart(canvas, cfg) { this.canvas = canvas; this.config = cfg; this.data = cfg.data; this.updates = 0; charts.push(this); }
+Chart.prototype.update = function () { this.updates++; };
+Chart.prototype.destroy = function () {};
+Chart.getChart = () => null;
+const DATA = { dates: [], pcu_avg: [], kills: [], isk: [] };
+for (let i = 0; i < 400; i++) { DATA.dates.push('d' + i); DATA.pcu_avg.push(i); DATA.kills.push(i); DATA.isk.push(i); }
+function panel() {
+  const canvas = { isConnected: true };
+  const els = { '#hist-slider': { value: 0, max: 0, addEventListener() {} }, '#hist-span': { textContent: '' },
+                '#hist-chart': canvas, '#hist-prev': { addEventListener() {} }, '#hist-next': { addEventListener() {} } };
+  return { id: 'history-panel', canvas, querySelector: sel => els[sel] || null };
+}
+const bodyListeners = {};
+const sandbox = {
+  window: { matchMedia }, console, Date, Chart, Math, JSON, parseInt,
+  fetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve(DATA) }),
+  document: {
+    querySelectorAll: () => [], querySelector: () => null, getElementById: () => null,
+    body: { addEventListener(type, fn) { (bodyListeners[type] = bodyListeners[type] || []).push(fn); } },
+    addEventListener() {},
+  },
+  localStorage: { getItem: () => null, setItem() {} },
+  setInterval: () => 0, clearInterval() {}, setTimeout: () => 0,
+};
+sandbox.window.document = sandbox.document;
+vm.createContext(sandbox);
+vm.runInContext(src, sandbox);
+const swap = p => (bodyListeners['htmx:afterSwap'] || []).forEach(fn => fn({ detail: { target: p } }));
+const ticksOf = ch => JSON.parse(JSON.stringify(ch.config.options.scales.x.ticks));
+const cross = to => { phone = to; mqs.forEach(m => m.listeners.forEach(fn => fn({ matches: to }))); };
+const listenerCount = () => mqs.reduce((n, m) => n + m.listeners.length, 0);
+
+(async () => {
+  const out = {};
+  const first = panel();
+  swap(first); await tick(); await tick(); await tick();
+  const a = charts[0];
+  out.built = ticksOf(a);
+  out.otherAxes = { y: JSON.parse(JSON.stringify(a.config.options.scales.y.ticks)) };
+  const listeners = listenerCount();
+  let u = a.updates; cross(phone); out.sameSideSkipped = a.updates === u;
+  u = a.updates; cross(!phone); out.crossed = { ticks: ticksOf(a), updated: a.updates - u };
+  u = a.updates; cross(!phone); out.crossedBack = { ticks: ticksOf(a), updated: a.updates - u };
+  // A second swap builds a new chart; the old canvas has left the page.
+  first.canvas.isConnected = false;
+  const second = panel();
+  swap(second); await tick(); await tick(); await tick();
+  const b = charts[1];
+  out.listenersGrew = listenerCount() - listeners;
+  const ua = a.updates, ub = b.updates;
+  cross(!phone);
+  out.afterSecond = { oldTouched: a.updates - ua, newUpdated: b.updates - ub, newTicks: ticksOf(b) };
+  process.stdout.write(JSON.stringify(out));
+})();
+"""
+
+
+def _hist(start):
+    if not shutil.which("node"):
+        pytest.skip("node not installed")
+    run = subprocess.run(["node", "-e", _HIST_HARNESS, "--", start, ACTIONS],
+                         capture_output=True, text=True, timeout=30)
+    assert run.returncode == 0, run.stderr
+    return json.loads(run.stdout)
+
+
+_DESK = {"color": "#888", "maxTicksLimit": 12}
+_PHONE_TICKS = {"color": "#888", "maxTicksLimit": 3, "maxRotation": 0}
+
+
+@pytest.fixture(scope="module")
+def hist_desk():
+    return _hist("desk")
+
+
+@pytest.fixture(scope="module")
+def hist_phone():
+    return _hist("phone")
+
+
+def test_history_chart_builds_desktop_with_its_old_options(hist_desk):
+    """Exactly {maxTicksLimit: 12, color: '#888'}: no maxRotation key, so
+    Chart.js's default tilt applies as before (canvas hashes match BASE)."""
+    assert hist_desk["built"] == _DESK
+    assert hist_desk["otherAxes"]["y"] == {"color": "#c8a951"}
+
+
+def test_history_chart_builds_phones_with_three_flat_labels(hist_phone):
+    assert hist_phone["built"] == _PHONE_TICKS
+
+
+def test_history_chart_follows_the_breakpoint_in_place(hist_desk, hist_phone):
+    assert hist_desk["sameSideSkipped"] and hist_phone["sameSideSkipped"]
+    assert hist_desk["crossed"] == {"ticks": _PHONE_TICKS, "updated": 1}
+    assert hist_desk["crossedBack"] == {"ticks": _DESK, "updated": 1}
+    assert hist_phone["crossed"] == {"ticks": _DESK, "updated": 1}
+    assert hist_phone["crossedBack"] == {"ticks": _PHONE_TICKS, "updated": 1}
+
+
+def test_history_chart_swaps_add_no_listener_and_skip_the_old_chart(hist_desk):
+    assert hist_desk["listenersGrew"] == 0
+    assert hist_desk["afterSecond"]["oldTouched"] == 0
+    assert hist_desk["afterSecond"]["newUpdated"] == 1
+    assert hist_desk["afterSecond"]["newTicks"] == _PHONE_TICKS
