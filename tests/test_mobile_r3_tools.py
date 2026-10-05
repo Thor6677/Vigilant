@@ -35,7 +35,7 @@ from app.skillfarm import rows as farm_rows
 from app.stockpiles.holdings import build_rows
 from tests._mobile import (VOID, assert_mrow, assert_single_value_child, cells_rows,
                            clamps, css_section, mrows, phone_block, render_page,
-                           row_keys, row_labelled, row_lead, rule_bodies)
+                           row_keys, row_labelled, row_lead, rule_bodies, selectors)
 
 _section = functools.partial(css_section, release="R3")
 
@@ -204,6 +204,26 @@ def test_stockpile_page_includes_the_tagged_rows_in_the_swap_target():
     html = render_page(stock_mod, "stockpiles.html", "/tools/stockpiles", rows=rows)
     inner = html[html.index('<div id="sp-rows">'):]
     assert len(assert_mrow(inner)) == 4
+
+
+def test_stockpile_rows_carry_their_target_id():
+    """The page's re-open script keys open rows on it across a swap."""
+    html, rows = _render_stock_rows()
+    assert [r["attrs"].get("data-stock-id") for r in mrows(html)] == [str(r["id"]) for r in rows]
+
+
+def test_stockpile_page_has_the_reopen_script():
+    """Smoke test of the re-open script's wiring only: one nonced script
+    on the page names the swap target, both htmx events, the open class
+    and the row id, and escapes the id it puts in a selector. Whether a
+    Remove or Add actually leaves the other open rows open is browser
+    behaviour; the review harness checks that at 360px."""
+    html = render_page(stock_mod, "stockpiles.html", "/tools/stockpiles", rows=_stock_rows())
+    scripts = re.findall(r'<script nonce="test-nonce">(.*?)</script>', html, re.S)
+    page = [s for s in scripts if "sp-rows" in s]
+    assert len(page) == 1
+    for needle in ("htmx:beforeSwap", "htmx:afterSwap", "is-open", "data-stock-id", "CSS.escape("):
+        assert needle in page[0], needle
 
 
 def test_empty_watchlist_has_no_rows():
@@ -402,9 +422,12 @@ def test_farm_table_is_an_m_table_with_an_m_head():
     assert '<thead class="m-head">' in html
 
 
-def test_farm_page_reopens_rows_after_a_swap():
-    """A Base SP change re-renders the whole section; the page puts back
-    the open rows by pilot id, so editing doesn't close the row."""
+def test_farm_page_has_the_reopen_script():
+    """Smoke test of the re-open script's wiring only: one nonced script,
+    after the swap target, names it, both htmx events, the open class and
+    the row id, and escapes the id it puts in a selector. Whether a Base SP
+    change actually keeps its row open is browser behaviour; the review
+    harness checks that at 360px (by the keyboard's Go and by blur)."""
     rows = _pilots()
     html = render_page(farm_mod, "skill_farm.html", "/tools/skill-farm", **_farm_ctx(rows))
     inner = html[html.index('<div id="skill-farm-content">'):]
@@ -412,8 +435,8 @@ def test_farm_page_reopens_rows_after_a_swap():
     scripts = re.findall(r'<script nonce="test-nonce">(.*?)</script>', html, re.S)
     restore = [s for s in scripts if "skill-farm-content" in s]
     assert len(restore) == 1
-    for needle in ("htmx:beforeSwap", "htmx:afterSwap", "is-open", "data-pilot-id"):
-        assert needle in restore[0]
+    for needle in ("htmx:beforeSwap", "htmx:afterSwap", "is-open", "data-pilot-id", "CSS.escape("):
+        assert needle in restore[0], needle
     # Content-block placement: after the swap target, before the page ends.
     assert html.index('<div id="skill-farm-content">') < html.index(restore[0])
 
@@ -529,6 +552,19 @@ def test_appraisal_header_is_m_head_and_total_row_is_plain():
     assert total and "m-row" not in total.group(1).split()
 
 
+def test_appraisal_total_row_drops_its_spacers_on_phones():
+    """The two empty flex:1 spacers are m-hide, so on phones the total and
+    the volume get their width (site.css keeps them on one line)."""
+    html, _ = _render_appraisal()
+    m = re.search(r'<div class="([^"]*)"[^>]*>\s*<span[^>]*>Total</span>(.*?)</div>', html, re.S)
+    assert m and "apr-total" in m.group(1).split()
+    spans = re.findall(r'<span([^>]*)>(.*?)</span>', m.group(2), re.S)
+    empty = [a for a, t in spans if not t.strip()]
+    values = [a for a, t in spans if t.strip()]
+    assert len(empty) == 2 and all('class="m-hide"' in a and "flex:1" in a for a in empty)
+    assert len(values) == 2 and not any("m-hide" in a for a in values)
+
+
 def test_appraisal_page_is_login_only_so_its_rows_may_toggle():
     """actions.js only loads for a session, so a page a stranger can open
     must carry no data-click. The appraisal page sends strangers home."""
@@ -549,12 +585,15 @@ def _decls(body):
             (d.split(":", 1) for d in body.split(";") if ":" in d)}
 
 
-@pytest.mark.parametrize("table", ["sp-table", "sf-table"])
+_FARM = "#skill-farm-content .sf-table"
+
+
+@pytest.mark.parametrize("table", [".sp-table", _FARM])
 def test_css_table_rows_draw_one_rule_and_cells_drop_their_desktop_box(table):
     phone = _phone()
-    row = _decls(rule_bodies(phone, f".{table} tr.m-row"))
+    row = _decls(rule_bodies(phone, f"{table} tr.m-row"))
     assert row["border-bottom"] == "1px solid var(--border)"
-    cell = _decls(rule_bodies(phone, f".{table} tr.m-row > td"))
+    cell = _decls(rule_bodies(phone, f"{table} tr.m-row > td"))
     assert cell["padding"] == "0" and cell["border-bottom"] == "none"
 
 
@@ -569,7 +608,7 @@ def test_css_stockpile_tint_moves_to_the_row_and_covered_dash_is_muted():
 
 
 @pytest.mark.parametrize("sel", [".sp-table tr.m-row > td > .sp-del",
-                                 ".sf-table tr.m-row > td > .sf-del"])
+                                 f"{_FARM} tr.m-row > td > .sf-del"])
 def test_css_remove_keeps_its_40px_in_an_open_row(sel):
     """.b-btn is flex:1, which would stretch the × across the open row."""
     assert _decls(rule_bodies(_phone(), sel))["flex"] == "none"
@@ -577,7 +616,7 @@ def test_css_remove_keeps_its_40px_in_an_open_row(sel):
 
 def test_css_base_sp_input_is_wider_in_an_opened_row():
     """The desktop 100px box holds 7 digits at 12px; phones force 16px."""
-    body = _decls(rule_bodies(_phone(), ".sf-table tr.m-row > [data-m-label] .sf-input"))
+    body = _decls(rule_bodies(_phone(), f"{_FARM} tr.m-row > [data-m-label] .sf-input"))
     assert body["width"] == "10em"
 
 
@@ -586,20 +625,39 @@ def test_css_monthly_profit_is_green_or_red_on_phones():
     so desktop draws profit in the text colour. Phones show the green/red
     (D18 A) in open rows and on the Total line; desktop stays as it is."""
     phone = _phone()
-    assert _decls(rule_bodies(phone, ".sf-table td.sf-profit"))["color"] == "#93c47d"
-    assert _decls(rule_bodies(phone, ".sf-table td.sf-loss"))["color"] == "#e06666"
+    assert _decls(rule_bodies(phone, f"{_FARM} td.sf-profit"))["color"] == "#93c47d"
+    assert _decls(rule_bodies(phone, f"{_FARM} td.sf-loss"))["color"] == "#e06666"
 
 
 def test_css_total_row_becomes_label_value_lines():
     phone = _phone()
-    for sel in (".sf-table > tfoot", ".sf-table > tfoot > tr"):
+    for sel in (f"{_FARM} > tfoot", f"{_FARM} > tfoot > tr"):
         assert _decls(rule_bodies(phone, sel))["display"] == "block", sel
-    assert _decls(rule_bodies(phone, ".sf-table > tfoot > tr"))["border-top"] == "2px solid var(--border)"
-    assert _decls(rule_bodies(phone, ".sf-table > tfoot > tr > td"))["display"] == "none"
-    line = _decls(rule_bodies(phone, ".sf-table > tfoot > tr > td[data-sf-label]"))
+    assert _decls(rule_bodies(phone, f"{_FARM} > tfoot > tr"))["border-top"] == "2px solid var(--border)"
+    assert _decls(rule_bodies(phone, f"{_FARM} > tfoot > tr > td"))["display"] == "none"
+    line = _decls(rule_bodies(phone, f"{_FARM} > tfoot > tr > td[data-sf-label]"))
     assert line["display"] == "block" and line["border-top"] == "none"
-    label = _decls(rule_bodies(phone, ".sf-table > tfoot > tr > td[data-sf-label]::before"))
+    label = _decls(rule_bodies(phone, f"{_FARM} > tfoot > tr > td[data-sf-label]::before"))
     assert label["content"] == "attr(data-sf-label)" and label["float"] == "left"
+
+
+def test_css_skill_farm_rules_are_scoped_to_the_page():
+    """fitting_saved.html also has a .sf-table, which R6 turns into m-rows
+    in the same release. Every Skill Farm selector here starts at this
+    page's swap target, so neither page's phone rules reach the other.
+    The ID also outranks the page's later <style>, so nothing needs
+    !important."""
+    section = _section("T7")
+    sels = [s for m in re.finditer(r"([^{}]+)\{[^{}]*\}", _phone()) for s in selectors(m.group(1))]
+    farm = [s for s in sels if "sf-" in s]
+    assert len(farm) >= 10
+    for s in farm:
+        assert s.startswith(_FARM + " "), s
+    assert "!important" not in section
+
+
+def test_css_appraisal_total_values_stay_on_one_line():
+    assert _decls(rule_bodies(_phone(), ".apr-total > span"))["white-space"] == "nowrap"
 
 
 def test_css_appraisal_show_all_is_inset_in_its_panel():

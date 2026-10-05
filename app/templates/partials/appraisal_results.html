@@ -98,10 +98,12 @@
         </div>
 
         {# ── Total Row ────────────────────────────────────────────────────────── #}
-        <div class="b-table-row" style="border-top:2px solid var(--border);">
+        {# Phones: the two spacers hide (m-hide) and site.css keeps the total
+           and the volume on one line each (.apr-total). #}
+        <div class="b-table-row apr-total" style="border-top:2px solid var(--border);">
             <span style="flex:3;font-size:11px;font-weight:600;color:var(--text);">Total</span>
-            <span style="flex:1;"></span>
-            <span style="flex:1;"></span>
+            <span class="m-hide" style="flex:1;"></span>
+            <span class="m-hide" style="flex:1;"></span>
             <span style="flex:1;text-align:right;font-size:12px;font-weight:600;color:var(--accent);">{{ fmt_isk(total_isk) }} ISK</span>
             <span style="flex:1;text-align:right;font-size:11px;font-weight:600;color:var(--muted);">{{ "{:,.1f}".format(total_volume) }} m³</span>
         </div>

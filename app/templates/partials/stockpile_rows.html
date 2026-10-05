@@ -5,7 +5,8 @@
    Phones (D17 A): each target is an expand-on-tap row. Key 1 is the item,
    key 2 the deficit (red when short, a muted "—" when covered). Name,
    Current, Target, Note (only when there is one) and Remove open below.
-   The Name cell is phone-only (m-only), so desktop's columns don't change. #}
+   The Name cell is phone-only (m-only), so desktop's columns don't change.
+   data-stock-id lets the page re-open a row after a swap. #}
 {% if not rows %}
 <div class="b-empty">
     No stockpile targets yet. Search for an item below and set a target quantity
@@ -26,7 +27,7 @@
     </thead>
     <tbody>
         {% for r in rows %}
-        <tr class="{{ 'is-under ' if r.under }}m-row" data-click="toggleMRow">
+        <tr class="{{ 'is-under ' if r.under }}m-row" data-click="toggleMRow" data-stock-id="{{ r.id }}">
             <td data-m="key">{{ r.type_name }}</td>
             <td class="m-only" data-m-label="Name">{{ r.type_name }}</td>
             <td style="text-align:right;" data-m-label="Current">{{ '{:,}'.format(r.current) }}</td>

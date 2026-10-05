@@ -85,7 +85,7 @@
     document.addEventListener('htmx:afterSwap', function (e) {
         if (!isFarm(e)) return;
         open.forEach(function (id) {
-            var r = e.detail.target.querySelector('tr.m-row[data-pilot-id="' + id + '"]');
+            var r = e.detail.target.querySelector('tr.m-row[data-pilot-id="' + CSS.escape(id) + '"]');
             if (r) r.classList.add('is-open');
         });
         open = [];
