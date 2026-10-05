@@ -33,25 +33,26 @@
             <span style="flex:1;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Margin %</span>
         </div>
 
+        {# The rows are written with no whitespace between their tags: a group
+           can return 200 of them, and whitespace between flex items or between
+           block-level rows is never drawn, so desktop is unchanged. Each cell
+           line opens with an empty stripping comment (or a block tag with a
+           leading dash), which drops the newline and indentation before it. #}
         <div class="m-clamp-wrap bf-clamp">
             <div class="m-clamp">
-                {% for r in rows %}
+                {%- for r in rows -%}
                 <div class="b-table-row m-row bf-row" data-click="toggleMRow">
-                    <span style="flex:3;font-size:11px;">
-                        <a href="/market/type/{{ r.product_type_id }}" style="color:var(--text);text-decoration:none;">{{ r.product_name }}</a>
-                    </span>
-                    <span class="m-only" data-m="key">{{ r.product_name }}</span>
-                    <span class="m-only" data-m-label="Name">{{ r.product_name }}</span>
-                    <span data-m-label="Build / unit" style="flex:1;text-align:right;font-size:11px;color:var(--muted);">
-                        <span>{{ r.cost_str }}{% if r.inv_str %}<span style="font-size:9px;"> (+{{ r.inv_str }} inv)</span>{% endif %}{% if r.skill_missing %}<span title="{{ skill_note }}" style="color:var(--danger);cursor:help;padding-left:2px;">&#9888;</span>{% endif %}</span>
-                    </span>
-                    {% if r.skill_missing %}<span class="m-only" data-m-label="Skills" style="color:var(--danger);">{{ skill_note }}</span>{% endif %}
-                    <span data-m-label="Sell / unit" style="flex:1;text-align:right;font-size:11px;color:var(--muted);">{{ r.sell_str }}</span>
-                    <span data-m-label="Margin" style="flex:1;text-align:right;font-size:11px;color:{% if not r.priced %}var(--muted){% elif r.margin_positive %}var(--success){% else %}var(--danger){% endif %};">{{ r.margin_isk_str }}</span>
-                    <span data-m="key" style="flex:1;text-align:right;font-size:11px;font-weight:600;color:{% if not r.priced %}var(--muted){% elif r.margin_positive %}var(--success){% else %}var(--danger){% endif %};">{{ r.margin_pct_str }}</span>
-                    <span class="m-only" data-m-label="Market"><a href="/market/type/{{ r.product_type_id }}" class="m-tap" style="color:var(--accent);text-decoration:none;">Open market page →</a></span>
-                </div>
-                {% endfor %}
+                    {#- #}<span style="flex:3;font-size:11px;"><a href="/market/type/{{ r.product_type_id }}" style="color:var(--text);text-decoration:none;">{{ r.product_name }}</a></span>
+                    {#- #}<span class="m-only" data-m="key">{{ r.product_name }}</span>
+                    {#- #}<span class="m-only" data-m-label="Name">{{ r.product_name }}</span>
+                    {#- #}<span data-m-label="Build / unit" style="flex:1;text-align:right;font-size:11px;color:var(--muted);"><span>{{ r.cost_str }}{% if r.inv_str %}<span style="font-size:9px;"> (+{{ r.inv_str }} inv)</span>{% endif %}{% if r.skill_missing %}<span title="{{ skill_note }}" style="color:var(--danger);cursor:help;padding-left:2px;">&#9888;</span>{% endif %}</span></span>
+                    {%- if r.skill_missing %}<span class="m-only" data-m-label="Skills">{{ skill_note }}</span>{% endif %}
+                    {#- #}<span data-m-label="Sell / unit" style="flex:1;text-align:right;font-size:11px;color:var(--muted);">{{ r.sell_str }}</span>
+                    {#- #}<span data-m-label="Margin" style="flex:1;text-align:right;font-size:11px;color:{% if not r.priced %}var(--muted){% elif r.margin_positive %}var(--success){% else %}var(--danger){% endif %};">{{ r.margin_isk_str }}</span>
+                    {#- #}<span data-m="key" style="flex:1;text-align:right;font-size:11px;font-weight:600;color:{% if not r.priced %}var(--muted){% elif r.margin_positive %}var(--success){% else %}var(--danger){% endif %};">{{ r.margin_pct_str }}</span>
+                    {#- #}<span class="m-only" data-m-label="Market"><a href="/market/type/{{ r.product_type_id }}" class="m-tap" aria-label="Open market page for {{ r.product_name }}">Open market page <span aria-hidden="true">→</span></a></span>
+                {#- #}</div>
+                {%- endfor %}
             </div>
             {% if rows|length > 10 %}
             <button type="button" class="m-only m-showall" data-click="toggleExpanded" data-toggle-target=".m-clamp-wrap">Show all {{ rows|length }}</button>

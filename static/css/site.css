@@ -1190,6 +1190,13 @@
     /* "Show all" inside the results panel: inset, so its border doesn't
        double against the panel's own sides and bottom. */
     .bf-clamp > .m-showall { width: calc(100% - 1.5rem); margin: 0.4rem 0.75rem 0.6rem; }
+    /* The phone-only Skills line and Market link take their colours here
+       rather than inline, since a group can return 200 rows. The link is an
+       m-tap inline-flex box, so its arrow is a flex item and the space
+       before it collapses; the gap puts back one character of the
+       monospace face. */
+    .bf-row > [data-m-label="Skills"] { color: var(--danger); }
+    .bf-row > [data-m-label="Market"] > .m-tap { color: var(--accent); text-decoration: none; gap: 0.6em; }
 
     /* The form's two control blocks stack in one column. The fields' inline
        min-width (220px, 240px) and flex shorthands need !important. The
@@ -1215,6 +1222,9 @@
     .bft-row > .bft-arrow { width: 40px; font-size: 12px; }
     .bft-row > .bft-arrow-empty { width: 40px; }
     .bft-row > .bft-select { font-size: 12px; }
+    /* The tree box: 60vh instead of 260px, which shows fewer than six of
+       these rows. The page's overflow-y:auto stays, so it still scrolls. */
+    .bf-field > .bf-tree { max-height: 60vh; }
 }
 /* ── end R3 T2 ── */
 

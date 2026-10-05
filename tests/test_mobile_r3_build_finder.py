@@ -187,6 +187,42 @@ def test_market_link_opens_inside_the_row_and_the_desktop_link_cell_is_untagged(
         assert desktop[0]["attrs"]["style"] == "flex:3;font-size:11px;"
 
 
+def test_market_link_has_an_accessible_name():
+    """Every row's link would otherwise be announced as the same "Open
+    market page →"; the label names the product, and the arrow is hidden
+    from assistive tech."""
+    html, rows = _render()
+    links = [(a, anc) for t, a, anc in _tree(html) if t == "a" and "m-tap" in _cls(a)]
+    assert len(links) == len(rows)
+    for (a, anc), r in zip(links, rows):
+        assert a["aria-label"] == f"Open market page for {r['product_name']}"
+        assert anc[-1].get("data-m-label") == "Market"
+    inner = re.findall(r'<a [^>]*class="m-tap"[^>]*>(.*?)</a>', html)
+    assert inner == ['Open market page <span aria-hidden="true">→</span>'] * len(rows)
+
+
+def test_phone_only_cells_carry_no_inline_style():
+    """Their colours live in the R3 T2 section instead: a 200-row response
+    repeats each cell 200 times."""
+    html, rows = _render()
+    for n, (row, _) in enumerate(_paired(html, rows)):
+        labelled = row_labelled(row)
+        assert "style" not in labelled["Market"]["kids"][0]
+        if n == _SKILL_ROW:
+            assert "style" not in labelled["Skills"]["attrs"]
+
+
+def test_rows_carry_no_whitespace_between_tags():
+    """Whitespace between flex items, or between the block-level rows, is
+    never rendered, so leaving it out changes nothing on screen and keeps
+    the 200-row response small."""
+    html, rows = _render()
+    start = html.index('<div class="b-table-row m-row')
+    end = html.rindex("Open market page")
+    assert len(rows) == 14
+    assert not re.search(r">\s+<", html[start:end])
+
+
 def test_missing_skill_reason_is_visible_text_in_the_open_row():
     html, rows = _render()
     titles = re.findall(r'<span title="([^"]+)"[^>]*>&#9888;</span>', html)
@@ -235,6 +271,14 @@ def test_no_show_all_at_ten_rows():
     c = clamps(html)
     assert [k["children"] for k in c.clamps] == [10]
     assert c.showall == []
+
+
+def test_show_all_appears_at_eleven_rows():
+    """The threshold is "more than 10": 11 rows already get the button."""
+    html, _ = _render(11)
+    c = clamps(html)
+    assert [k["children"] for k in c.clamps] == [11]
+    assert [b["text"] for b in c.showall] == ["Show all 11"]
 
 
 def test_rows_and_tagged_cells_are_never_hidden_inline():
@@ -331,6 +375,9 @@ def test_page_controls_match_the_phone_selectors():
         assert "bf-field" in _cls(anc[-1])
     me = [anc for _, a, anc in tags if "bf-me" in _cls(a)]
     assert len(me) == 1 and "bf-field" in _cls(me[0][-1])
+    trees = [(a, anc) for _, a, anc in tags if "bf-tree" in _cls(a)]
+    assert len(trees) == 1 and trees[0][0].get("id") == "bf-tree"
+    assert "bf-field" in _cls(trees[0][1][-1])
     chips = [anc for _, a, anc in tags if "bf-chip" in _cls(a)]
     assert len(chips) == 1 + len(industry_mod.DECRYPTORS)
     for anc in chips:
@@ -394,6 +441,22 @@ def test_result_keys_share_one_size_and_show_all_is_inset():
     assert "margin: 0.4rem 0.75rem 0.6rem" in body
 
 
+def test_tree_box_grows_on_phones_and_still_scrolls():
+    """At 44px a row, the desktop 260px box shows under six rows. The
+    page's overflow-y:auto stays, so the box still scrolls."""
+    body = rule_bodies(_phone()[0], ".bf-field > .bf-tree")
+    assert "max-height: 60vh" in body
+    assert "overflow" not in body
+
+
+def test_phone_only_cell_colours_live_in_the_section():
+    phone = _phone()[0]
+    link = rule_bodies(phone, '.bf-row > [data-m-label="Market"] > .m-tap')
+    for decl in ("color: var(--accent)", "text-decoration: none", "gap: 0.6em"):
+        assert decl in link, decl
+    assert "color: var(--danger)" in rule_bodies(phone, '.bf-row > [data-m-label="Skills"]')
+
+
 def test_section_has_no_desktop_rules():
     """bf-row and bf-clamp act only on phones, and the section's desktop
     slot is empty, so desktop renders as before (D21)."""
@@ -401,5 +464,5 @@ def test_section_has_no_desktop_rules():
         css = re.sub(r"/\*.*?\*/", "", fh.read(), flags=re.S)
     phone, desktop = _phone()
     assert not desktop.strip()
-    for cls in (".bf-row", ".bf-clamp", ".bf-chip", ".bft-", ".bf-controls", ".bf-field"):
+    for cls in (".bf-row", ".bf-clamp", ".bf-chip", ".bft-", ".bf-tree", ".bf-controls", ".bf-field"):
         assert css.count(cls) == phone.count(cls) > 0, cls
