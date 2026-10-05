@@ -680,6 +680,11 @@
         min-width: 40px !important; min-height: 40px !important; font-size: 12px !important;
         display: inline-flex !important; align-items: center; justify-content: center;
     }
+    /* A button or .b-btn already has the 44px phone floor (the touch rule
+       near the top of this file); m-tap's 40px must not shrink it. Two-part
+       selectors outrank .m-tap whatever the order, so this needs no other
+       place in the file. Width stays m-tap's 40px minimum. */
+    button.m-tap, .b-btn.m-tap { min-height: 44px !important; }
     .m-unclamp { max-height: none !important; overflow: visible !important; }
     .m-clamp-wrap:not(.is-expanded) .m-clamp > :nth-child(n+11) { display: none !important; }
     .m-clamp-wrap.is-expanded .m-showall { display: none !important; }
