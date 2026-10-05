@@ -20,11 +20,13 @@ Contexts are hand-built in the shapes pi.py's routes produce. Names are
 invented."""
 import functools
 import re
+from html.parser import HTMLParser
 
+from app.pi import constants as pi_const
 from app.routes import pi as pi_mod
-from tests._mobile import (Styled, assert_mrow, assert_single_value_child, cells_rows,
-                           css_section, phone_block, render_page, row_keys, row_labelled,
-                           row_lead, rule_bodies)
+from tests._mobile import (VOID, Styled, assert_mrow, assert_single_value_child, cells_rows,
+                           clamps, css_section, phone_block, render_page, row_keys,
+                           row_labelled, row_lead, rule_bodies)
 
 _section = functools.partial(css_section, release="R3")
 
@@ -408,18 +410,27 @@ def test_chain_grid_stacks_and_the_detail_panel_stops_sticking_via_hooks():
     (panel,) = _with_class(html, "pi-chain-detail-panel")
     assert "b-panel" in panel[1]
     assert panel[2] == "position:sticky;top:1rem;"          # desktop keeps it sticky
+    # tabindex=-1: the phone scroll moves focus to the loaded detail.
     assert re.search(r'class="b-panel pi-chain-detail-panel"[^>]*>\s*'
-                     r'<div class="b-panel-head">.*?<div id="chain-detail">', html, re.S)
+                     r'<div class="b-panel-head">.*?<div id="chain-detail" tabindex="-1">',
+                     html, re.S)
 
 
 def test_css_chain_stacks_unsticks_and_clears_the_sticky_nav():
     css = _phone()
     # The inline grid template beats .b-grid-2's phone rule, hence the hook.
     assert "grid-template-columns: minmax(0, 1fr) !important" in rule_bodies(css, ".pi-chain-grid")
-    assert "position: static !important" in rule_bodies(css, ".pi-chain-detail-panel")
-    # scrollIntoView lands the detail below the 46px sticky nav.
-    margin = re.search(r"scroll-margin-top:\s*(\d+)px", rule_bodies(css, "#chain-detail"))
-    assert margin and int(margin.group(1)) >= 46
+    panel = rule_bodies(css, ".pi-chain-detail-panel")
+    assert "position: static !important" in panel
+    # The panel (Detail head included) is scrolled to: it lands below the
+    # 46px sticky nav plus a gap.
+    assert "scroll-margin-top: 52px" in panel
+    assert rule_bodies(css, "#chain-detail") == ""
+    # The script then focuses the detail (tabindex=-1, not a control). After
+    # a tap on a tile, which can't take focus, Chrome treats that as
+    # focus-visible and draws the 2px accent ring: a stray bar under the
+    # Detail head. Phones drop it; desktop never focuses it programmatically.
+    assert "outline: none" in rule_bodies(css, "#chain-detail:focus-visible")
 
 
 def test_chain_script_scrolls_a_loaded_detail_into_view_on_phones_only():
@@ -429,7 +440,12 @@ def test_chain_script_scrolls_a_loaded_detail_into_view_on_phones_only():
     body = helper.group(1)
     gate = body.index("window.matchMedia('(max-width: 640px)').matches")
     assert "return" in body[gate:body.index("scrollIntoView")], "desktop returns before scrolling"
-    assert gate < body.index("document.getElementById('chain-detail')") < body.index("scrollIntoView")
+    get = body.index("document.getElementById('chain-detail')")
+    scroll = body.index("(el.closest('.b-panel') || el).scrollIntoView(")
+    focus = body.index("el.focus({ preventScroll: true });")
+    assert gate < get < scroll < focus
+    assert ("behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches "
+            "? 'auto' : 'smooth'") in body
     # Every way a detail loads: a tile (htmx), a link inside the detail, a deep link.
     hook = re.search(r"addEventListener\('htmx:afterSwap', function\(evt\) \{(.*?)\}\);", script, re.S)
     assert hook and "evt.detail.target.id === 'chain-detail'" in hook.group(1)
@@ -544,7 +560,12 @@ def test_lookup_hover_hints_hide_on_phones():
                      r'<div class="m-only" style="([^"]*)">\s*(.*?)\s*</div>', html, re.S)
     assert foot and foot.group(1) == foot.group(3)
     assert "cyan = downstream uses." in foot.group(2)
-    assert foot.group(4) == "Click to open the Chain Explorer for full details."
+    # The tier chips link to the Calculator. Desktop's "Chain Explorer"
+    # wording is the user's call; the phone copy says where a tap goes.
+    assert "Click to open the Chain Explorer for full details." in foot.group(2)
+    assert foot.group(4) == "Tap a commodity to plan it in the Calculator."
+    assert all(a["href"].startswith("/industry/planetary/calculator?")
+               for a in _links(html) if "pi-tier-item" in a.get("class", ""))
     assert 'class="m-hide">' not in html          # no new mid-line wrappers
 
 
@@ -569,8 +590,6 @@ def test_css_lookup_tier_chips_and_dropdown_rows_are_40px():
 
 
 # ── Planet detail pins (D16 A) ───────────────────────────────────────
-
-from app.pi import constants as pi_const  # noqa: E402
 
 _TYPE_NAMES = {91001: "Sample Gas", 95001: "Sample Oxidizer"}
 # The shapes pi.py's planet-detail route leaves on each pin: two extractors
@@ -633,14 +652,67 @@ def test_planet_detail_contents_still_open_from_a_details():
     assert [c["text"] for c in contents[:2]] == ["—", "—"]
     for c in contents[2:]:
         assert [k.get("style") for k in c["kids"]] == ["cursor:pointer;"]   # the <details>
-    boxes = re.findall(r'<details style="cursor:pointer;">\s*<summary class="b-text">'
-                       r'(\d+) items?</summary>\s*<div class="m-unclamp" '
+    # An open row forces overflow:visible on every value descendant (Polish
+    # B), so the 180px box would spill over the next row: it unclamps (and
+    # clamps at 10 instead). data-click="noop": the dispatcher stops there,
+    # so a tap inside the open list doesn't collapse the pin row.
+    boxes = re.findall(r'<details class="m-clamp-wrap" style="cursor:pointer;">\s*'
+                       r'<summary class="b-text">(\d+) items?</summary>\s*'
+                       r'<div class="m-unclamp m-clamp" data-click="noop" '
                        r'style="padding-left:0.5rem;margin-top:0.2rem;max-height:180px;'
                        r'overflow-y:auto;">', html)
-    # An open row forces overflow:visible on every value descendant (Polish
-    # B), so the 180px box would spill over the next row: it unclamps.
     assert boxes == ["1", "3"]
     assert "Type 99999" in html
+    assert not clamps(html).showall        # 10 or fewer: no Show all
+
+
+class _Nesting(HTMLParser):
+    """Each .m-row's ancestors' classes."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.stack, self.rows = [], []
+
+    def handle_starttag(self, tag, attrs):
+        cls = dict(attrs).get("class") or ""
+        if "m-row" in cls.split():
+            self.rows.append([c for _, cs in self.stack for c in cs])
+        if tag not in VOID:
+            self.stack.append((tag, cls.split()))
+
+    def handle_endtag(self, tag):
+        for i in range(len(self.stack) - 1, -1, -1):
+            if self.stack[i][0] == tag:
+                del self.stack[i:]
+                return
+
+
+def test_planet_detail_long_contents_show_all_past_ten():
+    pins = [dict(p) for p in _PINS]
+    pins.append({"type_id": 80004, "_kind": "storage", "_type_name": "Sample Storage Facility",
+                 "contents": [{"type_id": 91001, "amount": 100 + i} for i in range(13)]})
+    html = render_page(
+        pi_mod, "partials/planetary_planet_detail.html", "/industry/planetary/planet/1/2",
+        planet={"upgrade_level": 4, "last_update": None}, pins=pins, type_names=_TYPE_NAMES,
+        pin_group_names=pi_const.PIN_GROUP_NAMES)
+    c = clamps(html)
+    assert [k["children"] for k in c.clamps] == [1, 3, 13]
+    (button,) = c.showall
+    assert button["in_wrap"] and button["text"] == "Show all 13"
+    a = button["attrs"]
+    assert a["type"] == "button" and a["class"].split() == ["m-only", "m-showall"]
+    assert a["data-click"] == "toggleExpanded" and a["data-toggle-target"] == ".m-clamp-wrap"
+    assert re.search(r'<button type="button" class="m-only m-showall"[^>]*>Show all 13</button>\s*'
+                     r'</details>', html)
+    assert c.wraps == 3 and c.nested_wraps == 0
+    # The wrap is the <details> inside a Contents cell, never an m-row's
+    # ancestor: its is-expanded would open rows (`.is-expanded > .m-row`).
+    assert all(t[0] == "details" for t in _with_class(html, "m-clamp-wrap"))
+    n = _Nesting()
+    n.feed(html)
+    assert len(n.rows) == len(pins)
+    assert not any("m-clamp-wrap" in anc or "is-expanded" in anc for anc in n.rows)
+    assert_mrow(html, min_rows=len(pins))
 
 
 def test_planet_detail_column_header_hides_on_phones():

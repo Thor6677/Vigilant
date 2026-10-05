@@ -24,7 +24,10 @@
        "—" off the extractors); Kind, Product and Contents open below. The
        Contents <details> still opens there. Its box is m-unclamp: an open
        row forces overflow:visible on its values, which would spill a 180px
-       scroll box over the next row. #}
+       scroll box over the next row. Instead it clamps at 10 with a Show all
+       (the <details> is the m-clamp-wrap; it is inside a cell, never a row's
+       parent), and data-click="noop" keeps a tap in the list from closing
+       the row (the dispatcher stops at the nearest data-click). #}
     <div class="pi-pin-row m-row" data-click="toggleMRow" style="display:grid;grid-template-columns:110px minmax(160px,1.5fr) minmax(140px,1.2fr) minmax(100px,1fr) 90px;gap:0.5rem;padding:0.4rem 0.5rem;font-size:11px;border-bottom:1px solid var(--border);align-items:center;">
         <span class="m-only" data-m-label="Name">{{ pin._type_name }}</span>
         <span data-m-label="Kind" style="font-size:10px;text-transform:uppercase;color:
@@ -63,9 +66,9 @@
 
         <span data-m-label="Contents" style="font-size:11px;color:var(--muted);">
             {% if pin.contents %}
-                <details style="cursor:pointer;">
+                <details class="m-clamp-wrap" style="cursor:pointer;">
                     <summary class="b-text">{{ pin.contents | length }} item{{ 's' if pin.contents|length != 1 else '' }}</summary>
-                    <div class="m-unclamp" style="padding-left:0.5rem;margin-top:0.2rem;max-height:180px;overflow-y:auto;">
+                    <div class="m-unclamp m-clamp" data-click="noop" style="padding-left:0.5rem;margin-top:0.2rem;max-height:180px;overflow-y:auto;">
                         {% for c in pin.contents %}
                         <div style="display:flex;justify-content:space-between;gap:0.5rem;font-size:10px;">
                             <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ type_names.get(c.type_id) or 'Type ' ~ c.type_id }}</span>
@@ -73,6 +76,9 @@
                         </div>
                         {% endfor %}
                     </div>
+                    {% if pin.contents | length > 10 %}
+                    <button type="button" class="m-only m-showall" data-click="toggleExpanded" data-toggle-target=".m-clamp-wrap">Show all {{ pin.contents | length }}</button>
+                    {% endif %}
                 </details>
             {% else %}
                 —

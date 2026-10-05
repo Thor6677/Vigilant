@@ -79,7 +79,7 @@
     <div>
         <div class="b-panel pi-chain-detail-panel" style="position:sticky;top:1rem;">
             <div class="b-panel-head"><span class="b-label">Detail</span></div>
-            <div id="chain-detail">
+            <div id="chain-detail" tabindex="-1">
                 <div class="b-empty" style="padding:1rem;">Click a commodity on the left to see its details.</div>
             </div>
         </div>
@@ -94,12 +94,19 @@
 <script nonce="{{ request.state.csp_nonce }}">
 /* Phones (mobile R3, D15 A): the detail panel stacks below every tier list,
  * so a detail loaded from a tile far up the page would land off-screen.
- * Bring it into view. Desktop keeps it beside the list and never scrolls.
- * Called from every load path: a tile (htmx), piLoadNode and the deep link. */
+ * Bring its panel (Detail head included; site.css sets the margin that
+ * clears the sticky nav) into view, then move focus to the detail so a
+ * screen reader follows. Desktop keeps it beside the list: no scroll, no
+ * focus change. Called from every load path: a tile (htmx), piLoadNode and
+ * the deep link. */
 function piShowChainDetail() {
     if (!(window.matchMedia && window.matchMedia('(max-width: 640px)').matches)) return;
     var el = document.getElementById('chain-detail');
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (!el) return;
+    (el.closest('.b-panel') || el).scrollIntoView({
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+        block: 'start' });
+    el.focus({ preventScroll: true });
 }
 /* A tile loads its detail through htmx (hx-target="#chain-detail"). */
 document.body.addEventListener('htmx:afterSwap', function(evt) {
