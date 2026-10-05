@@ -11,7 +11,9 @@
     {#- Phones (R4 T4, D10 A): lead = icon, key 1 = name, key 2 = quantity.
         Name, Status and Hangar are m-only copies (Status and Thresholds swap
         places); Remove wraps the desktop × in a display:contents cell, so
-        both widths share one control. #}
+        both widths share one control. The lead icon is an m-only copy with
+        no data-on-error (its inline hide loses to the phone CSS); desktop
+        keeps its own icon. #}
     {%- set badge -%}
         {%- if t.alert_state == 'critical' -%}
         <span class="b-badge is-danger" style="font-size:8px;">CRITICAL</span>
@@ -22,7 +24,10 @@
         {%- endif -%}
     {%- endset %}
     <div class="b-row m-row cinv-item" data-click="toggleMRow" style="gap:0.4rem;padding:0.35rem 0.75rem;">
-        <img data-m="lead" width="24" height="24" src="https://images.evetech.net/types/{{ t.type_id }}/icon?size=32"
+        <img class="m-only" data-m="lead" width="24" height="24" alt="" loading="lazy"
+             src="https://images.evetech.net/types/{{ t.type_id }}/icon?size=32"
+             style="width:24px;height:24px;border:1px solid var(--border);">
+        <img class="m-hide" src="https://images.evetech.net/types/{{ t.type_id }}/icon?size=32"
              style="width:24px;height:24px;border:1px solid var(--border);flex-shrink:0;"
              data-on-error="hide">
         <span data-m="key" style="flex:1;min-width:0;font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">

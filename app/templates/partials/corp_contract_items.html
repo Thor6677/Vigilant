@@ -5,7 +5,9 @@
 {#- Phones (R4 T4, D12 A): lead = icon (or the "T" glyph for a title match),
     key 1 = match label, key 2 = count. Name, Match and Status are m-only
     copies (Status and Thresholds swap places); Remove wraps the desktop ×
-    in a display:contents cell, so both widths share one control. #}
+    in a display:contents cell, so both widths share one control. The lead
+    icon is an m-only copy with no data-on-error (its inline hide loses to
+    the phone CSS); desktop keeps its own icon. #}
 {%- set badge -%}
     {%- if t.alert_state == 'critical' -%}
     <span class="b-badge is-danger" style="font-size:8px;">CRITICAL</span>
@@ -19,7 +21,10 @@
 {%- endset %}
 <div class="b-row m-row cctr-item" data-click="toggleMRow" style="gap:0.4rem;padding:0.35rem 0.75rem;">
     {% if t.type_id %}
-    <img data-m="lead" width="24" height="24" src="https://images.evetech.net/types/{{ t.type_id }}/icon?size=32"
+    <img class="m-only" data-m="lead" width="24" height="24" alt="" loading="lazy"
+         src="https://images.evetech.net/types/{{ t.type_id }}/icon?size=32"
+         style="width:24px;height:24px;border:1px solid var(--border);">
+    <img class="m-hide" src="https://images.evetech.net/types/{{ t.type_id }}/icon?size=32"
          style="width:24px;height:24px;border:1px solid var(--border);flex-shrink:0;"
          data-on-error="hide">
     {% else %}

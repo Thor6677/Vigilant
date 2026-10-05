@@ -193,6 +193,32 @@ def _is_img_lead(cell, size="24"):
     return cell["tag"] == "img" and a.get("width") == size and a.get("height") == size
 
 
+def _assert_icon_pair(row):
+    """The lead is a phone-only copy of the icon with no data-on-error. That
+    handler sets an inline display:none, which the phone CSS overrides on a
+    tagged cell (R1 contract caveat), so a broken icon would show a
+    broken-image box. Desktop keeps its own icon, untagged and m-hide, with
+    the handler."""
+    for c in row["cells"]:
+        if "data-m" in c["attrs"] or "data-m-label" in c["attrs"]:
+            assert "data-on-error" not in c["attrs"], c["attrs"]
+    leads = row_lead(row)
+    assert len(leads) == 1
+    lead = leads[0]
+    a = lead["attrs"]
+    assert _is_img_lead(lead)
+    assert "m-only" in a.get("class", "").split()
+    assert a.get("alt") == "" and "alt" in a
+    assert a.get("loading") == "lazy"
+    desk = [c for c in row["cells"] if c["tag"] == "img" and c is not lead]
+    assert len(desk) == 1
+    d = desk[0]["attrs"]
+    assert "data-m" not in d and "data-m-label" not in d
+    assert "m-hide" in d.get("class", "").split()
+    assert d.get("data-on-error") == "hide"
+    assert d.get("src") == a.get("src")
+
+
 # ── 1. Tracked items (D10 A) ──────────────────────────────────────────
 
 def test_tracked_items_are_expandable_rows():
@@ -209,6 +235,11 @@ def test_tracked_item_lead_is_the_sized_icon_and_key_one_the_name():
         assert k1["text"].startswith(t.type_name)
         # The desktop hangar sub-span stays in the name cell, phone-hidden.
         assert all("m-hide" in k.get("class", "").split() for k in k1["kids"]), k1["kids"]
+
+
+def test_tracked_item_lead_is_a_phone_icon_without_the_hide_handler():
+    for row in _cells(_render_items(), 3):
+        _assert_icon_pair(row)
 
 
 @pytest.mark.parametrize("idx, colour", [(0, "var(--warn)"), (1, "var(--danger)"), (2, "var(--text)")])
@@ -328,6 +359,11 @@ def test_scan_row_lead_icon_key_one_item_key_two_quantity():
         assert "color:var(--accent)" in k2["attrs"]["style"].replace(" ", "")
 
 
+def test_scan_row_lead_is_a_phone_icon_without_the_hide_handler():
+    for row in _cells(_render_scan(), 14):
+        _assert_icon_pair(row)
+
+
 def test_scan_row_labels_are_name_hangar_track():
     for row in _row_nodes(_render_scan(), "cinv-scan", 14):
         assert _labels(row) == ["Name", "Hangar", "Track"]
@@ -429,6 +465,15 @@ def test_contract_lead_is_the_icon_or_the_title_glyph():
     glyph = row_lead(rows[1])[0]
     assert glyph["tag"] == "span" and glyph["text"] == "T"
     assert _is_img_lead(row_lead(rows[2])[0])
+
+
+def test_contract_item_lead_is_a_phone_icon_without_the_hide_handler():
+    rows = _cells(_render_contract_items(), 3)
+    for i in (0, 2):
+        _assert_icon_pair(rows[i])
+    # A title match keeps its single "T" glyph lead, with no desktop icon.
+    assert not [c for c in rows[1]["cells"] if c["tag"] == "img"]
+    assert all("data-on-error" not in c["attrs"] for c in rows[1]["cells"])
 
 
 def test_contract_labels_come_in_order():

@@ -4,7 +4,9 @@
 {#- Phones (R4 T4, D11 A): lead = icon, key 1 = item, key 2 = quantity; an
     opened row shows Name, Hangar and Track. Track is the desktop inputs and
     button in display:contents wrappers (addScanItem reads them from the
-    row), so both widths share one set. Show all past 10. #}
+    row), so both widths share one set. Show all past 10. The lead icon is
+    an m-only copy with no data-on-error (its inline hide loses to the
+    phone CSS); desktop keeps its own icon. #}
 <div class="m-clamp-wrap cinv-scan-wrap">
 <div class="m-clamp">
 {% for item in items %}
@@ -15,7 +17,10 @@
      data-location-id="{{ item.location_id }}"
      data-location-name="{{ location_name }}"
      data-flag="{{ item.flag }}">
-    <img data-m="lead" width="24" height="24" src="https://images.evetech.net/types/{{ item.type_id }}/icon?size=32"
+    <img class="m-only" data-m="lead" width="24" height="24" alt="" loading="lazy"
+         src="https://images.evetech.net/types/{{ item.type_id }}/icon?size=32"
+         style="width:24px;height:24px;border:1px solid var(--border);">
+    <img class="m-hide" src="https://images.evetech.net/types/{{ item.type_id }}/icon?size=32"
          style="width:24px;height:24px;border:1px solid var(--border);flex-shrink:0;"
          data-on-error="hide">
     <span data-m="key" style="flex:1;min-width:0;font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
