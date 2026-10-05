@@ -346,3 +346,13 @@ def test_open_row_shows_the_whole_counterparty():
     assert "text-overflow: clip" in body
     # Arrow, system and chevron stay on the wrapped name's first line.
     assert "align-items: start !important" in rule_bodies(phone, "#changes-list .m-row.is-open:not(.m-row--link)")
+
+
+def test_alliance_keys_reach_12px_and_the_open_link_gets_a_tap_area():
+    phone, _ = phone_block(_section("T5"))
+    keys = rule_bodies(phone, '#changes-list .m-row > [data-m="key"]')
+    assert "font-size: 12px !important" in keys, "key 2 carries an inline 10px"
+    open_k2 = '#changes-list .m-row.is-open:not(.m-row--link) > [data-m="key"] ~ [data-m="key"]'
+    assert "overflow: visible" in rule_bodies(phone, open_k2), "a clipped key 2 would cut the hit area"
+    link = rule_bodies(phone, open_k2 + " > a")
+    assert "padding: 14px 0" in link and "margin: -14px 0" in link

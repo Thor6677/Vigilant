@@ -1905,7 +1905,15 @@
        to show the whole name, with the arrow, system and chevron on its
        first line. */
     #changes-list .m-row.is-open:not(.m-row--link) { align-items: start !important; }
-    #changes-list .m-row.is-open:not(.m-row--link) > [data-m="key"] ~ [data-m="key"] { white-space: normal; text-overflow: clip; overflow-wrap: anywhere; }
+    #changes-list .m-row.is-open:not(.m-row--link) > [data-m="key"] ~ [data-m="key"] { white-space: normal; text-overflow: clip; overflow-wrap: anywhere; overflow: visible; }
+    /* Keys at 12px like other phone lists (key 2's inline 10px needs
+       !important); at their desktop sizes collapsed rows sat under 40px. */
+    #changes-list .m-row > [data-m="key"] { font-size: 12px !important; }
+    /* The counterparty link is the phone's only way to that alliance. In an
+       open row key 2 stops clipping (above), and padding with a matching
+       negative margin gives the link a 40px+ hit area without moving its
+       text. */
+    #changes-list .m-row.is-open:not(.m-row--link) > [data-m="key"] ~ [data-m="key"] > a { padding: 14px 0; margin: -14px 0; }
 }
 /* ── end R5 T5 ── */
 
