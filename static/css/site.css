@@ -1772,6 +1772,71 @@
 
 /* ── R6 T5 · saved fits/compare ── */
 @media (max-width: 640px) {
+    /* Every selector starts at an id only Saved Fits or Compare has. The
+       Skill Farm also uses .sf-table (R3 T7 scoped its own rules to
+       #skill-farm-content), and neither page's phone rules may reach the
+       other. The ids also outrank the pages' own <style> rules, which load
+       after this file. */
+
+    /* Saved fit rows (D12 A, D13 A). Each cell carries the page's desktop
+       padding and bottom rule; as grid items those would draw a line under
+       every cell, so the row draws one instead. */
+    #sf-tbody > tr.m-row { border-bottom: 1px solid var(--border); }
+    #sf-tbody > tr.m-row > td { padding: 0; border-bottom: none; }
+    /* The search filter hides rows with `hidden`. This (1,2,1) beats
+       .m-row's display:grid !important (0,1,0). Desktop needs no rule: the
+       browser's own [hidden] does it there. */
+    #sf-tbody > tr.m-row[hidden] { display: none !important; }
+    /* Collapsed line: icon · fit name · DPS, at 12px rather than 11px. */
+    #sf-tbody > tr.m-row > [data-m="key"] { font-size: 12px; }
+    #sf-tbody > tr.m-row > [data-m="lead"] > img { border: 1px solid var(--border); }
+    /* Actions, inside the open row: the compare box, Move and Delete side
+       by side. The buttons already get the 44px phone height; min-width
+       makes each a square target, and their glyphs grow from 11px (the
+       !important beats the open row's font-size:inherit). The checkbox is
+       the only copy there is, since the compare state lives in it. Its
+       label (no box on desktop) is the 44px target here and ticks it; the
+       box itself is drawn at 20px, because a native checkbox paints at
+       whatever size it is given and the global 44px input height would
+       make it a 40px white block. toggleMRow ignores taps on labels. */
+    #sf-tbody .sf-act { display: inline-flex; align-items: center; gap: 0.25rem; }
+    #sf-tbody .sf-act > .sf-cmp {
+        display: inline-flex; align-items: center; justify-content: center;
+        min-width: 44px; min-height: 44px; cursor: pointer;
+    }
+    #sf-tbody .sf-act > .sf-cmp > .sf-compare-check { width: 20px; height: 20px; min-height: 0; margin: 0; }
+    #sf-tbody .sf-act > button { min-width: 44px; font-size: 16px !important; }
+
+    /* Toolbar: search on its own full-width line (it was 220px minimum),
+       the spacer that pushed the chips right goes, and the chips (already
+       44px tall as buttons) read at 12px. + New Fit is a link, so it is
+       raised to the height of the Import button beside it. */
+    input#sf-search { flex: 1 1 100%; min-width: 0; }
+    input#sf-search + span { display: none; }
+    #sf-toolbar > .sf-chip, #sf-head-actions > .sf-chip { font-size: 12px; }
+    #sf-head-actions > a.sf-chip { min-height: 44px; display: inline-flex; align-items: center; }
+
+    /* Import-from-character dialog: each fit's checklist row (a <label>)
+       is a 40px target at 12px. Its checkbox drops the global 44px input
+       height, which would otherwise size the row; the close × is square.
+       A fieldset's default min-width is its min-content, so one long
+       nowrap fit name widened its whole group past the dialog and the list
+       scrolled sideways; at 0 the name ellipsises as the row intends. */
+    #charimport-dialog fieldset { min-width: 0; }
+    #charimport-dialog fieldset > label { min-height: 40px; font-size: 12px; }
+    #charimport-dialog fieldset > label > input { min-height: 0; }
+    #charimport-dialog button[aria-label="Close"] { min-width: 44px; }
+
+    /* Compare (D14 A): four columns kept. The head reads A and B (the
+       icons and names are m-hide); the line above the table names them.
+       Narrower side padding keeps the table inside 360px. */
+    #fit-compare > .fc-names {
+        padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border);
+        font-size: 12px; color: var(--muted); overflow-wrap: anywhere;
+    }
+    #fit-compare > .fc-names > b, #fit-compare .fc-fit-head > .m-only { color: var(--accent); font-weight: 600; }
+    #fit-compare .fc-fit-head > .m-only { font-size: 12px; }
+    #fit-compare th, #fit-compare td { padding-left: 0.4rem; padding-right: 0.4rem; }
 }
 /* ── end R6 T5 ── */
 

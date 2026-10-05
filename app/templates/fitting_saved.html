@@ -55,6 +55,10 @@
     font-size:11px; padding:0 0.3rem;
 }
 .sf-actions button:hover { color:var(--danger); }
+/* The compare checkbox's label generates no box here, so the checkbox lays
+   out as if unwrapped. On phones (site.css, R6 T5) it becomes the
+   checkbox's 40px tap target. */
+.sf-actions .sf-cmp { display:contents; }
 
 .sf-empty {
     padding:3rem 1rem; text-align:center; color:var(--muted); font-size:11px;
@@ -88,14 +92,14 @@
             {{ total }} saved fit{{ '' if total == 1 else 's' }}{% if folders %} &middot; {{ folders|length }} folder{{ '' if folders|length == 1 else 's' }}{% endif %}
         </div>
     </div>
-    <div style="display:flex;gap:0.5rem;">
+    <div id="sf-head-actions" style="display:flex;gap:0.5rem;">
         <button data-click="openCharImportDialog" class="sf-chip" style="padding:6px 14px;">Import from character</button>
         <a href="/tools/fitting" class="sf-chip is-primary" style="padding:6px 14px;">+ New Fit</a>
     </div>
 </div>
 
 {% if rows %}
-<div class="sf-toolbar">
+<div class="sf-toolbar" id="sf-toolbar">
     <input id="sf-search" type="text" placeholder="Filter by name, ship, folder..." autocomplete="off">
     <span style="flex:1;"></span>
     <button class="sf-chip is-active" data-sort="name">Name</button>
@@ -108,8 +112,15 @@
 </div>
 
 <div class="b-panel">
-    <table class="sf-table">
-        <thead>
+    {# Phones (≤640px): each fit is an expand-on-tap m-row. Ship icon ·
+       fit name · DPS collapsed; Name, Ship, Folder, Est. cost, an "Open in
+       tool" link and the row's own controls when open. The phone-only cells
+       are m-only copies placed after the fifth desktop cell, so the 720px
+       rule above (folder = td 3, cost = td 5) still hides the cells it did.
+       The row keeps data-click="openSavedFit": on desktop a click loads the
+       fit, on phones openSavedFit hands the tap to toggleMRow. #}
+    <table class="sf-table m-table">
+        <thead class="m-head">
             <tr>
                 <th>Ship</th>
                 <th>Fitting Name</th>
@@ -121,7 +132,7 @@
         </thead>
         <tbody id="sf-tbody">
             {% for r in rows %}
-            <tr data-fit-id="{{ r.id }}"
+            <tr class="m-row" data-fit-id="{{ r.id }}"
                 data-name="{{ r.name | lower }}"
                 data-ship="{{ r.ship_name | lower }}"
                 data-folder="{{ r.folder_path | lower }}"
@@ -135,15 +146,25 @@
                         <span class="sf-ship-name">{{ r.ship_name }}</span>
                     </div>
                 </td>
-                <td><span class="b-text">{{ r.name }}</span></td>
+                <td data-m="key"><span class="b-text">{{ r.name }}</span></td>
                 <td><span class="sf-folder">{{ r.folder_path or '—' }}</span></td>
-                <td class="sf-dps">{% if r.dps is none %}<span class="sf-dps-loading" style="color:var(--muted);font-weight:normal;">…</span>{% else %}{{ '{:,.0f}'.format(r.dps) if r.dps else '—' }}{% endif %}</td>
+                <td class="sf-dps" data-m="key">{% if r.dps is none %}<span class="sf-dps-loading" style="color:var(--muted);font-weight:normal;">…</span>{% else %}{{ '{:,.0f}'.format(r.dps) if r.dps else '—' }}{% endif %}</td>
                 <td class="sf-cost">{{ '{:,.0f}'.format(r.cost) if r.cost else '—' }}</td>
-                <td class="sf-actions">
-                    <input type="checkbox" class="sf-compare-check" value="{{ r.id }}"
-                           data-click="noop" data-stop title="Select for compare">
+                {# Lead: a copy of the ship icon without data-on-error, whose
+                   inline display:none would lose to the m-row rules. #}
+                <td class="m-only" data-m="lead"><img src="https://images.evetech.net/types/{{ r.ship_type_id }}/icon?size=32" width="24" height="24" alt="" loading="lazy"></td>
+                <td class="m-only" data-m-label="Name">{{ r.name }}</td>
+                <td class="m-only" data-m-label="Ship">{{ r.ship_name }}</td>
+                <td class="m-only" data-m-label="Folder">{{ r.folder_path or '—' }}</td>
+                <td class="m-only" data-m-label="Est. cost">{{ '{:,.0f} ISK'.format(r.cost) if r.cost else '—' }}</td>
+                <td class="m-only" data-m-label="Fit"><a href="/tools/fitting?load={{ r.id }}" class="m-tap">Open in tool &rarr;</a></td>
+                {# The desktop cell itself, never a copy: the compare state
+                   lives in its checkbox. One wrapper holds the value. #}
+                <td class="sf-actions" data-m-label="Actions">
+                    <span class="sf-act"><label class="sf-cmp"><input type="checkbox" class="sf-compare-check" value="{{ r.id }}"
+                           data-click="noop" data-stop title="Select for compare"></label>
                     <button data-click="moveFit" data-fit-id="{{ r.id }}" data-stop title="Move to folder">&#8644;</button>
-                    <button data-click="deleteFit" data-fit-id="{{ r.id }}" data-stop title="Delete">&times;</button>
+                    <button data-click="deleteFit" data-fit-id="{{ r.id }}" data-stop title="Delete">&times;</button></span>
                 </td>
             </tr>
             {% endfor %}
@@ -219,13 +240,17 @@
     fillDps();
 
     /* --- Filter --- */
+    /* Hides rows with the hidden attribute, not an inline display:none: on
+       phones each row is an m-row, whose display:grid !important beats an
+       inline style. site.css (R6 T5) gives hidden rows display:none
+       !important there; on desktop the browser's own [hidden] rule does it. */
     var searchInput = document.getElementById('sf-search');
     if (searchInput) {
         searchInput.addEventListener('input', function() {
             var q = this.value.trim().toLowerCase();
             rows.forEach(function(tr) {
                 var hay = tr.dataset.name + ' ' + tr.dataset.ship + ' ' + tr.dataset.folder;
-                tr.style.display = (!q || hay.indexOf(q) >= 0) ? '' : 'none';
+                tr.hidden = !(!q || hay.indexOf(q) >= 0);
             });
         });
     }
@@ -298,9 +323,16 @@ function _folderPickPrompt(message) {
    ancestor carrying data-click, so a click on one of the row's own controls
    never reaches this handler. The guard is still needed for clicks that land
    on the actions cell itself — its padding around the buttons is part of the
-   row and carries no binding of its own. */
+   row and carries no binding of its own.
+   Phones (≤640px, R6 T5): the row is an m-row, so a tap opens it instead,
+   through actions.js's toggleMRow (which leaves taps on the "Open in tool"
+   link to the link). That link, inside the opened row, loads the fit. */
 function openSavedFit(e) {
     if (e.target.closest('button, .sf-actions')) return;
+    if (window.matchMedia && window.matchMedia('(max-width: 640px)').matches) {
+        if (typeof window.toggleMRow === 'function') window.toggleMRow.call(this, e);
+        return;
+    }
     window.location = '/tools/fitting?load=' + this.dataset.fitId;
 }
 

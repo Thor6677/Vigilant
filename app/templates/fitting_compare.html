@@ -54,21 +54,30 @@
     </div>
 </div>
 
-<div class="b-panel">
+{# Phones (≤640px, D14 A): the table keeps its four columns. The head shows
+   the letters A and B in place of each icon and name, and the m-only line
+   above the table says which fit is which. #}
+<div class="b-panel" id="fit-compare">
+    <div class="m-only fc-names">
+        <b>A</b> {{ fit_a.name }}{% if fit_a.ship_name != fit_b.ship_name %} ({{ fit_a.ship_name }}){% endif %}
+        &middot; <b>B</b> {{ fit_b.name }}{% if fit_a.ship_name != fit_b.ship_name %} ({{ fit_b.ship_name }}){% else %} &middot; both {{ fit_a.ship_name }}{% endif %}
+    </div>
     <table class="fc-table">
         <thead>
             <tr>
                 <th>Stat</th>
                 <th>
                     <div class="fc-fit-head">
-                        <img src="https://images.evetech.net/types/{{ fit_a.ship_type_id }}/icon?size=32" data-on-error="hide" alt="">
-                        <span class="fc-fit-name" title="{{ fit_a.name }}">A: {{ fit_a.name }}</span>
+                        <img class="m-hide" src="https://images.evetech.net/types/{{ fit_a.ship_type_id }}/icon?size=32" data-on-error="hide" alt="">
+                        <span class="fc-fit-name m-hide" title="{{ fit_a.name }}">A: {{ fit_a.name }}</span>
+                        <span class="m-only">A</span>
                     </div>
                 </th>
                 <th>
                     <div class="fc-fit-head">
-                        <img src="https://images.evetech.net/types/{{ fit_b.ship_type_id }}/icon?size=32" data-on-error="hide" alt="">
-                        <span class="fc-fit-name" title="{{ fit_b.name }}">B: {{ fit_b.name }}</span>
+                        <img class="m-hide" src="https://images.evetech.net/types/{{ fit_b.ship_type_id }}/icon?size=32" data-on-error="hide" alt="">
+                        <span class="fc-fit-name m-hide" title="{{ fit_b.name }}">B: {{ fit_b.name }}</span>
+                        <span class="m-only">B</span>
                     </div>
                 </th>
                 <th title="B minus A; green = B better for that stat (direction-aware)">&Delta; B&minus;A</th>
