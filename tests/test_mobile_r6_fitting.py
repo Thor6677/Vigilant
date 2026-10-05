@@ -3,7 +3,8 @@
   1. Module browser (D9 A). On phones each add from the browser overlay
      shows a short note inside the overlay ("✓ Added X · high 4/5"), worked
      out from the page's own slot state. The overlay stays open. The note
-     floats over the list with pointer-events:none and fades. The close ×
+     floats over the list with pointer-events:none, fades, and has its text
+     cleared once the fade has run. The close ×
      is a square 44px target, the tree and item rows (divs) are 40px, and a
      cannot-fit item spells out its reason (desktop keeps the hover title).
   2. Pinned summary bar (D10 A). A phone-only button fixed to the bottom
@@ -11,7 +12,9 @@
      refreshed on every #stats-panel write, including the error path, and
      tapping it scrolls to #stats-panel. It hides while the browser overlay,
      a modal or the charge selector is open, and the page gets bottom
-     padding so the bar never covers the last controls.
+     padding so the bar never covers the last controls. Extreme values
+     (spool DPS, a capital's EHP) truncate with an ellipsis rather than
+     push the bar past the screen edge.
   3. Slot rows (D11 A). The state dot, charge button and remove × are
      square 44px targets: the global phone button rule gives the height and
      .fit-ctl the width (it never sets a height, which would outrank that
@@ -169,6 +172,23 @@ def test_add_note_is_phone_gated_and_fades(script):
     assert "textContent" in note and "innerHTML" not in note
 
 
+def test_add_note_text_clears_after_the_fade(script):
+    # The note is role=status: at opacity 0 it would still read out the
+    # last add, so its text goes once the fade has run (not in the same
+    # tick, which would cut the fade short).
+    note = _fn(script, "_noteBrowserAdd")
+    fade = note.index("note.classList.remove('is-shown');")
+    clear = re.search(r"_addNoteTimer = setTimeout\(function\(\) \{ note\.textContent = ''; \}, (\d+)\);", note)
+    assert clear, "the text is cleared by a timer of its own"
+    assert fade < clear.start(), "the clear is scheduled from the fade callback"
+    fade_s = re.search(r"opacity ([\d.]+)s", _decls(".fit-added-note")["transition"])
+    assert int(clear.group(1)) >= float(fade_s.group(1)) * 1000, "the clear waits out the fade"
+    # Both stages share the one timer each add cancels first, so an earlier
+    # add's pending clear can never wipe a newer note.
+    assert note.count("_addNoteTimer = setTimeout(") == 2
+    assert note.index("clearTimeout(_addNoteTimer);") < note.index("_addNoteTimer = setTimeout(")
+
+
 def test_browser_add_confirms_with_the_rack_fill(script):
     add = _fn(script, "addModuleFromBrowser")
     assert "_noteBrowserAdd(_browserAddNoteText(typeId, typeName, slotType));" in add
@@ -274,6 +294,23 @@ def test_summary_bar_hides_while_overlay_or_modal_is_open(script):
     assert "_fitSumBarWatch();" in init
 
 
+def test_summary_bar_observes_the_overlay_and_every_modal(page, script):
+    # _fitSumBarSync checks the modals, but it only runs when the observer
+    # fires: a modal missing from the observed list would open over a bar
+    # that never steps aside.
+    watch = _fn(script, "_fitSumBarWatch")
+    listed = re.search(r"\[([^\]]*)\]\.forEach\(", watch)
+    assert listed, "the observed ids are one array literal"
+    ids = re.findall(r"'([\w-]+)'", listed.group(1))
+    nodes = _tree(page)
+    for id_ in ("browser-panel", "info-modal", "charimport-modal", "import-modal"):
+        assert id_ in ids, f"_fitSumBarWatch must observe #{id_}"
+        _by_id(nodes, id_)
+    # The modals open and close through style.display; the overlay through data-overlay.
+    filt = re.search(r"attributeFilter: \[([^\]]*)\]", watch)
+    assert filt and {"style", "data-overlay"} <= set(re.findall(r"'([\w-]+)'", filt.group(1)))
+
+
 def test_summary_bar_tap_scrolls_to_stats(script):
     go = _fn(script, "scrollToFitStats")
     assert "document.getElementById('stats-panel')" in go and "scrollIntoView(" in go
@@ -284,6 +321,13 @@ def test_summary_bar_css():
     bar = _decls(".fit-sumbar")
     assert bar["position"] == "fixed" and bar["bottom"] == "0"
     assert bar["display"] == "flex"
+    # Long values (spool DPS beside a capital's EHP) once pushed Cap past a
+    # 320px screen. The gap is a floor under space-between, so ordinary
+    # values sit where they did; each item truncates rather than overflow.
+    assert bar["justify-content"] == "space-between" and bar["gap"] == "0.5rem"
+    item = _decls(".fit-sumbar-item")
+    assert item.get("min-width") == "0" and item.get("overflow") == "hidden", item
+    assert item.get("text-overflow") == "ellipsis" and item.get("white-space") == "nowrap", item
     assert _decls(".fit-sumbar[hidden]")["display"] == "none !important"
     assert _decls(".fit-sumbar.is-covered")["display"] == "none !important"
     pad = _decls("body:has(#fit-sumbar:not([hidden]))")

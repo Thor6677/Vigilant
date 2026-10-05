@@ -499,7 +499,10 @@ function _fitIsPhone() {
 
 /* D9 A: the module browser overlay stays open, so each add from it is
    confirmed by a short note inside the overlay. A new add replaces the
-   note and restarts its fade. */
+   note and restarts its fade. Once the 0.3s fade has run, the text is
+   cleared too, so a screen reader can't land on a stale note. Both steps
+   share one timer, so a new add cancels whichever is pending and an
+   earlier add's clear can never wipe the newer text. */
 var RACK_NAMES = {high: 'high', med: 'mid', low: 'low', rig: 'rig', subsystem: 'subsystem'};
 var _addNoteTimer = null;
 function _noteBrowserAdd(text) {
@@ -509,7 +512,10 @@ function _noteBrowserAdd(text) {
     note.textContent = text;
     note.classList.add('is-shown');
     clearTimeout(_addNoteTimer);
-    _addNoteTimer = setTimeout(function() { note.classList.remove('is-shown'); }, 2500);
+    _addNoteTimer = setTimeout(function() {
+        note.classList.remove('is-shown');
+        _addNoteTimer = setTimeout(function() { note.textContent = ''; }, 300);
+    }, 2500);
 }
 
 function _rackFill(slot) {

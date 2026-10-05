@@ -1821,16 +1821,20 @@
     .fit-sum-vals { flex-wrap: wrap; row-gap: 0.25rem !important; }
 
     /* Pinned summary bar (D10 A). Below the nav (z 50) and the browser
-       backdrop (49); it is hidden anyway while those layers are open. */
+       backdrop (49); it is hidden anyway while those layers are open.
+       The gap is only a minimum: space-between spreads ordinary values
+       exactly as before, and the tighter floor lets spool DPS beside a
+       capital's EHP fit on one line from 375px up. Past that, each value
+       gives up its tail to an ellipsis instead of pushing Cap off-screen. */
     .fit-sumbar {
         position: fixed; left: 0; right: 0; bottom: 0; z-index: 45;
-        display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
+        display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
         width: 100%; min-height: 44px; margin: 0; padding: 0 1rem env(safe-area-inset-bottom, 0px);
         border: 0; border-top: 1px solid var(--accent); background: var(--surface);
         color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer;
     }
     .fit-sumbar[hidden], .fit-sumbar.is-covered { display: none !important; }
-    .fit-sumbar-item { white-space: nowrap; }
+    .fit-sumbar-item { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .fit-sumbar-k { margin-right: 0.35rem; color: var(--muted); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
     .fit-sumbar-v { color: var(--accent); font-weight: 600; }
     .fit-sumbar-v[data-sumbar="cap"] { color: var(--success); }
