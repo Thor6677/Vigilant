@@ -1824,8 +1824,10 @@
         display: flex; align-items: center; justify-content: center; text-align: center;
     }
 
-    /* Common Routes buttons and the system autocomplete rows: 40px targets. */
-    #tab-checker .gc-route-btn { min-height: 40px; font-size: 12px; }
+    /* Common Routes buttons keep the global 44px button floor (no height
+       here, so it isn't lowered) at a readable 12px. The autocomplete rows
+       are divs with no floor of their own: 40px targets. */
+    #tab-checker .gc-route-btn { font-size: 12px; }
     .gc-dropdown > .gc-dd-item { min-height: 40px; font-size: 12px; }
 
     /* Waypoints, gatecamps and war-target systems fold into two lines

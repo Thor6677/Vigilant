@@ -483,9 +483,24 @@ def test_tab_bar_is_an_equal_width_44px_bar():
 
 
 def test_small_controls_are_40px():
+    """The autocomplete rows (divs) and picker labels have no global phone
+    size, so they get 40px here."""
     body, _ = _phone()
-    for sel in ("#tab-checker .gc-route-btn", ".gc-dropdown > .gc-dd-item", "label.wht-pick"):
+    for sel in (".gc-dropdown > .gc-dd-item", "label.wht-pick"):
         assert "min-height: 40px" in rule_bodies(body, sel), sel
+
+
+def test_buttons_keep_the_44px_phone_floor():
+    """Buttons already get min-height:44px from the global phone rule, the
+    floor for every task. A rule here may raise it but never lower it."""
+    body, _ = _phone()
+    for sel in ("#tab-checker .gc-route-btn", "div.gc-tabs > .gc-tab"):
+        rules = rule_bodies(body, sel)
+        assert rules, sel
+        for value in re.findall(r"min-height:\s*([\d.]+)px", rules):
+            assert float(value) >= 44, f"{sel}: min-height {value}px is under the 44px button floor"
+    # The Common Routes buttons keep their phone text size.
+    assert "font-size: 12px" in rule_bodies(body, "#tab-checker .gc-route-btn")
 
 
 def test_waypoint_rows_fold_into_two_lines():
