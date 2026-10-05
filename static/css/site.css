@@ -1780,11 +1780,17 @@
     }
     #dmg-custom-sliders.fit-dmg-on > label { gap: 0.4rem !important; min-width: 0; }
     #dmg-custom-sliders.fit-dmg-on input[type="range"] { flex: 1 1 auto; width: auto !important; min-width: 0; }
+    /* The single 1fr track would otherwise grow to its widest unbreakable
+       content (a nowrap name, a long implant name) and push the page
+       sideways; min-width:0 holds each column to the screen width. */
+    .fit-grid > * { min-width: 0; }
 
     /* Module browser overlay (D9 A). ID-level, since the template's own
        #browser-close display rule outranks a class; the global button rule
-       already gives it 44px of height. */
-    #browser-panel #browser-close { min-width: 40px; }
+       already gives it 44px of height, so only the width is raised to make
+       a square target. The tree and item rows are divs, which the floor
+       doesn't reach, so they are raised to 40px here. */
+    #browser-panel #browser-close { min-width: 44px; }
     #browser-panel .fit-brow { min-height: 40px; }
     .fit-nofit-why { display: block; font-size: 11px; color: var(--danger); }
     .fit-added-note {
@@ -1795,10 +1801,12 @@
     }
     .fit-added-note.is-shown { opacity: 1; }
 
-    /* Slot, drone, implant and booster controls (D11 A): 40px targets with
-       a 12px glyph. min-height deliberately 40px, as m-tap. */
+    /* Slot, drone, implant and booster controls (D11 A), and the stats
+       %/EHP toggles: square 44px targets with a 12px glyph. The global phone
+       button rule supplies the 44px height; no min-height here, since a
+       class would outrank that floor. */
     .fit-ctl {
-        min-width: 40px; min-height: 40px; display: inline-flex; align-items: center; justify-content: center;
+        min-width: 44px; display: inline-flex; align-items: center; justify-content: center;
         vertical-align: middle; font-size: 12px !important;
     }
     /* The m-only name copy: the module name truncates, and a loaded charge
@@ -1841,6 +1849,13 @@
     }
     .fit-import-box textarea { height: 140px !important; }
     .fit-import-actions { position: sticky; bottom: 0; padding: 0.5rem 0; background: var(--surface); }
+
+    /* Info and character-import modals: the corner × becomes a square
+       44px target (height from the global button rule) in the corner
+       itself, and the info header keeps clear of it (a long module name
+       used to run under the glyph). */
+    .fit-modal-x { min-width: 44px; top: 0 !important; right: 0 !important; }
+    #info-modal-body > div:first-child { padding-right: 1.75rem; }
 }
 /* ── end R6 T4 ── */
 

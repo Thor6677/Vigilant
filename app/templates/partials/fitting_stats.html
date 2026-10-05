@@ -49,7 +49,7 @@
 <div class="b-section">
     <div class="b-section-head" style="display:flex;justify-content:space-between;align-items:center;">
         <span class="b-label">Fitting Resources</span>
-        <button id="fr-toggle" class="m-tap"
+        <button id="fr-toggle" class="fit-ctl"
                 data-click="toggleResourceUnits"
                 style="font-size:9px;padding:1px 8px;cursor:pointer;background:var(--surface);border:1px solid var(--border);color:var(--accent);border-radius:3px;">%</button>
     </div>
@@ -130,7 +130,7 @@
         <span class="b-label">Defense
             <span id="def-header-label" style="font-weight:400;color:var(--muted);font-size:9px;">(Effective HP: {{ "{:,.0f}".format(stats.total_ehp) }})</span>
         </span>
-        <button id="def-toggle" class="m-tap"
+        <button id="def-toggle" class="fit-ctl"
                 data-click="toggleDefenceUnits"
                 style="font-size:9px;padding:1px 8px;cursor:pointer;background:var(--surface);border:1px solid var(--border);color:var(--accent);border-radius:3px;">EHP</button>
     </div>

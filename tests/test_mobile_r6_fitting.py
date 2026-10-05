@@ -3,25 +3,30 @@
   1. Module browser (D9 A). On phones each add from the browser overlay
      shows a short note inside the overlay ("✓ Added X · high 4/5"), worked
      out from the page's own slot state. The overlay stays open. The note
-     floats over the list with pointer-events:none and fades. The close ×,
-     the tree rows and the item rows are 40px targets, and a cannot-fit
-     item spells out its reason (desktop keeps the hover title).
+     floats over the list with pointer-events:none and fades. The close ×
+     is a square 44px target, the tree and item rows (divs) are 40px, and a
+     cannot-fit item spells out its reason (desktop keeps the hover title).
   2. Pinned summary bar (D10 A). A phone-only button fixed to the bottom
      shows DPS, EHP and Cap from the stats partial's data-* hooks. It is
      refreshed on every #stats-panel write, including the error path, and
      tapping it scrolls to #stats-panel. It hides while the browser overlay,
      a modal or the charge selector is open, and the page gets bottom
      padding so the bar never covers the last controls.
-  3. Slot rows (D11 A). The state dot, charge button and remove × are 40px
-     targets. The `i` button is m-hide, since the module icon opens info.
-     A phone-only copy of the name truncates, with the loaded charge as a
-     muted second line. The desktop name span is m-hide, untouched. Drones,
-     implants and boosters get the same 40px controls.
+  3. Slot rows (D11 A). The state dot, charge button and remove × are
+     square 44px targets: the global phone button rule gives the height and
+     .fit-ctl the width (it never sets a height, which would outrank that
+     44px floor). The `i` button is m-hide, since the module icon opens
+     info. A phone-only copy of the name truncates, with the loaded charge
+     as a muted second line. The desktop name span is m-hide, untouched.
+     Drones, implants and boosters get the same controls.
   4. Toolbars: header buttons centre their labels, the custom damage
-     sliders become a 2×2 grid, the stats %/EHP toggles are m-tap and the
+     sliders become a 2×2 grid, the stats %/EHP toggles share .fit-ctl
+     (never m-tap, whose 40px !important would shrink a button) and the
      stats summary line wraps.
   5. EFT import: on phones the box sits at the top, scrolls inside a
-     max-height and keeps Import/Cancel in a sticky row.
+     max-height and keeps Import/Cancel in a sticky row. The info and
+     character-import modals' corner × is a square 44px target that a long
+     module name keeps clear of.
 
 Desktop renders identically (D21). The new elements are m-only, the new
 classes have rules only in this section's phone block, and the JS phone
@@ -198,8 +203,10 @@ def test_cannot_fit_reason_is_visible_text_on_phones(script):
     assert '<span class="m-only fit-nofit-why">Cannot fit this ship</span>' in line
 
 
-def test_browser_close_is_a_40px_target():
-    assert _decls("#browser-panel #browser-close")["min-width"] == "40px"
+def test_browser_close_is_a_square_44px_target():
+    close = _decls("#browser-panel #browser-close")
+    assert close["min-width"] == "44px"
+    assert "min-height" not in close, "the global button rule gives it 44px; don't cap it"
 
 
 def test_browser_rows_and_note_css():
@@ -329,15 +336,16 @@ def test_stats_summary_line_wraps_on_phones():
     assert v["flex-wrap"] == "wrap" and v["row-gap"].endswith("!important")
 
 
-def test_stats_unit_toggles_are_tap_targets():
+def test_stats_unit_toggles_are_44px_tap_targets():
     _, nodes = _summary()
     for id_ in ("fr-toggle", "def-toggle"):
-        assert "m-tap" in _by_id(nodes, id_)["cls"]
+        # m-tap's 40px !important would shrink these buttons below the floor.
+        assert _by_id(nodes, id_)["cls"] == ["fit-ctl"], id_
 
 
 # ── 3. Slot rows ────────────────────────────────────────────────────
 
-def test_slot_row_controls_carry_the_40px_hook(script):
+def test_slot_row_controls_carry_the_tap_hook(script):
     slots = _fn(script, "renderSlots")
     assert "fit-ctl" in _classes_in(_line(slots, 'data-click="toggleOnline"'), 'data-click="toggleOnline"')
     charge_btn = [ln for ln in slots.splitlines() if "<button" in ln and 'data-click="openChargeSelector"' in ln]
@@ -387,7 +395,7 @@ def test_drone_name_truncates(script):
     assert "<span class=\"fit-dname\" style=\"flex:1;font-size:11px;color:var(--text);\">" in drone
 
 
-def test_implant_and_booster_remove_are_40px(script):
+def test_implant_and_booster_remove_carry_the_tap_hook(script):
     imp = _line(_fn(script, "renderImplantSlots"), 'data-click="removeImplant"')
     assert "fit-ctl" in _classes_in(imp, 'data-click="removeImplant"')
     boo = _line(_fn(script, "renderBoosterSlots"), 'data-click="removeBooster"')
@@ -396,7 +404,8 @@ def test_implant_and_booster_remove_are_40px(script):
 
 def test_slot_control_css():
     ctl = _decls(".fit-ctl")
-    assert ctl["min-width"] == "40px" and ctl["min-height"] == "40px"
+    assert ctl["min-width"] == "44px"
+    assert "min-height" not in ctl, "the global button rule gives 44px; a class would outrank it"
     assert ctl["display"] == "inline-flex"
     name = _decls(".fit-name")
     assert name["min-width"] == "0" and name["flex-direction"] == "column"
@@ -452,6 +461,57 @@ def test_import_modal_scrolls_with_reachable_buttons():
 def test_import_textarea_is_16px_through_the_global_rule():
     css = open(SITE_CSS, encoding="utf-8").read()
     assert "input, select, textarea { font-size: 16px !important; }" in css
+
+
+def test_modal_close_buttons_are_44px_and_clear_the_title(page):
+    nodes = _tree(page)
+    for modal, closer in (("info-modal", "hideInfoModal"), ("charimport-modal", "hideCharImportModal")):
+        idx = nodes.index(_by_id(nodes, modal))
+        x = [n for n in nodes if n["attrs"].get("data-click") == closer and idx in _parents(nodes, n)]
+        assert len(x) == 1 and x[0]["cls"] == ["fit-modal-x"], modal
+    x = _decls(".fit-modal-x")
+    assert x["min-width"] == "44px"
+    assert "min-height" not in x, "the global button rule gives 44px; don't cap it"
+    assert x["top"] == "0 !important" and x["right"] == "0 !important"
+    # A long module name ran under the info modal's ×.
+    assert _decls("#info-modal-body > div:first-child")["padding-right"]
+
+
+# ── Page width ──────────────────────────────────────────────────────
+
+def test_grid_columns_never_grow_past_the_screen():
+    # The nowrap phone name copy made the single 1fr track as wide as the
+    # longest name (450px at a 360px viewport).
+    assert _decls(".fit-grid > *")["min-width"] == "0"
+
+
+# ── 44px floor ──────────────────────────────────────────────────────
+
+_MTAP_BUTTON = re.compile(r"<button\b[^>]*\bclass=[\"'][^\"']*\bm-tap\b")
+
+
+def test_no_button_carries_m_tap(page):
+    # The shared .m-tap rule forces 40px !important, under the 44px the
+    # global phone rule gives every button. The page includes its script, so
+    # this covers the JS-string buttons too.
+    assert _MTAP_BUTTON.search('<button id="x" class="a m-tap">'), "the check itself works"
+    stats = render_page(fitting_mod, "partials/fitting_stats.html", stats=_stats(),
+                        character_name=None, ship_name="Rifter", ship_type_id=587)
+    for name, html in (("page", page), ("stats partial", stats)):
+        assert not _MTAP_BUTTON.search(html), f"a <button> in the {name} carries m-tap"
+
+
+def test_phone_block_sets_no_height_under_44px_except_on_div_rows():
+    # A class or id selector outranks the global `button { min-height: 44px }`,
+    # so a smaller height here would shrink a button. Only the browser's
+    # tree and item rows (divs, which the floor doesn't reach) go to 40px.
+    small = []
+    for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", _phone()[0]):
+        for prop, val in re.findall(r"(?:^|;)\s*((?:min-)?height)\s*:\s*([^;]+)", m.group(2)):
+            n = re.fullmatch(r"(\d+(?:\.\d+)?)(px|rem)(?:\s*!important)?", val.strip())
+            if n and float(n.group(1)) * (16 if n.group(2) == "rem" else 1) < 44:
+                small.append((norm(m.group(1)), prop, val.strip()))
+    assert small == [("#browser-panel .fit-brow", "min-height", "40px")], small
 
 
 # ── Section shape ───────────────────────────────────────────────────

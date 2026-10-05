@@ -335,7 +335,7 @@
 {# ── Module Info Modal ───────────────────────────────────────────────────── #}
 <div id="info-modal" data-click="closeModalOnBackdrop" data-modal-closer="hideInfoModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:100;">
     <div style="background:var(--surface);border:1px solid var(--border);padding:1.25rem;max-width:520px;width:90%;margin:auto;position:relative;top:12%;max-height:80vh;overflow-y:auto;">
-        <button data-click="hideInfoModal" style="position:absolute;top:0.5rem;right:0.75rem;background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;line-height:1;">&times;</button>
+        <button class="fit-modal-x" data-click="hideInfoModal" style="position:absolute;top:0.5rem;right:0.75rem;background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;line-height:1;">&times;</button>
         <div id="info-modal-body">
             <div style="padding:1rem;font-size:11px;color:var(--muted);text-align:center;">Loading...</div>
         </div>
@@ -345,7 +345,7 @@
 {# ── Character Fittings Import Modal ─────────────────────────────────────── #}
 <div id="charimport-modal" data-click="closeModalOnBackdrop" data-modal-closer="hideCharImportModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:100;">
     <div style="background:var(--surface);border:1px solid var(--border);padding:1.25rem;max-width:560px;width:92%;margin:auto;position:relative;top:10%;max-height:82vh;overflow-y:auto;">
-        <button data-click="hideCharImportModal" style="position:absolute;top:0.5rem;right:0.75rem;background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;line-height:1;">&times;</button>
+        <button class="fit-modal-x" data-click="hideCharImportModal" style="position:absolute;top:0.5rem;right:0.75rem;background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;line-height:1;">&times;</button>
         <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:0.75rem;">Import from Character</div>
         <div id="charimport-body">
             <div style="padding:1rem;font-size:11px;color:var(--muted);text-align:center;">Loading...</div>
