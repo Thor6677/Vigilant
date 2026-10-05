@@ -2368,6 +2368,13 @@
 
     /* Structure Age: the help text's long in-game link wraps. */
     .sa-showinfo { overflow-wrap: anywhere; }
+    /* The result card, on the tool page and where the WH Tracker panel and
+       the wormhole system page embed it: its System link is a 44px tap
+       target (an 18px line otherwise; 44px, as every height in this
+       section), and the 9px date labels and method badge are 11px. Later
+       in the file than the shared .sa-* rules, so the single classes win. */
+    .sa-meta-item > a { display: inline-flex; align-items: center; min-height: 44px; }
+    .sa-date-lbl, .sa-method { font-size: 11px; }
 }
 /* ── end R6 T3 ── */
 

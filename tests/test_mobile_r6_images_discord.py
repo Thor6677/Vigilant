@@ -14,9 +14,10 @@ D8 A).
   (label + Copy, then the full preview) through phone CSS alone; the
   <t:…> tag is hidden but is still what Copy copies. The mode tabs are a
   44px bar and Quick Actions keep two columns.
-- Structure Age's long in-game link wraps. The shared result card and every
-  .sa-* rule are untouched, so the WH Tracker and the wormhole system page
-  embed it exactly as before.
+- Structure Age's long in-game link wraps. The shared result card (also
+  embedded by the WH Tracker and the wormhole system page) gets a 40px
+  System link and 11px date labels and method badge on phones (polish
+  pass); its markup is untouched.
 - Every button here (Copy, Delete, Back, Estimate, the Discord Time
   buttons) keeps the global 44px phone floor: none carries m-tap, whose
   shared rule forces 40px, and no rule in this section sets a height below
@@ -453,14 +454,20 @@ def test_structure_age_link_wraps_on_phones():
     assert "overflow-wrap: anywhere" in rule_bodies(_phone(), ".sa-showinfo")
 
 
-def test_shared_result_card_is_untouched():
+def test_shared_result_card_changes_only_on_phones():
     """The WH Tracker panel and the wormhole system page embed the result
-    card and share the .sa-* rules, so this section restyles none of them
-    (only the tool page's own .sa-showinfo hook) and the partial renders as
-    before, anonymous-safe."""
+    card and share the .sa-* rules. This section restyles only the tool
+    page's .sa-showinfo hook and, for all three pages, the card's System
+    link (44px) and its 9px labels (11px), all inside the phone block, so
+    desktop is unchanged; the partial renders as before, anonymous-safe."""
     sels = [s for m in re.finditer(r"([^{}]+)\{", _section("T3")) for s in selectors(m.group(1))]
     sa = {s for s in sels if ".sa-" in s}
-    assert sa <= {".sa-showinfo"}, sa
+    assert sa == {".sa-showinfo", ".sa-meta-item > a", ".sa-date-lbl", ".sa-method"}, sa
+    assert phone_block(_section("T3"))[1].strip() == "", "no desktop rule"
+    link = rule_bodies(_phone(), ".sa-meta-item > a")
+    assert "display: inline-flex" in link and "min-height: 44px" in link
+    for sel in (".sa-date-lbl", ".sa-method"):
+        assert "font-size: 11px" in rule_bodies(_phone(), sel), sel
     html = render_page(sa_mod, "structure_age_result.html", "/tools/structure-age/partial",
                        session=None, **_sa_ctx())
     assert not _ACTION_BINDING.search(html)
