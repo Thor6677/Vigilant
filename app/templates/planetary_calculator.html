@@ -738,7 +738,7 @@
                 {%- if row.type_id == bom.target.type_id -%}var(--accent)
                 {%- else -%}var(--text)
                 {%- endif -%};">
-                <span class="m-only" style="font-size:9px;color:var(--muted);margin-right:0.4rem;">P{{ tier }}</span>
+                <span class="m-only pi-pipe-tier" style="font-size:9px;color:var(--muted);margin-right:0.4rem;">P{{ tier }}</span>
                 {%- if row.type_id == bom.target.type_id %}★ {% endif %}{{ row.name }}
             </span>
             <span data-m="key" style="text-align:right;color:var(--text);">{{ '{:,}'.format(row.qty | round | int) }}</span>

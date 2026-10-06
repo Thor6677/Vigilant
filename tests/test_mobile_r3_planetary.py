@@ -311,6 +311,18 @@ def test_calculator_pipeline_keys_tier_and_product_then_quantity_needed():
     assert row_labelled(rows[4])["Cycles"]["text"] == "12.5"
 
 
+def test_calculator_pipeline_tier_tag_is_11px_on_phones():
+    """Key 1's P-tier tag is phone-only text with an inline 9px; its hook
+    takes it to 11px (!important beats the inline size)."""
+    rows = _hooked(_calc(), "pi-pipe-row")
+    assert len(rows) == len(_PIPELINE)
+    for r in rows:
+        (tag,) = row_keys(r)[0]["kids"]
+        assert tag.get("class", "").split() == ["m-only", "pi-pipe-tier"]
+        assert "font-size:9px" in tag.get("style", "").replace(" ", "")
+    assert "font-size: 11px !important" in rule_bodies(_phone(), ".pi-pipe-tier")
+
+
 def test_calculator_flow_chart_hides_on_phones_but_the_hand_off_summary_stays():
     html = _calc()
     (container,) = _with_class(html, "pi-flow-container")

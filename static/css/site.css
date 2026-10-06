@@ -1654,6 +1654,10 @@
     /* Planet detail (Colonies): an opened pin row's Contents <details>
        opens from a 40px summary (toggleMRow ignores taps on a summary). */
     .pi-pin-row > [data-m-label] > details > summary { min-height: 40px; line-height: 40px; }
+
+    /* Calculator pipeline: key 1's phone-only P-tier tag at 11px over its
+       inline 9px. */
+    .pi-pipe-tier { font-size: 11px !important; }
 }
 /* ── end R3 T6 ── */
 
