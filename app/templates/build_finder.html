@@ -149,10 +149,13 @@
                        hx-swap="innerHTML">
                 {# root tree loads via htmx on page load; search results swap
                    the same container (a sub-2-char / cleared query returns
-                   the root tree again, restoring the browser) #}
+                   the root tree again, restoring the browser). hx-target
+                   "this" keeps the load out of the form's inherited
+                   #bf-results target (ISS-121). #}
                 <div id="bf-tree" class="bf-tree"
                      hx-get="/industry/build-finder/tree?parent=0"
-                     hx-trigger="load"></div>
+                     hx-trigger="load"
+                     hx-target="this"></div>
             </div>
             <div class="bf-field">
                 <label for="bf-me">ME %</label>

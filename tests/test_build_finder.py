@@ -28,6 +28,7 @@ import base64
 import json
 import os
 import tempfile
+from html.parser import HTMLParser
 
 import itsdangerous
 from fastapi.testclient import TestClient
@@ -662,3 +663,80 @@ def test_build_finder_page_has_tree_picker():
         assert 'name="group_id"' not in body
     finally:
         teardown()
+
+
+# ── ISS-121: the root tree loads into its own box ──────────────────────────
+
+class _Elements(HTMLParser):
+    """Every element's attrs with the attrs of its open ancestors (outermost
+    first), so a test can resolve htmx's attribute inheritance."""
+    _VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link",
+             "meta", "source", "track", "wbr"}
+
+    def __init__(self):
+        super().__init__()
+        self.stack, self.found = [], []
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        self.found.append((a, [x for _, x in self.stack]))
+        if tag not in self._VOID:
+            self.stack.append((tag, a))
+
+    def handle_endtag(self, tag):
+        for i in range(len(self.stack) - 1, -1, -1):
+            if self.stack[i][0] == tag:
+                del self.stack[i:]
+                return
+
+
+def _hx_target_id(attrs, ancestors):
+    """The id of the element htmx 1.9 swaps a request from `attrs` into
+    (getTarget): the closest element, itself first, that carries hx-target,
+    unless an ancestor's hx-disinherit covers it first; "this" names the
+    element carrying the attribute; no hx-target at all means the element
+    itself. Only `this` and `#id` values are resolved."""
+    for el in [attrs] + ancestors[::-1]:
+        dis = el.get("hx-disinherit") or el.get("data-hx-disinherit") or ""
+        if el is not attrs and (dis == "*" or "hx-target" in dis.split()):
+            return attrs.get("id")
+        value = el.get("hx-target") or el.get("data-hx-target")
+        if value == "this":
+            return el.get("id")
+        if value:
+            assert value.startswith("#"), value
+            return value[1:]
+    return attrs.get("id")
+
+
+def test_root_tree_loads_into_its_own_box():
+    """ISS-121: #bf-tree sits inside #bf-form, and htmx inherits the form's
+    hx-target="#bf-results". With no target of its own, the root tree's
+    load swapped into the results box: #bf-tree stayed empty, and the
+    picker's select and expand/collapse handlers, delegated on #bf-tree,
+    never saw a node. The tree's own requests must land in #bf-tree, while
+    the form (submitted by Rank builds and by picking a group) still
+    renders into #bf-results."""
+    teardown = _seeded_tree_db()
+    try:
+        r = _authed_client().get("/industry/build-finder")
+        assert r.status_code == 200
+        parser = _Elements()
+        parser.feed(r.text)
+    finally:
+        teardown()
+    by_id = {a["id"]: (a, anc) for a, anc in parser.found if a.get("id")}
+
+    tree, tree_anc = by_id["bf-tree"]
+    assert tree["hx-get"] == "/industry/build-finder/tree?parent=0"
+    assert tree["hx-trigger"] == "load"
+    assert any(a.get("id") == "bf-form" for a in tree_anc), \
+        "the tree is inside the results form, so it would inherit the form's target"
+    assert _hx_target_id(tree, tree_anc) == "bf-tree"
+
+    search, search_anc = by_id["bf-tree-search"]
+    assert _hx_target_id(search, search_anc) == "bf-tree"
+
+    form, form_anc = by_id["bf-form"]
+    assert form["hx-get"] == "/industry/build-finder/results"
+    assert _hx_target_id(form, form_anc) == "bf-results"
