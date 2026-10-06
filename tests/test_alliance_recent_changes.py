@@ -7,6 +7,12 @@ with `toISOString()` (UTC): a change at 00:15 UTC showed as 04:15 to a
 viewer in New York. The API now sends an explicit UTC offset, so the page
 shows the UTC time it means to whatever the viewer's zone.
 
+ISS-129b: the rows are a template string written with innerHTML, and the
+system and region names (shipped map data), the counterparty's name (ESI),
+the direction and the counterparty id went in unescaped. Each is now
+escaped (the id is URL-encoded in the link), so a name renders as text and
+adds no elements. Ordinary names give the same markup as before.
+
 The page script runs under node against a stub DOM and stub fetch() (the
 same approach as tests/test_mobile_r5_maps_alliance.py), with TZ set so the
 result does not depend on the machine's zone. Names and ids are invented."""
@@ -19,6 +25,8 @@ import subprocess
 import tempfile
 import types
 from datetime import datetime, timedelta, timezone
+from html.parser import HTMLParser
+from urllib.parse import quote
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -26,7 +34,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 import app.db.models as models
 from app.db.models import Base, SovereigntyChangeEvent
 from app.routes import starmap as starmap_mod
-from tests._mobile import cells_rows, render_page, row_labelled
+from tests._mobile import cells_rows, render_page, row_keys, row_labelled, row_lead
 
 _NS = types.SimpleNamespace
 
@@ -180,3 +188,76 @@ def test_when_shows_the_utc_time_in_any_viewer_zone(sov_db, run_page, tz):
     assert len(rows) == 2
     for row, stored in zip(rows, (_WHEN, _WHEN - timedelta(hours=3))):
         assert row_labelled(row)["When"]["text"] == stored.strftime("%Y-%m-%d %H:%M")
+
+
+# ── hostile names (ISS-129b) ──────────────────────────────────────────
+
+HOSTILE_SYS = '<img src=x id="pwn-sys">Sample & Co'
+HOSTILE_REG = 'Region "Q" \'A\' <b>bold</b>'
+HOSTILE_ALLIANCE = 'A&amp;B <script>alert(1)</script> "q"'
+HOSTILE_DIR = 'loss" onmouseover="alert(1)'
+HOSTILE_ID = '1"><img src=x id="pwn-id">'
+
+
+def _detail(second_id, second_direction):
+    """A gain from OTHER in system 30000001, then a change in 30000002 whose
+    counterparty id and direction are the caller's."""
+    return {"name": "Sample Alliance", "ticker": "SMPL", "sov_system_count": 2,
+            "sov_gained_7d": 1, "sov_lost_7d": 1, "date_founded": None,
+            "recent_changes": [
+                {"system_id": 30000001, "changed_at": "2026-10-05T00:15:00+00:00",
+                 "old_alliance_id": OTHER, "new_alliance_id": ALLIANCE, "direction": "gain"},
+                {"system_id": 30000002, "changed_at": "2026-10-04T21:15:00+00:00",
+                 "old_alliance_id": ALLIANCE, "new_alliance_id": second_id,
+                 "direction": second_direction},
+            ]}
+
+
+class _Tags(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.tags = []
+
+    def handle_starttag(self, tag, attrs):
+        self.tags.append((tag, sorted(k for k, _ in attrs)))
+
+
+def _tags(html):
+    p = _Tags()
+    p.feed(html)
+    return p.tags
+
+
+def _normal(run_page):
+    return run_page(_detail(99000003, "loss"), _SYSTEMS,
+                    {str(OTHER): "Sample Counterparty Alliance"})
+
+
+def _hostile(run_page):
+    systems = [{"id": 30000001, "name": HOSTILE_SYS, "regName": HOSTILE_REG},
+               {"id": 30000002, "name": "SMP-02", "regName": "Sample Region"}]
+    return run_page(_detail(HOSTILE_ID, HOSTILE_DIR), systems, {str(OTHER): HOSTILE_ALLIANCE})
+
+
+def test_hostile_names_add_no_elements_or_attributes(run_page):
+    hostile = _tags(_hostile(run_page))
+    assert hostile == _tags(_normal(run_page))
+    assert {t for t, _ in hostile} <= {"div", "span", "a"}
+    assert not [a for _, attrs in hostile for a in attrs if a.startswith("on") or a == "id"]
+
+
+def test_hostile_names_render_as_their_own_text(run_page):
+    gain, change = cells_rows(_hostile(run_page))
+    cells = row_labelled(gain)
+    assert cells["Name"]["text"] == HOSTILE_SYS
+    assert cells["Region"]["text"] == HOSTILE_REG
+    k1, k2 = row_keys(gain)
+    assert k1["text"] == HOSTILE_SYS
+    assert k2["text"] == f"from {HOSTILE_ALLIANCE}"
+    assert k2["kids"] == [{"class": "b-text", "href": f"/alliance/{OTHER}"}]
+    # The direction stays inside the class attribute; the id is URL-encoded.
+    (lead,) = row_lead(change)
+    assert lead["attrs"] == {"class": f"b-change-dir {HOSTILE_DIR}", "data-m": "lead"}
+    k1, k2 = row_keys(change)
+    assert k2["text"] == f"to Alliance {HOSTILE_ID}"
+    assert k2["kids"] == [{"class": "b-text", "href": "/alliance/" + quote(HOSTILE_ID, safe="")}]

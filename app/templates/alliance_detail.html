@@ -115,16 +115,20 @@
         // it shows Name, Region and When. The m-only cells are display:none
         // above 640px, so desktop keeps its four grid cells. The list shows
         // 10 rows plus "Show all N" on phones (m-clamp).
+        // Names come from map data and ESI: escape every value written
+        // into the markup (ISS-129).
+        const esc = s => String(s).replace(/[&<>"']/g, ch =>
+            ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
         const rows = detail.recent_changes.map(c => {
             const sys = systemMap.get(c.system_id);
-            const sysName = sys?.name || ('System ' + c.system_id);
-            const regName = sys?.regName || '';
+            const sysName = esc(sys?.name || ('System ' + c.system_id));
+            const regName = esc(sys?.regName || '');
             const other = c.direction === 'gain' ? c.old_alliance_id : c.new_alliance_id;
-            const otherName = other ? (names[other] || ('Alliance ' + other)) : 'Unclaimed';
-            const when = new Date(c.changed_at).toISOString().slice(0, 16).replace('T', ' ');
+            const otherName = esc(other ? (names[other] || ('Alliance ' + other)) : 'Unclaimed');
+            const when = esc(new Date(c.changed_at).toISOString().slice(0, 16).replace('T', ' '));
             return `
                 <div class="b-change-row m-row" data-click="toggleMRow">
-                    <span class="b-change-dir ${c.direction}" data-m="lead">${c.direction === 'gain' ? '▲' : '▼'}</span>
+                    <span class="b-change-dir ${esc(c.direction)}" data-m="lead">${c.direction === 'gain' ? '▲' : '▼'}</span>
                     <span class="m-only" data-m="key" style="color:var(--accent);">${sysName}</span>
                     <span class="m-only" data-m-label="Name">${sysName}</span>
                     <span>
@@ -134,7 +138,7 @@
                     ${regName ? `<span class="m-only" data-m-label="Region">${regName}</span>` : ''}
                     <span style="color:var(--muted);font-size:10px;" data-m="key">
                         ${c.direction === 'gain' ? 'from' : 'to'}
-                        ${other ? `<a class="b-text" href="/alliance/${other}">${otherName}</a>` : otherName}
+                        ${other ? `<a class="b-text" href="/alliance/${encodeURIComponent(other)}">${otherName}</a>` : otherName}
                     </span>
                     <span style="color:var(--muted);font-size:9px;" data-m-label="When">${when}</span>
                 </div>
