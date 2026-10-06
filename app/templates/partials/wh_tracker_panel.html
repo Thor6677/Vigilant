@@ -154,8 +154,11 @@
         <div class="ws-section">
             <div class="ws-section-title">Kill Activity</div>
             {# Refreshes on its own: the panel around it is only re-rendered
-               when the character changes system. #}
-            <div hx-get="/wormholes/system/{{ system['system_name'] }}/kills"
+               when the character changes system. data-wht-kills: the
+               page's script adds the range shown (30/60/90D) to these
+               requests, so the 60s reload keeps a picked range (ISS-124). #}
+            <div data-wht-kills
+                 hx-get="/wormholes/system/{{ system['system_name'] }}/kills"
                  hx-trigger="load, every 60s"
                  hx-swap="innerHTML">
                 <div class="b-panel" style="padding:0.75rem;text-align:center;">

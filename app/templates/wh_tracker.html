@@ -126,6 +126,18 @@
         }
     }
 
+    /* ISS-124: the kill list ([data-wht-kills]) reloads itself every 60s
+       from a URL that names no range, so a 60D/90D pick fell back to 30D.
+       Its panel reports the range it shows in data-days; send that along.
+       The range buttons name theirs in their own URL, and a freshly
+       rendered tracker panel starts at the default 30D. */
+    document.addEventListener('htmx:configRequest', function(e) {
+        var elt = e.detail && e.detail.elt;
+        if (!elt || !elt.hasAttribute || !elt.hasAttribute('data-wht-kills')) return;
+        var panel = elt.querySelector('.whk[data-days]');
+        if (panel) e.detail.parameters.days = panel.getAttribute('data-days');
+    });
+
     /* Stale-poll ticker: bump the "checked Xs ago" label every 5s. Danger
        threshold scales with the 15s poll interval below (same ~2.5x
        headroom the old 30s/75s pairing used). */
