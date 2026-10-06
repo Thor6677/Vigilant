@@ -2,7 +2,7 @@
 
 A collapsed m-row is one line of text plus the base rule's 0.6rem padding,
 which measured 37–39px on many pages (wallet journal, skills queue, mining,
-P&L, the order book, industry rows, dashboard Table/Compact). The floor is
+P&L, the order book, industry rows, the dashboard Table). The floor is
 one central declaration in the base `.m-row` phone rule of the R1 shared
 layer, so every page gets it and no page section has to repeat it.
 
