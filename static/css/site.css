@@ -1074,6 +1074,11 @@
     /* Stats: the zKillboard chip is an m-tap target. As an inline-flex box
        its ::after arrow is a flex item and loses the space in its content. */
     .ent-zkb { gap: 0.3em; }
+    /* Stats: the summary tiles' labels and the heatmap's Less/More legend
+       at 11px over the page's 9px. The page's <style> loads after this
+       file; element plus class outranks its rules. The heatmap's 8px day
+       and hour labels stay: 24 columns of cells leave them no room. */
+    div.ent-tile-label, div.ent-hm-legend { font-size: 11px; }
 
     /* Blueprint filter row (ISS-111): two buttons per line, each on one
        line. The separator becomes an empty spacer row between the filter

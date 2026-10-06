@@ -14,7 +14,7 @@ import app.main  # noqa: F401 — populates every router's templates.env.globals
 from app.routes import blueprints as blueprints_mod
 from app.routes import fittings as fittings_mod
 from app.routes import intel_entity as entity_mod
-from tests._mobile import VOID, css_section, mrows, norm, render_page, rule_bodies
+from tests._mobile import VOID, css_section, mrows, norm, render_page, rule_bodies, source
 
 
 # ── HTML and CSS helpers ─────────────────────────────────────────────
@@ -228,6 +228,25 @@ def test_entity_css_zkillboard_chip_spaces_its_arrow():
     """m-tap makes the chip inline-flex, so its ::after arrow is a flex item
     and loses the leading space in its content; a gap puts it back."""
     assert "gap" in _decls(".ent-zkb")
+
+
+def test_entity_css_tile_labels_and_heatmap_legend_are_11px():
+    """The summary tiles' labels and the heatmap's Less/More legend are 9px
+    in the page's own <style>, which loads after site.css; the element plus
+    class outranks its single-class rules. The heatmap's 8px day and hour
+    labels stay: the 24 columns of cells leave them no room."""
+    assert _decls("div.ent-tile-label") == {"font-size": "11px"}
+    assert _decls("div.ent-hm-legend") == {"font-size": "11px"}
+    page = source("intel_entity.html")
+    assert re.search(r"\.ent-tile-label \{[^}]*font-size:9px", page)
+    assert re.search(r"\.ent-hm-legend \{[^}]*font-size:9px", page)
+    # The rules reach the elements: both are divs, with these classes only.
+    summary = source("partials/entity_summary.html")
+    assert summary.count('<div class="ent-tile-label">') == summary.count("ent-tile-label") == 4
+    heatmap = source("partials/entity_heatmap.html")
+    assert heatmap.count('<div class="ent-hm-legend">') == heatmap.count("ent-hm-legend") == 1
+    for cls in (".ent-hm ", ".ent-hm-hh", ".ent-hm-day"):
+        assert cls not in css_section("T3"), cls
 
 
 # ── Blueprint filter row (ISS-111 part 1) ────────────────────────────
