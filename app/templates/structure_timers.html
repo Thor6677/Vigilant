@@ -417,7 +417,8 @@
                 {{ t.timer_expires.strftime('%Y-%m-%d %H:%M') }} UTC
             </span>
             <span class="m-only" data-m="key" style="color:var(--muted);">{{ t.timer_expires.strftime('%m-%d') }}</span>
-            <form method="POST" action="/structure-timers/{{ t.id }}/delete" data-m-label="Delete" style="flex:none;">
+            <form method="POST" action="/structure-timers/{{ t.id }}/delete" data-m-label="Delete" style="flex:none;"
+                  data-confirm="Delete this timer?">
                 <button class="b-btn st-tap" aria-label="Delete timer" style="padding:0.1rem 0.3rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
             </form>
         </div>

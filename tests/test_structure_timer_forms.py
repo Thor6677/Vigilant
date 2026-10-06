@@ -1,4 +1,4 @@
-"""Structure Timers: what the Edit form sends back.
+"""Structure Timers: what the Edit form sends back, and deleting a timer.
 
 ISS-128a: the Edit form's phase select offered only Shield, Armor and Hull,
 while the Add form, the routes and the ESI sync also use Anchoring and
@@ -7,6 +7,10 @@ first option, so saving any edit to an anchoring or unanchoring timer
 silently turned it into a Shield timer. The round-trip test builds the POST
 body from the rendered form the way a browser does, then checks the phase
 survives.
+
+ISS-128b: an archived timer's delete button removed it at once, while the
+active rows' delete asks "Delete this timer?" first. Every timer delete form
+now carries the same data-confirm.
 
 Names and ids are invented."""
 import asyncio
@@ -131,9 +135,9 @@ def _timer(tid, phase, expires=datetime(2030, 1, 2, 3, 4, 5)):
                notes=None, source="manual", created_by=1, acl_group_id=None)
 
 
-def _render(timers):
+def _render(timers, archived=()):
     return render_page(st_mod, "structure_timers.html", "/structure-timers",
-                       active_timers=list(timers), archived_timers=[], acl_groups=[],
+                       active_timers=list(timers), archived_timers=list(archived), acl_groups=[],
                        user_id=1, is_privileged=False)
 
 
@@ -145,6 +149,36 @@ def test_edit_form_offers_the_add_forms_phases_and_selects_the_timers_own(phase)
     assert [(v, label) for v, label, _ in edit] == [(v, label) for v, label, _ in add]
     assert [v for v, _, _ in edit] == PHASES
     assert [v for v, _, sel in edit if sel] == [phase]
+
+
+# ── deleting a timer (ISS-128b) ───────────────────────────────────────
+
+
+class _Forms(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.forms = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "form":
+            self.forms.append({k: (v if v is not None else "") for k, v in attrs})
+
+
+def _delete_forms(html, tid):
+    p = _Forms()
+    p.feed(html)
+    return [f for f in p.forms if f.get("action") == f"/structure-timers/{tid}/delete"]
+
+
+def test_archived_timer_delete_asks_first_like_an_active_one():
+    html = _render([_timer(31, "armor")], [_timer(41, "hull", datetime(2029, 12, 1, 18, 30))])
+    active = _delete_forms(html, 31)
+    archived = _delete_forms(html, 41)
+    # Active: the desktop button and the phone row's copy. Archived: one form.
+    assert len(active) == 2 and len(archived) == 1
+    for form in active + archived:
+        assert form["method"] == "POST"
+        assert form.get("data-confirm") == "Delete this timer?"
 
 
 # ── the round trip through the routes ─────────────────────────────────
