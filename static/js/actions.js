@@ -122,11 +122,52 @@
     // data-toggle-target; it defaults to the element itself so a missing
     // attribute degrades to a visible no-op rather than a thrown error on
     // closest(null).
+    //
+    // The trigger announces the state: its aria-expanded follows the
+    // target's is-expanded, after every toggle and once per page load and
+    // htmx swap (so templates needn't render it). Only a button, a link or a
+    // role=button element gets the attribute (it isn't allowed on a plain
+    // div), and never an m-row: mSyncAria owns those, phone-only.
+    //
+    // A "Show all" (.m-showall) hides itself once its list opens. Focus would
+    // then fall back to <body>, so it moves to the first row the list just
+    // revealed (the 11th of a .m-clamp), or the list, or the target. The
+    // check is "the trigger is no longer rendered", not "it had focus": iOS
+    // Safari doesn't focus a tapped button.
+    function toggleTargetOf(el) {
+        var selector = el.dataset && el.dataset.toggleTarget;
+        return selector ? el.closest(selector) : el;
+    }
+    function expandedAria(trigger, target) {
+        if (!trigger || !target || !trigger.getAttribute) return;
+        if (trigger.classList && trigger.classList.contains('m-row')) return;
+        var tag = trigger.tagName;
+        if (tag !== 'BUTTON' && tag !== 'A' && trigger.getAttribute('role') !== 'button') return;
+        trigger.setAttribute('aria-expanded', target.classList.contains('is-expanded') ? 'true' : 'false');
+    }
+    function focusRevealed(target) {
+        var list = target.querySelector('.m-clamp');
+        var el = (list && list.children[10]) || list || target;
+        if (!el.matches('a[href], button, input, select, textarea, [tabindex]')) el.setAttribute('tabindex', '-1');
+        el.focus();
+    }
     window.toggleExpanded = window.toggleExpanded || function () {
-        var selector = this.dataset && this.dataset.toggleTarget;
-        var target = selector ? this.closest(selector) : this;
-        if (target) target.classList.toggle('is-expanded');
+        var target = toggleTargetOf(this);
+        if (!target) return;
+        target.classList.toggle('is-expanded');
+        expandedAria(this, target);
+        if (target.classList.contains('is-expanded') && this.getClientRects &&
+                !this.getClientRects().length) focusRevealed(target);
     };
+    window.initToggleExpandedAria = window.initToggleExpandedAria || function (root) {
+        var scope = root && root.querySelectorAll ? root : document;
+        var SEL = '[data-click="toggleExpanded"]';
+        var triggers = Array.prototype.slice.call(scope.querySelectorAll(SEL));
+        if (scope.matches && scope.matches(SEL)) triggers.unshift(scope);
+        for (var i = 0; i < triggers.length; i++) expandedAria(triggers[i], toggleTargetOf(triggers[i]));
+    };
+    document.addEventListener('DOMContentLoaded', function () { window.initToggleExpandedAria(document); });
+    document.addEventListener('htmx:afterSettle', function (e) { window.initToggleExpandedAria(e.target); });
 
     // Was: onclick="window.location='/somewhere'" — a whole row acting as a
     // link. The destination comes from data-href.
@@ -464,6 +505,36 @@
     // either way. The hook below no-ops everywhere the panel is absent.
     //
     // Chart.js is loaded by the page, as it already was.
+    //
+    // Phones (≤640px) get at most 3 unrotated x labels instead of 12 tilted
+    // ones (four full dates overlap at 360px, and Chart.js's own size-based
+    // skipping still draws four). The chart is built for the side the page is on; crossing 640px (a
+    // rotation, a resized window) rewrites the limit in place, and a change
+    // that lands on the side it was last laid out for is skipped. Desktop's
+    // options are exactly what they were. One listener, not one per panel
+    // swap: it reaches whichever chart the newest swap built, and a chart
+    // whose canvas has left the page is never touched.
+    var HIST_MQ = window.matchMedia ? window.matchMedia('(max-width: 640px)') : null;
+    function histPhone() { return !!(HIST_MQ && HIST_MQ.matches); }
+    function histXTicks(ticks, phone) {
+        if (phone) { ticks.maxTicksLimit = 3; ticks.maxRotation = 0; }
+        else { ticks.maxTicksLimit = 12; delete ticks.maxRotation; }
+        return ticks;
+    }
+    var histLive = null;   // { chart, side } for the chart on the page now
+    if (HIST_MQ) {
+        var _histRelayout = function () {
+            var h = histLive;
+            if (!h || !h.chart.canvas || !h.chart.canvas.isConnected) return;
+            var side = histPhone();
+            if (side === h.side) return;
+            h.side = side;
+            histXTicks(h.chart.config.options.scales.x.ticks, side);
+            h.chart.update('none');
+        };
+        if (HIST_MQ.addEventListener) HIST_MQ.addEventListener('change', _histRelayout);
+        else if (HIST_MQ.addListener) HIST_MQ.addListener(_histRelayout);
+    }
     function initActivityHistory(panel) {
         if (typeof Chart === 'undefined') return;
         var VIEW = 365, H = null, chart = null;
@@ -499,6 +570,7 @@
             slider.value = maxStart;  // open on the most recent year
             var existing = Chart.getChart ? Chart.getChart(canvas) : null;
             if (existing) existing.destroy();
+            var side = histPhone();
             chart = new Chart(canvas, {
                 type: 'line',
                 data: { labels: [], datasets: [
@@ -513,7 +585,7 @@
                     responsive: true, maintainAspectRatio: false, animation: false,
                     interaction: { mode: 'index', intersect: false },
                     scales: {
-                        x: { ticks: { maxTicksLimit: 12, color: '#888' }, grid: { color: '#1a1a1a' } },
+                        x: { ticks: histXTicks({ color: '#888' }, side), grid: { color: '#1a1a1a' } },
                         y: { position: 'left', ticks: { color: '#c8a951' }, grid: { color: '#1a1a1a' } },
                         y1: { position: 'right', ticks: { color: '#8899aa', callback: function (v) { return v >= 1e9 ? fmtIsk(v) : v; } }, grid: { drawOnChartArea: false } }
                     },
@@ -524,6 +596,7 @@
                         } } } }
                 }
             });
+            histLive = { chart: chart, side: side };
             render(maxStart);
             // Direct listeners rather than the data-* dispatcher: these
             // elements are re-created by every swap, and so is this closure,

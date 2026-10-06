@@ -1,4 +1,13 @@
-{# Build-finder ranked results — margin % desc, unpriced rows last #}
+{# Build-finder ranked results — margin % desc, unpriced rows last.
+
+   Phones (mobile R3 T2): each row opens on tap. Key 1 is the product name
+   as plain text (an m-only copy) and key 2 the margin % (D5 A). The desktop
+   name cell stays a market link and stays untagged, so phones hide it; the
+   link opens inside the row as the Market line instead (D6 A), so a tap on
+   the row never navigates away. A missing invention skill, which desktop
+   explains only in the ⚠ title, is a visible Skills line. Past 10 rows the
+   list clamps with "Show all N". #}
+{% set skill_note = "character missing an invention skill (level 0 used)" %}
 {% if not rows %}
 <div class="b-section">
     <div class="b-empty">No buildable items found for this group.</div>
@@ -16,7 +25,7 @@
             </span>
         </div>
 
-        <div class="b-table-row" style="border-bottom:1px solid var(--border);">
+        <div class="b-table-row m-head" style="border-bottom:1px solid var(--border);">
             <span style="flex:3;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Product</span>
             <span style="flex:1;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Build / unit</span>
             <span style="flex:1;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Sell / unit</span>
@@ -24,19 +33,31 @@
             <span style="flex:1;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Margin %</span>
         </div>
 
-        {% for r in rows %}
-        <div class="b-table-row">
-            <span style="flex:3;font-size:11px;">
-                <a href="/market/type/{{ r.product_type_id }}" style="color:var(--text);text-decoration:none;">{{ r.product_name }}</a>
-            </span>
-            <span style="flex:1;text-align:right;font-size:11px;color:var(--muted);">
-                {{ r.cost_str }}{% if r.inv_str %}<span style="font-size:9px;"> (+{{ r.inv_str }} inv)</span>{% endif %}{% if r.skill_missing %}<span title="character missing an invention skill (level 0 used)" style="color:var(--danger);cursor:help;padding-left:2px;">&#9888;</span>{% endif %}
-            </span>
-            <span style="flex:1;text-align:right;font-size:11px;color:var(--muted);">{{ r.sell_str }}</span>
-            <span style="flex:1;text-align:right;font-size:11px;color:{% if not r.priced %}var(--muted){% elif r.margin_positive %}var(--success){% else %}var(--danger){% endif %};">{{ r.margin_isk_str }}</span>
-            <span style="flex:1;text-align:right;font-size:11px;font-weight:600;color:{% if not r.priced %}var(--muted){% elif r.margin_positive %}var(--success){% else %}var(--danger){% endif %};">{{ r.margin_pct_str }}</span>
+        {# The rows are written with no whitespace between their tags: a group
+           can return 200 of them, and whitespace between flex items or between
+           block-level rows is never drawn, so desktop is unchanged. Each cell
+           line opens with an empty stripping comment (or a block tag with a
+           leading dash), which drops the newline and indentation before it. #}
+        <div class="m-clamp-wrap bf-clamp">
+            <div class="m-clamp">
+                {%- for r in rows -%}
+                <div class="b-table-row m-row bf-row" data-click="toggleMRow">
+                    {#- #}<span style="flex:3;font-size:11px;"><a href="/market/type/{{ r.product_type_id }}" style="color:var(--text);text-decoration:none;">{{ r.product_name }}</a></span>
+                    {#- #}<span class="m-only" data-m="key">{{ r.product_name }}</span>
+                    {#- #}<span class="m-only" data-m-label="Name">{{ r.product_name }}</span>
+                    {#- #}<span data-m-label="Build / unit" style="flex:1;text-align:right;font-size:11px;color:var(--muted);"><span>{{ r.cost_str }}{% if r.inv_str %}<span style="font-size:9px;"> (+{{ r.inv_str }} inv)</span>{% endif %}{% if r.skill_missing %}<span title="{{ skill_note }}" style="color:var(--danger);cursor:help;padding-left:2px;">&#9888;</span>{% endif %}</span></span>
+                    {%- if r.skill_missing %}<span class="m-only" data-m-label="Skills">{{ skill_note }}</span>{% endif %}
+                    {#- #}<span data-m-label="Sell / unit" style="flex:1;text-align:right;font-size:11px;color:var(--muted);">{{ r.sell_str }}</span>
+                    {#- #}<span data-m-label="Margin" style="flex:1;text-align:right;font-size:11px;color:{% if not r.priced %}var(--muted){% elif r.margin_positive %}var(--success){% else %}var(--danger){% endif %};">{{ r.margin_isk_str }}</span>
+                    {#- #}<span data-m="key" style="flex:1;text-align:right;font-size:11px;font-weight:600;color:{% if not r.priced %}var(--muted){% elif r.margin_positive %}var(--success){% else %}var(--danger){% endif %};">{{ r.margin_pct_str }}</span>
+                    {#- #}<span class="m-only" data-m-label="Market"><a href="/market/type/{{ r.product_type_id }}" class="m-tap" aria-label="Open market page for {{ r.product_name }}">Open market page <span aria-hidden="true">→</span></a></span>
+                {#- #}</div>
+                {%- endfor %}
+            </div>
+            {% if rows|length > 10 %}
+            <button type="button" class="m-only m-showall" data-click="toggleExpanded" data-toggle-target=".m-clamp-wrap">Show all {{ rows|length }}</button>
+            {% endif %}
         </div>
-        {% endfor %}
     </div>
     <div style="font-size:9px;color:var(--muted);padding:0.4rem 0.1rem;">
         Ranked {{ shown }} of {{ total_n }} buildable items in {{ compute_ms }} ms.

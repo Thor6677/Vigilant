@@ -14,7 +14,7 @@ import app.main  # noqa: F401 — populates every router's templates.env.globals
 from app.routes import blueprints as blueprints_mod
 from app.routes import fittings as fittings_mod
 from app.routes import intel_entity as entity_mod
-from tests._mobile import VOID, css_section, mrows, norm, render_page, rule_bodies
+from tests._mobile import VOID, css_section, mrows, norm, render_page, rule_bodies, source
 
 
 # ── HTML and CSS helpers ─────────────────────────────────────────────
@@ -230,6 +230,25 @@ def test_entity_css_zkillboard_chip_spaces_its_arrow():
     assert "gap" in _decls(".ent-zkb")
 
 
+def test_entity_css_tile_labels_and_heatmap_legend_are_11px():
+    """The summary tiles' labels and the heatmap's Less/More legend are 9px
+    in the page's own <style>, which loads after site.css; the element plus
+    class outranks its single-class rules. The heatmap's 8px day and hour
+    labels stay: the 24 columns of cells leave them no room."""
+    assert _decls("div.ent-tile-label") == {"font-size": "11px"}
+    assert _decls("div.ent-hm-legend") == {"font-size": "11px"}
+    page = source("intel_entity.html")
+    assert re.search(r"\.ent-tile-label \{[^}]*font-size:9px", page)
+    assert re.search(r"\.ent-hm-legend \{[^}]*font-size:9px", page)
+    # The rules reach the elements: both are divs, with these classes only.
+    summary = source("partials/entity_summary.html")
+    assert summary.count('<div class="ent-tile-label">') == summary.count("ent-tile-label") == 4
+    heatmap = source("partials/entity_heatmap.html")
+    assert heatmap.count('<div class="ent-hm-legend">') == heatmap.count("ent-hm-legend") == 1
+    for cls in (".ent-hm ", ".ent-hm-hh", ".ent-hm-day"):
+        assert cls not in css_section("T3"), cls
+
+
 # ── Blueprint filter row (ISS-111 part 1) ────────────────────────────
 
 def _render_blueprints(is_corp, filter="all", group_by="type"):
@@ -253,6 +272,16 @@ def _render_blueprints(is_corp, filter="all", group_by="type"):
                        char=char, blueprints=bps, groups=blueprints_mod._group_blueprints(bps, group_by),
                        stats=blueprints_mod._compute_stats(bps), error=None, is_corp=is_corp,
                        corp_id=corp_id, filter=filter, group_by=group_by)
+
+
+@pytest.mark.parametrize("is_corp", [False, True])
+def test_blueprint_calc_links_name_their_blueprint(is_corp):
+    """Every row's link reads "Calc →"; a screen reader's link list needs
+    the blueprint in each name."""
+    html = _render_blueprints(is_corp, "all", "type")
+    links = re.findall(r'<a href="/industry\?type_id=(\d+)" class="m-tap" aria-label="([^"]*)"', html)
+    assert sorted(links) == [("691", "Open Sample Frigate Blueprint in the calculator"),
+                             ("692", "Open Sample Cruiser Blueprint in the calculator")]
 
 
 @pytest.mark.parametrize("is_corp,filter,group_by", [
@@ -292,7 +321,9 @@ def test_blueprint_css_filter_row_is_a_two_column_grid():
     btn = _decls(".bp-filters > .b-btn")
     assert btn["white-space"] == "nowrap"
     assert btn["font-size"] == "12px !important"            # beats the inline 10px
-    assert btn["min-height"] == "40px"
+    # No height: the global phone .b-btn rule's 44px applies (a 40px
+    # min-height here outranked it and shrank the links).
+    assert "min-height" not in btn and "height" not in btn
     assert btn["display"] == "flex" and btn["align-items"] == "center"
     sep = _decls(".bp-filters > .bp-filter-sep")
     assert sep["grid-column"] == "1 / -1"                   # a spacer row between the two groups

@@ -73,10 +73,10 @@
     <div class="b-section-head"><span class="b-label">Add a target</span></div>
     <div style="padding:0.75rem;">
         <span class="sp-field-label">Find an item</span>
-        <input type="text" id="sp-search" class="sp-input" autocomplete="off"
+        <input type="text" id="sp-search" name="q" class="sp-input" autocomplete="off"
                placeholder="Search item name — e.g. Antimatter Charge L, Hobgoblin II…"
                hx-get="/tools/stockpiles/search"
-               hx-trigger="keyup changed delay=300ms"
+               hx-trigger="keyup changed delay:300ms"
                hx-target="#sp-search-results" hx-swap="innerHTML">
         <div id="sp-search-results" class="sp-results"></div>
 
@@ -122,6 +122,29 @@
         document.getElementById('sp-search-results').innerHTML = '';
         document.getElementById('sp-qty').focus();
     };
+
+    // Phones: adding or removing a target swaps the whole watchlist
+    // (#sp-rows), which would close any row that was open. Re-open those
+    // rows by target id; actions.js's afterSettle pass then syncs their
+    // aria-expanded. Desktop never opens a row, so this does nothing there.
+    var openRows = [];
+    function isRows(e) {
+        return !!(e.detail && e.detail.target && e.detail.target.id === 'sp-rows');
+    }
+    document.addEventListener('htmx:beforeSwap', function (e) {
+        if (!isRows(e)) return;
+        openRows = Array.prototype.map.call(
+            e.detail.target.querySelectorAll('tr.m-row.is-open[data-stock-id]'),
+            function (r) { return r.getAttribute('data-stock-id'); });
+    });
+    document.addEventListener('htmx:afterSwap', function (e) {
+        if (!isRows(e)) return;
+        openRows.forEach(function (id) {
+            var r = e.detail.target.querySelector('tr.m-row[data-stock-id="' + CSS.escape(id) + '"]');
+            if (r) r.classList.add('is-open');
+        });
+        openRows = [];
+    });
 
     // After a successful add, reset the form's selection state (the table has
     // already been swapped in by htmx).

@@ -18,7 +18,7 @@
         <div class="kf-top-type">{{ c['type_name'] }}</div>
         <div class="kf-top-isk">{{ c['isk_fmt'] }}</div>
         <div class="kf-top-meta kf-sys-{{ c['system_band'] }}">{{ c['system_name'] }}</div>
-        <div class="kf-top-corp">{{ c['victim_corp'] or c['victim_alliance'] or '&mdash;' }}</div>
+        <div class="kf-top-corp">{{ c['victim_corp'] or c['victim_alliance'] or '—' }}</div>
       </div>
       {% endfor %}
     </div>
@@ -40,7 +40,7 @@
         <div class="kf-top-type">{{ c['type_name'] }}</div>
         <div class="kf-top-isk">{{ c['isk_fmt'] }}</div>
         <div class="kf-top-meta kf-sys-{{ c['system_band'] }}">{{ c['system_name'] }}</div>
-        <div class="kf-top-corp">{{ c['victim_corp'] or c['victim_alliance'] or '&mdash;' }}</div>
+        <div class="kf-top-corp">{{ c['victim_corp'] or c['victim_alliance'] or '—' }}</div>
       </div>
       {% endfor %}
     </div>

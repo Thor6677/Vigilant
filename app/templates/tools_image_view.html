@@ -41,20 +41,20 @@
 
             <div style="display:flex;flex-direction:column;gap:3px;">
                 <label class="b-eyebrow">Share URL</label>
-                <div style="display:flex;gap:0.4rem;">
-                    <input type="text" id="share-url" value="{{ share_url }}" readonly
+                <div class="m-stack" style="display:flex;gap:0.4rem;">
+                    <input type="text" id="share-url" class="img-share-url" value="{{ share_url }}" readonly
                            style="flex:1;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
-                    <button type="button" data-click="copyField" data-field-id="share-url" class="b-btn"
+                    <button type="button" id="copy-share-url" data-field-id="share-url" class="b-btn"
                             style="border:1px solid var(--border);padding:0.35rem 0.75rem;font-size:10px;">Copy</button>
                 </div>
             </div>
 
             <div style="display:flex;flex-direction:column;gap:3px;">
                 <label class="b-eyebrow">Direct image URL</label>
-                <div style="display:flex;gap:0.4rem;">
-                    <input type="text" id="raw-url" value="{{ raw_url }}" readonly
+                <div class="m-stack" style="display:flex;gap:0.4rem;">
+                    <input type="text" id="raw-url" class="img-share-url" value="{{ raw_url }}" readonly
                            style="flex:1;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
-                    <button type="button" data-click="copyField" data-field-id="raw-url" class="b-btn"
+                    <button type="button" id="copy-raw-url" data-field-id="raw-url" class="b-btn"
                             style="border:1px solid var(--border);padding:0.35rem 0.75rem;font-size:10px;">Copy</button>
                 </div>
             </div>
@@ -79,7 +79,7 @@
 </div>
 
 {% if is_owner %}
-<div class="b-section" style="display:flex;gap:0.5rem;">
+<div class="b-section img-owner-actions" style="display:flex;gap:0.5rem;">
     <a href="/tools/images" class="b-btn" style="flex:1;padding:0.5rem;border:1px solid var(--border);">Back to Image Host</a>
     <form method="POST" action="/tools/images/{{ img.id }}/delete" style="flex:1;margin:0;"
           data-confirm="Delete this image?">
@@ -90,21 +90,49 @@
 {% endif %}
 
 <script nonce="{{ request.state.csp_nonce }}">
-function copyField() {
-    var id = this.dataset.fieldId;
-    var btn = this;
-    var el = document.getElementById(id);
-    el.select();
-    el.setSelectionRange(0, 99999);
-    try {
-        navigator.clipboard.writeText(el.value);
-    } catch (e) {
-        document.execCommand('copy');
+/* This page is public, and base.html loads actions.js only for a logged-in
+   session, so a data-click Copy did nothing for the visitors a link is
+   shared with (ISS-119). The buttons are bound here by id instead: the
+   same code runs for everyone, and only once.
+
+   Copy is gesture-safe on iOS: the field is selected and writeText is
+   called straight from the tap. With no clipboard API (an insecure
+   context) it throws, and execCommand('copy') copies the selection. A
+   rejected writeText retries that outside the tap, so on iOS the retry is
+   best-effort; if it fails too, the button says so briefly and the field
+   stays selected for a manual copy. */
+(function () {
+    function legacyCopy() {
+        try { return document.execCommand('copy'); } catch (e) { return false; }
     }
-    var orig = btn.textContent;
-    btn.textContent = 'Copied';
-    setTimeout(function(){ btn.textContent = orig; }, 1200);
-}
+
+    function copyField(btn, flash) {
+        var el = document.getElementById(btn.dataset.fieldId);
+        if (!el) return;
+        el.select();
+        el.setSelectionRange(0, 99999);
+        function fallback() { flash(legacyCopy() ? 'Copied' : 'Select & copy'); }
+        try {
+            navigator.clipboard.writeText(el.value).then(function () { flash('Copied'); }, fallback);
+        } catch (e) {
+            fallback();
+        }
+    }
+
+    ['copy-share-url', 'copy-raw-url'].forEach(function (id) {
+        var btn = document.getElementById(id);
+        if (!btn) return;
+        /* Read once, so a second tap inside the "Copied" window can't make
+           "Copied" the label it restores. */
+        var label = btn.textContent, timer = null;
+        function flash(text) {
+            clearTimeout(timer);
+            btn.textContent = text;
+            timer = setTimeout(function () { btn.textContent = label; }, 1200);
+        }
+        btn.addEventListener('click', function () { copyField(btn, flash); });
+    });
+})();
 </script>
 
 {% endif %}

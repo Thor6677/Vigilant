@@ -27,7 +27,7 @@
                 <span style="font-size:11px;color:var(--text);">{{ e.skill_name }}</span>
                 <span style="font-size:10px;color:var(--accent);">{{ ['', 'I', 'II', 'III', 'IV', 'V'][e.target_level] }}</span>
             </span>
-            <span style="flex:1;font-size:9px;color:var(--muted);">
+            <span class="skp-shared-attr" style="flex:1;font-size:9px;color:var(--muted);">
                 {{ e.primary_attr_name[:3] }}/{{ e.secondary_attr_name[:3] }}
                 <span class="skp-shared-rank" style="color:var(--border);">&times;{{ e.rank | int if e.rank == e.rank | int else e.rank }}</span>
             </span>

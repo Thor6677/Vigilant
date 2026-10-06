@@ -56,9 +56,20 @@
         {% if not rows %}
         <div class="b-empty">No farm pilots added yet. Add one below.</div>
         {% else %}
+        {# Phones (D18 A): each pilot is an expand-on-tap row. Key 1 is the
+           pilot, key 2 the injectors ready now with their ISK, on one line
+           (an m-only copy: desktop's cell breaks the ISK onto a second line).
+           The rest opens below as labelled lines, the Base SP form included;
+           toggleMRow ignores taps on its input. A pilot without the skills
+           scope or a first sync shows that message as key 2. The note line
+           opens with its row (m-only Note); the separate desktop line is
+           m-hide. The Total row isn't an m-row: site.css turns it into
+           label/value lines (data-sf-label). data-pilot-id lets the page
+           re-open a row after a swap. m-only cells are display:none above
+           640px, so desktop's columns don't change. #}
         <div style="overflow-x:auto;">
-        <table class="sf-table">
-            <thead>
+        <table class="sf-table m-table">
+            <thead class="m-head">
                 <tr>
                     <th>Pilot</th>
                     <th>Total SP</th>
@@ -73,16 +84,17 @@
             </thead>
             <tbody>
                 {% for r in rows %}
-                <tr>
-                    <td>{{ r.character_name }}</td>
+                <tr class="m-row" data-click="toggleMRow" data-pilot-id="{{ r.id }}">
+                    <td data-m="key">{{ r.character_name }}</td>
+                    <td class="m-only" data-m-label="Name">{{ r.character_name }}</td>
                     {% if r.status == "no_scope" %}
-                    <td colspan="7" class="sf-note">Needs the skills permission</td>
+                    <td colspan="7" class="sf-note" data-m="key">Needs the skills permission</td>
                     {% elif r.status == "waiting" %}
-                    <td colspan="7" class="sf-note">Waiting for first sync</td>
+                    <td colspan="7" class="sf-note" data-m="key">Waiting for first sync</td>
                     {% else %}
-                    <td>{{ '{:,}'.format(r.total_sp) }}</td>
-                    <td>{{ '{:,}'.format(r.unallocated_sp) }}</td>
-                    <td>
+                    <td data-m-label="Total SP">{{ '{:,}'.format(r.total_sp) }}</td>
+                    <td data-m-label="Unallocated">{{ '{:,}'.format(r.unallocated_sp) }}</td>
+                    <td data-m-label="Base SP">
                         <form hx-post="/tools/skill-farm/pilots/{{ r.id }}/base-sp"
                               hx-target="#skill-farm-content" hx-swap="innerHTML"
                               hx-trigger="change, submit">
@@ -93,13 +105,17 @@
                     <td>
                         {{ r.ready_now }}{% if r.ready_isk %}<br><span class="sf-note">{{ r.ready_isk_str }}</span>{% endif %}
                     </td>
-                    <td>{{ '{:,.0f}'.format(r.rate_per_hour) }}</td>
-                    <td>{{ r.eta_str }}</td>
-                    <td class="{% if r.profit and r.profit > 0 %}sf-profit{% elif r.profit and r.profit < 0 %}sf-loss{% endif %}">
+                    <td class="m-only" data-m="key">{{ r.ready_now }} ready{% if r.ready_isk %} <span class="sf-note">· {{ r.ready_isk_str }}</span>{% endif %}</td>
+                    <td data-m-label="SP / hour">{{ '{:,.0f}'.format(r.rate_per_hour) }}</td>
+                    <td data-m-label="Next injector">{{ r.eta_str }}</td>
+                    <td class="{% if r.profit and r.profit > 0 %}sf-profit{% elif r.profit and r.profit < 0 %}sf-loss{% endif %}" data-m-label="Monthly profit">
                         {{ r.profit_str }}
                     </td>
                     {% endif %}
-                    <td>
+                    {% if r.notes %}
+                    <td class="m-only sf-note" data-m-label="Note">{{ r.notes|join(" · ") }}</td>
+                    {% endif %}
+                    <td data-m-label="Remove">
                         <button type="button" class="b-btn sf-del"
                                 hx-delete="/tools/skill-farm/pilots/{{ r.id }}"
                                 hx-target="#skill-farm-content" hx-swap="innerHTML"
@@ -108,7 +124,7 @@
                     </td>
                 </tr>
                 {% if r.notes %}
-                <tr>
+                <tr class="m-hide">
                     <td colspan="9" class="sf-note">{{ r.notes|join(" · ") }}</td>
                 </tr>
                 {% endif %}
@@ -120,12 +136,12 @@
                     <td></td>
                     <td></td>
                     <td></td>
-                    <td>
+                    <td data-sf-label="Ready now">
                         {{ totals.ready_now }}{% if totals.ready_isk %}<br><span class="sf-note">{{ totals_ready_isk_str }}</span>{% endif %}
                     </td>
                     <td></td>
                     <td></td>
-                    <td class="{% if totals.profit and totals.profit > 0 %}sf-profit{% elif totals.profit and totals.profit < 0 %}sf-loss{% endif %}">
+                    <td class="{% if totals.profit and totals.profit > 0 %}sf-profit{% elif totals.profit and totals.profit < 0 %}sf-loss{% endif %}" data-sf-label="Monthly profit">
                         {{ totals_profit_str }}
                     </td>
                     <td></td>

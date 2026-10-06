@@ -89,25 +89,38 @@
 
 <div class="b-section" style="margin-top:0.75rem;">
     <div class="b-section-head"><span class="b-label">Realized P&amp;L by item — best first</span></div>
-    <div style="padding:0.25rem;overflow-x:auto;">
-        <table class="pnl-table">
-            <thead>
+    {# Phones (D7 A, D8 A): each item is an m-row. Key 1 is the name as
+       plain text, key 2 the realized ISK in its colour; opened, the row shows
+       Name, Units, Avg margin, Split (where there is one) and a Market line
+       that links to the item. The desktop name link is untagged, so phones
+       hide it. Every added cell is m-only, so desktop keeps its four columns.
+       The list shows 10 rows plus "Show all N" on phones. #}
+    <div class="m-clamp-wrap" style="padding:0.25rem;overflow-x:auto;">
+        <table class="pnl-table m-table">
+            <thead class="m-head">
                 <tr><th>Item</th><th>Realized ISK</th><th>Units flipped</th><th>Avg margin</th></tr>
             </thead>
-            <tbody>
+            <tbody class="m-clamp">
                 {% for r in rows %}
-                <tr>
+                <tr class="m-row" data-click="toggleMRow">
                     <td>
                         <a href="/market/type/{{ r.type_id }}" style="color:var(--accent);">{{ r.type_name }}</a>
                         {% if r.split_note %}<div style="color:var(--muted);font-size:9px;margin-top:1px;">{{ r.split_note }}</div>{% endif %}
                     </td>
-                    <td class="{% if r.profit_positive %}pnl-profit{% else %}pnl-loss{% endif %}">{{ r.realized_isk_str }}</td>
-                    <td>{{ r.qty_flipped_str }}</td>
-                    <td>{{ r.margin_pct_str }}</td>
+                    <td class="m-only" data-m="key">{{ r.type_name }}</td>
+                    <td class="{% if r.profit_positive %}pnl-profit{% else %}pnl-loss{% endif %}" data-m="key">{{ r.realized_isk_str }}</td>
+                    <td class="m-only" data-m-label="Name">{{ r.type_name }}</td>
+                    <td data-m-label="Units">{{ r.qty_flipped_str }}</td>
+                    <td data-m-label="Avg margin">{{ r.margin_pct_str }}</td>
+                    {% if r.split_note %}<td class="m-only" data-m-label="Split">{{ r.split_note }}</td>{% endif %}
+                    <td class="m-only" data-m-label="Market"><a href="/market/type/{{ r.type_id }}" class="m-tap" style="color:var(--accent);" aria-label="Open market page for {{ r.type_name }}">Open market page →</a></td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
+        {% if rows|length > 10 %}
+        <button type="button" class="m-only m-showall" data-click="toggleExpanded" data-toggle-target=".m-clamp-wrap">Show all {{ rows|length }}</button>
+        {% endif %}
     </div>
     <p class="pnl-note">
         <strong>Assumptions:</strong> fees/taxes are applied at flat rates — broker fee {{ "%.2f"|format(assumptions.broker_pct) }}% on each side (buy + sell) and sales tax {{ "%.2f"|format(assumptions.sales_tax_pct) }}% on sells. Actual in-game rates vary with your Broker Relations / Accounting skills and standings, so figures are indicative, not exact.
@@ -153,32 +166,51 @@
     var buildColors = MONTHLY.build.map(function (v) {
         return v >= 0 ? 'rgba(200,169,81,0.55)' : 'rgba(224,102,102,0.3)';
     });
-    new Chart(document.getElementById('pnl-chart'), {
-        type: 'bar',
-        data: {
-            labels: MONTHLY.labels,
-            datasets: [
-                { label: 'Trading', data: MONTHLY.trade,
-                  backgroundColor: tradeColors, borderWidth: 0, stack: 'pnl' },
-                { label: 'Industry', data: MONTHLY.build,
-                  backgroundColor: buildColors, borderWidth: 0, stack: 'pnl' }
-            ]
-        },
-        options: {
-            responsive: true, maintainAspectRatio: false, animation: false,
-            scales: {
-                x: { stacked: true, ticks: { color: '#888' }, grid: { color: '#1a1a1a' } },
-                y: { stacked: true, ticks: { color: '#c8a951', callback: function (v) { return fmtIsk(v); } },
-                     grid: { color: '#1a1a1a' } }
+    // Phones (≤640px, mobile R4): at most 4 month labels under the bars.
+    // The breakpoint is read each time the chart is drawn, and crossing it
+    // (a rotation, a resized window) redraws the chart, so desktop always
+    // gets the options below as they are. A change event that leaves the
+    // page on the side it was drawn for redraws nothing.
+    var phoneMq = window.matchMedia ? window.matchMedia('(max-width: 640px)') : null;
+    var chart = null, drawnPhone = false;
+    function drawChart() {
+        drawnPhone = !!(phoneMq && phoneMq.matches);
+        var cfg = {
+            type: 'bar',
+            data: {
+                labels: MONTHLY.labels,
+                datasets: [
+                    { label: 'Trading', data: MONTHLY.trade,
+                      backgroundColor: tradeColors, borderWidth: 0, stack: 'pnl' },
+                    { label: 'Industry', data: MONTHLY.build,
+                      backgroundColor: buildColors, borderWidth: 0, stack: 'pnl' }
+                ]
             },
-            plugins: {
-                legend: { display: true, labels: { color: '#888', boxWidth: 10, font: { size: 10 } } },
-                tooltip: { callbacks: { label: function (ctx) {
-                    return ctx.dataset.label + ': ' + fmtIsk(ctx.parsed.y) + ' ISK';
-                } } }
+            options: {
+                responsive: true, maintainAspectRatio: false, animation: false,
+                scales: {
+                    x: { stacked: true, ticks: { color: '#888' }, grid: { color: '#1a1a1a' } },
+                    y: { stacked: true, ticks: { color: '#c8a951', callback: function (v) { return fmtIsk(v); } },
+                         grid: { color: '#1a1a1a' } }
+                },
+                plugins: {
+                    legend: { display: true, labels: { color: '#888', boxWidth: 10, font: { size: 10 } } },
+                    tooltip: { callbacks: { label: function (ctx) {
+                        return ctx.dataset.label + ': ' + fmtIsk(ctx.parsed.y) + ' ISK';
+                    } } }
+                }
             }
-        }
-    });
+        };
+        if (drawnPhone) cfg.options.scales.x.ticks.maxTicksLimit = 4;
+        if (chart) chart.destroy();
+        chart = new Chart(document.getElementById('pnl-chart'), cfg);
+    }
+    drawChart();
+    if (phoneMq) {
+        var redraw = function () { if (phoneMq.matches !== drawnPhone) drawChart(); };
+        if (phoneMq.addEventListener) phoneMq.addEventListener('change', redraw);
+        else if (phoneMq.addListener) phoneMq.addListener(redraw);
+    }
     {% endif %}
 })();
 </script>

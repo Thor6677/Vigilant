@@ -1,8 +1,15 @@
 {# htmx partial — swapped via innerHTML into #lp-offers-panel in
    market_lp.html, so no {% extends %}/base globals here; the lp-* / b-empty
-   classes are already on the page from the parent template's head block. #}
+   classes are already on the page from the parent template's head block.
+
+   Phones (mobile R4 T2, D5 A): each offer is an expand-on-tap m-row. Key 1
+   is the offer name, key 2 its ISK/LP; opened, it reads Name (a full copy:
+   the item cell ellipsises), Qty, LP cost, ISK cost, Materials and Unit
+   sell. Past 10 offers, "Show all N" shows the rest. Desktop renders as
+   before: the Name copy and the button are m-only, the clamp wrappers are
+   unstyled, and the last offer is still its parent's :last-child. #}
 {% if rows %}
-<div class="lp-row lp-head">
+<div class="lp-row lp-head m-head">
     <span class="lp-col-item">Item</span>
     <span class="lp-col-num">Qty</span>
     <span class="lp-col-num">LP cost</span>
@@ -11,17 +18,25 @@
     <span class="lp-col-num">Unit sell</span>
     <span class="lp-col-ratio">ISK/LP</span>
 </div>
+<div class="m-clamp-wrap">
+<div class="m-clamp">
 {% for r in rows %}
-<div class="lp-row{% if not r.priced %} lp-unpriced{% endif %}">
-    <span class="lp-col-item" title="{{ r.item_name }}">{{ r.item_name }}</span>
-    <span class="lp-col-num">{{ r.quantity_str }}</span>
-    <span class="lp-col-num">{{ r.lp_cost_str }}</span>
-    <span class="lp-col-num">{{ r.isk_cost_str }}</span>
-    <span class="lp-col-num">{{ r.materials_cost_str }}</span>
-    <span class="lp-col-num">{{ r.unit_price_str }}</span>
-    <span class="lp-col-ratio">{{ r.isk_per_lp_str }}</span>
+<div class="lp-row m-row{% if not r.priced %} lp-unpriced{% endif %}" data-click="toggleMRow">
+    <span class="lp-col-item" data-m="key" title="{{ r.item_name }}">{{ r.item_name }}</span>
+    <span class="m-only" data-m-label="Name">{{ r.item_name }}</span>
+    <span class="lp-col-num" data-m-label="Qty">{{ r.quantity_str }}</span>
+    <span class="lp-col-num" data-m-label="LP cost">{{ r.lp_cost_str }}</span>
+    <span class="lp-col-num" data-m-label="ISK cost">{{ r.isk_cost_str }}</span>
+    <span class="lp-col-num" data-m-label="Materials">{{ r.materials_cost_str }}</span>
+    <span class="lp-col-num" data-m-label="Unit sell">{{ r.unit_price_str }}</span>
+    <span class="lp-col-ratio" data-m="key">{{ r.isk_per_lp_str }}</span>
 </div>
 {% endfor %}
+</div>
+{% if rows|length > 10 %}
+<button type="button" class="m-only m-showall" data-click="toggleExpanded" data-toggle-target=".m-clamp-wrap">Show all {{ rows|length }}</button>
+{% endif %}
+</div>
 {% else %}
 <div class="b-empty">This corporation has no LP store offers (or none could be fetched).</div>
 {% endif %}

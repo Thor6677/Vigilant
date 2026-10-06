@@ -41,6 +41,8 @@
     </div>
 </div>
 
+{# Phones (R4 T1 in site.css): the stat cards become label · value lines
+   (D3 A), and the range buttons get 12px labels and a 40px minimum width. #}
 <div class="mk-stats">
     <div class="mk-stat"><div class="mk-stat-val" id="mk-latest-avg">—</div><div class="mk-stat-label">Latest avg</div></div>
     <div class="mk-stat"><div class="mk-stat-val" id="mk-latest-high">—</div><div class="mk-stat-label">Latest high</div></div>
@@ -78,8 +80,13 @@
 <script nonce="{{ request.state.csp_nonce }}">
 (function () {
     var TYPE_ID = {{ type_id }};
-    var range = '1y', chart = null;
+    var range = '1y', chart = null, lastData = null;
     var errEl = document.getElementById('mk-error');
+    /* Phones (≤640px, D4 A): price only. The volume bars and their
+       right-hand axis would take ~50px of a 360px screen, so they go, and
+       at most 3 date labels fit. Read when the chart is drawn; crossing the
+       breakpoint redraws it (below). Desktop options are untouched. */
+    var phoneMq = window.matchMedia ? window.matchMedia('(max-width: 640px)') : null;
 
     function fmtIsk(v) {
         if (v == null) return '—';
@@ -106,7 +113,13 @@
         document.getElementById('mk-latest-high').textContent = fmtIsk(last(data.highest));
         document.getElementById('mk-latest-low').textContent = fmtIsk(last(data.lowest));
         document.getElementById('mk-latest-vol').textContent = fmtNum(last(data.volume));
+        drawChart(data);
+    }
 
+    /* The chart alone, so a breakpoint redraw (below) leaves the stat
+       cards and any error message as they are. */
+    function drawChart(data) {
+        lastData = data;
         var cfg = {
             type: 'bar',
             data: {
@@ -145,6 +158,16 @@
                 }
             }
         };
+        if (phoneMq && phoneMq.matches) {
+            cfg.data.datasets = cfg.data.datasets.filter(function (d) { return d.yAxisID !== 'y1'; });
+            delete cfg.options.scales.y1;
+            cfg.options.scales.x.ticks.maxTicksLimit = 3;
+            /* The 'bar' type's defaults start y at zero, which would squash
+               the price band into the top of a phone's plot; fit the data,
+               with 5% of its range as headroom above and below. */
+            cfg.options.scales.y.beginAtZero = false;
+            cfg.options.scales.y.grace = '5%';
+        }
         if (chart) { chart.destroy(); }
         chart = new Chart(document.getElementById('mk-chart'), cfg);
     }
@@ -179,6 +202,12 @@
         });
         load();
     });
+
+    if (phoneMq) {
+        var onBreakpoint = function () { if (chart && lastData) drawChart(lastData); };
+        if (phoneMq.addEventListener) phoneMq.addEventListener('change', onBreakpoint);
+        else if (phoneMq.addListener) phoneMq.addListener(onBreakpoint);
+    }
 
     load();
 })();

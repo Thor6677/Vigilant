@@ -76,9 +76,9 @@
     <div style="margin-bottom:0.75rem;">
         <div style="font-size:10px;color:var(--muted);margin-bottom:0.3rem;">Recipe inputs per cycle</div>
         {% for inp in inputs %}
-        <div style="display:flex;justify-content:space-between;padding:0.25rem 0;font-size:11px;border-bottom:1px dashed var(--border);">
+        <div class="pi-node-recipe" style="display:flex;justify-content:space-between;padding:0.25rem 0;font-size:11px;border-bottom:1px dashed var(--border);">
             <span class="b-text">
-                <a href="#" data-click="piLoadNode" data-type-id="{{ inp.type_id }}" style="color:inherit;text-decoration:none;border-bottom:1px dotted var(--muted);">
+                <a href="#" data-click="piLoadNode" data-type-id="{{ inp.type_id }}" class="pi-node-input m-tap" style="color:inherit;text-decoration:none;border-bottom:1px dotted var(--muted);">
                     {{ inp.name }}
                 </a>
             </span>
@@ -94,7 +94,7 @@
         <div style="font-size:10px;color:var(--muted);margin-bottom:0.3rem;">Used to produce</div>
         <div style="display:flex;gap:0.3rem;flex-wrap:wrap;">
             {% for u in uses %}
-            <a href="#" data-click="piLoadNode" data-type-id="{{ u.type_id }}"
+            <a href="#" data-click="piLoadNode" data-type-id="{{ u.type_id }}" class="m-tap"
                style="font-size:11px;padding:0.2rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);text-decoration:none;">
                 {{ u.name }}
             </a>

@@ -354,34 +354,35 @@ def _raw_css() -> str:
         return fh.read()
 
 
-def test_r2_sections_are_seeded_in_order_before_the_final_m_hide():
-    """Each section's header and end marker appear once, in T1…T6, P order.
-    Between them sits exactly one phone @media block, first; a desktop rule,
-    if a task truly needs one, goes after that block's `}` and before the
-    end marker. Braces balance inside each section, and every section comes
-    before the final m-hide block.
+# Any width cap, however it's spelled: `(max-width:640px)`, `(max-width: 480px)`,
+# `screen and (max-width: 640px)`, range syntax `(width <= 640px)`.
+_NARROW = re.compile(r"max-width|\bwidth\s*<|>=?\s*width\b", re.I)
 
-    Nothing may follow the final m-hide block: only whitespace and comments.
-    A rule after it, phone-scoped or not (a bare rule, `(max-width:640px)`
-    without the space, `(max-width: 480px)`, `! important`), could undo
-    the tie-break that test_m_hide_is_last_phone_utility can't see."""
-    raw = _raw_css()
+
+def _assert_sections(raw, release, sections):
+    """`release`'s section headers and end markers each appear once, in
+    `sections` order, without overlapping. Between each header and its end
+    marker sits exactly one width-capped @media block, however it's spelled
+    (`max-width`, range syntax): the phone block, first, closed by
+    phone_block's brace matching. Nested @supports, `(hover: …)` or a
+    `(min-width: …)` desktop wrapper are fine. A desktop rule, if a task
+    truly needs one, goes after that block's `}` and before the end marker.
+    Braces balance inside each section. Returns the offsets of the first
+    header and the last end marker."""
     marks = []
-    for task, page in _R2_SECTIONS:
-        head, end = f"/* ── R2 {task} · {page} ── */", f"/* ── end R2 {task} ── */"
+    for task, page in sections:
+        head, end = f"/* ── {release} {task} · {page} ── */", f"/* ── end {release} {task} ── */"
         assert raw.count(head) == 1, head
         assert raw.count(end) == 1, end
-        marks.append((raw.index(head), raw.index(end), head, end))
-    flat = [p for start, stop, _, _ in marks for p in (start, stop)]
-    assert flat == sorted(flat), "R2 sections are out of order or overlap"
-    assert raw.count(_M_HIDE_FINAL) == 1
-    assert flat[-1] < raw.index(_M_HIDE_FINAL), "R2 sections must come before the final m-hide block"
+        marks.append((raw.index(head), raw.index(end), head))
+    flat = [p for start, stop, _ in marks for p in (start, stop)]
+    assert flat == sorted(flat), f"{release} sections are out of order or overlap"
 
-    for (task, _), mark in zip(_R2_SECTIONS, marks):
-        head = mark[2]
-        body = css_section(task, raw)
-        preludes = re.findall(r"@media([^{]*)\{", body)
-        assert [p for p in preludes if PHONE in p] == [f" ({PHONE}) "], head
+    for (task, _), (_, _, head) in zip(sections, marks):
+        body = css_section(task, raw, release=release)
+        preludes = re.findall(r"@media([^{]*)\{", body, flags=re.I)
+        narrow = [p for p in preludes if _NARROW.search(p)]
+        assert narrow == [f" ({PHONE}) "], f"{head}: one phone @media block per section, found {narrow}"
         try:
             phone_block(body)   # opens with its phone block, and that block closes
         except AssertionError as e:
@@ -391,10 +392,26 @@ def test_r2_sections_are_seeded_in_order_before_the_final_m_hide():
             depth += (ch == "{") - (ch == "}")
             assert depth >= 0, f"{head}: a `}}` closes something outside the section"
         assert depth == 0, f"{head}: unbalanced braces"
+    return flat[0], flat[-1]
+
+
+def test_r2_sections_are_seeded_in_order_before_the_final_m_hide():
+    """Each section's header and end marker appear once, in T1…T6, P order,
+    each bracketing exactly one phone @media block (_assert_sections), and
+    every section comes before the final m-hide block.
+
+    Nothing may follow the final m-hide block: only whitespace and comments.
+    A rule after it, phone-scoped or not (a bare rule, `(max-width:640px)`
+    without the space, `(max-width: 480px)`, `! important`), could undo
+    the tie-break that test_m_hide_is_last_phone_utility can't see."""
+    raw = _raw_css()
+    _, last = _assert_sections(raw, "R2", _R2_SECTIONS)
+    assert raw.count(_M_HIDE_FINAL) == 1
+    assert last < raw.index(_M_HIDE_FINAL), "R2 sections must come before the final m-hide block"
 
     final = re.sub(r"/\*.*?\*/", "", raw[raw.index(_M_HIDE_FINAL):], flags=re.S)
     assert re.fullmatch(rf"\s*@media \({PHONE}\) \{{\s*\.m-hide, \.m-tabs-desktop \{{ display: none !important; \}}\s*\}}\s*",
-                        final), "the final m-hide block must follow the R2 sections and end the file"
+                        final), "the final m-hide block must follow the page sections and end the file"
 
 
 def test_css_section_returns_a_tasks_section_without_comments():
@@ -411,3 +428,131 @@ def test_css_section_returns_a_tasks_section_without_comments():
 def test_css_section_rejects_an_unknown_task(task):
     with pytest.raises(AssertionError, match=f"R2 {task} section header"):
         css_section(task)
+
+
+# ── R3 foundation ─────────────────────────────────────────────────────
+# R3's seven page tasks (Industry) work the same way as R2's: each edits only
+# its own seeded section, so the parallel cherry-picks stay conflict-free.
+# The sections sit after R2 P and before the final m-hide block, which still
+# ends the file (the R2 test above pins that tail).
+
+_R3_SECTIONS = (("T1", "landing/manufacturing"), ("T2", "build finder"),
+                ("T3", "active jobs"), ("T4", "compression/hauling"),
+                ("T5", "mining ledger"), ("T6", "planetary tools"),
+                ("T7", "stockpiles/farm/appraisal"))
+_R2_LAST_END = "/* ── end R2 P ── */"
+
+
+def _assert_blank_line_gaps(raw, prev_end, release, sections):
+    """Nothing lives between `release`'s sections: every rule belongs to a
+    task. Only a blank line sits between `prev_end` (the previous release's
+    last end marker) and the first header, between each end marker and the
+    next header, and after the last end marker up to the next `/* ── `
+    header, whatever follows (the next release's, or the final m-hide)."""
+    bounds = [raw.index(prev_end) + len(prev_end)]
+    for task, page in sections:
+        end = f"/* ── end {release} {task} ── */"
+        bounds += [raw.index(f"/* ── {release} {task} · {page} ── */"), raw.index(end) + len(end)]
+    bounds.append(raw.index("/* ── ", bounds[-1]))
+    gaps = [raw[a:b] for a, b in zip(bounds[::2], bounds[1::2])]
+    assert gaps == ["\n\n"] * len(gaps), f"only a blank line between {release} sections: {gaps}"
+
+
+def test_r3_sections_are_seeded_in_order_after_r2_and_before_the_final_m_hide():
+    """Each R3 header and end marker appears once, in T1…T7 order, each
+    bracketing exactly one phone @media block (_assert_sections, as for R2),
+    all after R2's last section and before the final m-hide block."""
+    raw = _raw_css()
+    first, last = _assert_sections(raw, "R3", _R3_SECTIONS)
+    assert raw.count(_R2_LAST_END) == 1
+    assert raw.index(_R2_LAST_END) < first, "R3 sections must come after the end of R2 P"
+    assert raw.count(_M_HIDE_FINAL) == 1
+    assert last < raw.index(_M_HIDE_FINAL), "R3 sections must come before the final m-hide block"
+    _assert_blank_line_gaps(raw, _R2_LAST_END, "R3", _R3_SECTIONS)
+
+
+def test_css_section_reads_an_r3_section():
+    for task, _ in _R3_SECTIONS:
+        body = css_section(task, release="R3")
+        assert body.lstrip().startswith(f"@media ({PHONE}) {{"), task
+        assert "/*" not in body, task
+    # The release keeps same-named tasks apart.
+    sample = ("/* ── R2 T1 · two ── */\n@media (max-width: 640px) {\n    .two { color: red; }\n}\n"
+              "/* ── end R2 T1 ── */\n\n"
+              "/* ── R3 T1 · three ── */\n@media (max-width: 640px) {\n    .three { color: blue; }\n}\n"
+              "/* ── end R3 T1 ── */\n")
+    assert css_section("T1", sample) == "\n@media (max-width: 640px) {\n    .two { color: red; }\n}\n"
+    assert css_section("T1", sample, release="R3") == (
+        "\n@media (max-width: 640px) {\n    .three { color: blue; }\n}\n")
+
+
+@pytest.mark.parametrize("release", ["R9", "r3", "R"])
+def test_css_section_rejects_an_unknown_release(release):
+    with pytest.raises(AssertionError, match=re.escape(f"expected one {release} T1 section header")):
+        css_section("T1", release=release)
+
+
+@pytest.mark.parametrize("task", ["T8", "T0", "t1"])
+def test_css_section_names_the_release_for_an_unknown_r3_task(task):
+    with pytest.raises(AssertionError, match=re.escape(f"expected one R3 {task} section header")):
+        css_section(task, release="R3")
+
+
+# ── R4–R6 foundation ──────────────────────────────────────────────────
+# The three remaining sweeps' sections were seeded together, so each sweep's
+# page tasks can start at once in parallel worktrees. R4 follows R3, R5
+# follows R4 and R6 follows R5, all before the final m-hide block.
+
+_R4_SECTIONS = (("T1", "market"), ("T2", "lp store"), ("T3", "pnl/net worth"),
+                ("T4", "corp inventory/contracts"))
+_R5_SECTIONS = (("T1", "kills"), ("T2", "dscan/local"), ("T3", "gatecheck/watch/trending"),
+                ("T4", "wormholes"), ("T5", "maps/alliance"))
+_R6_SECTIONS = (("T1", "server activity"), ("T2", "structure timers"),
+                ("T3", "images/discord/age"), ("T4", "fitting tool"),
+                ("T5", "saved fits/compare"), ("T6", "admin"), ("T7", "account"))
+# Each release, its sections, and the previous release's last end marker.
+_LATER = (("R4", _R4_SECTIONS, "/* ── end R3 T7 ── */"),
+          ("R5", _R5_SECTIONS, "/* ── end R4 T4 ── */"),
+          ("R6", _R6_SECTIONS, "/* ── end R5 T5 ── */"))
+
+
+@pytest.mark.parametrize("release, sections, prev_end", _LATER, ids=[r for r, _, _ in _LATER])
+def test_later_sections_are_seeded_in_order_after_the_previous_release_and_before_the_final_m_hide(
+        release, sections, prev_end):
+    """As for R3: each header and end marker appears once, in order, each
+    bracketing exactly one phone @media block (_assert_sections), all after
+    the previous release's last end marker and before the final m-hide
+    block, with only a blank line between sections."""
+    raw = _raw_css()
+    first, last = _assert_sections(raw, release, sections)
+    assert raw.count(prev_end) == 1, prev_end
+    assert raw.index(prev_end) < first, f"{release} sections must come after {prev_end}"
+    assert raw.count(_M_HIDE_FINAL) == 1
+    assert last < raw.index(_M_HIDE_FINAL), f"{release} sections must come before the final m-hide block"
+    _assert_blank_line_gaps(raw, prev_end, release, sections)
+
+
+def test_css_section_reads_r4_to_r6_sections():
+    raw = _raw_css()
+    for release, sections, _ in _LATER:
+        for task, _ in sections:
+            body = css_section(task, raw, release=release)
+            assert body.lstrip().startswith(f"@media ({PHONE}) {{"), (release, task)
+            assert "/*" not in body, (release, task)
+    # The release keeps R4 T1, R5 T1 and R6 T1 apart. Their bodies are empty
+    # for now, so they'd compare equal: tell them apart by where their headers
+    # sit, and by a marker rule put after each header in a copy of the file.
+    heads = {r: f"/* ── {r} T1 · {sections[0][1]} ── */" for r, sections, _ in _LATER}
+    assert len({raw.index(h) for h in heads.values()}) == 3
+    marked = raw
+    for r, head in heads.items():
+        marked = marked.replace(head, f"{head}\n.mark-{r} {{ }}")
+    for r in heads:
+        body = css_section("T1", marked, release=r)
+        assert [o for o in heads if f".mark-{o} " in body] == [r], r
+
+
+@pytest.mark.parametrize("release, task", [("R4", "T5"), ("R5", "T6"), ("R6", "T8"), ("R4", "T0")])
+def test_css_section_names_the_release_for_an_unknown_later_task(release, task):
+    with pytest.raises(AssertionError, match=re.escape(f"expected one {release} {task} section header")):
+        css_section(task, release=release)

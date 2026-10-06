@@ -3,7 +3,8 @@
     <div class="b-panel">
         <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
             <span class="b-label">Shopping List</span>
-            <div style="display:flex;gap:6px;align-items:center;">
+            {# Phones: the buttons wrap (mfg-shop-actions, site.css R3 T1). #}
+            <div class="mfg-shop-actions" style="display:flex;gap:6px;align-items:center;">
                 <span class="b-muted-sm">{{ item_count }} item{{ 's' if item_count != 1 else '' }}</span>
                 {# All three handlers run from page-level scripts now — see the
                    note at the foot of this file. #}
@@ -28,32 +29,35 @@
             </div>
         </div>
 
-        {# Material list #}
+        {# Material list. Phones (D4 A): key 1 = name, key 2 = quantity; Name,
+           Volume and Cost when opened. Send to Hauling reads the data-haul-*
+           attributes off these rows (#shopping-items is its scope). #}
         <div id="shopping-items">
         {% for item in items %}
-        <div class="b-table-row"
+        <div class="b-table-row m-row mfg-shop"
              data-haul-name="{{ item.name }}" data-haul-qty="{{ item.qty }}"
-             data-haul-volume="{{ item.volume | default(0) }}">
-            <span style="flex:3;font-size:11px;color:var(--text);">{{ item.name }}</span>
-            <span style="flex:1;text-align:right;font-size:11px;color:var(--text);font-weight:600;">{{ "{:,}".format(item.qty) }}</span>
-            <span style="flex:1;text-align:right;font-size:10px;color:var(--muted);">{{ "{:,.1f}".format(item.total_volume | default(0)) }} m³</span>
+             data-haul-volume="{{ item.volume | default(0) }}" data-click="toggleMRow">
+            <span data-m="key" style="flex:3;font-size:11px;color:var(--text);">{{ item.name }}</span>
+            <span class="m-only" data-m-label="Name">{{ item.name }}</span>
+            <span data-m="key" style="flex:1;text-align:right;font-size:11px;color:var(--text);font-weight:600;">{{ "{:,}".format(item.qty) }}</span>
+            <span data-m-label="Volume" style="flex:1;text-align:right;font-size:10px;color:var(--muted);">{{ "{:,.1f}".format(item.total_volume | default(0)) }} m³</span>
             {% set p = price_map.get(item.name, 0) %}
             {% if p > 0 %}
-            <span style="flex:1;text-align:right;font-size:10px;color:var(--accent);">
+            <span data-m-label="Cost" style="flex:1;text-align:right;font-size:10px;color:var(--accent);">
                 {% set cost = p * item.qty %}
                 {% if cost >= 1000000000 %}{{ "%.1f"|format(cost / 1000000000) }}B
                 {% elif cost >= 1000000 %}{{ "%.1f"|format(cost / 1000000) }}M
                 {% else %}{{ "{:,.0f}".format(cost) }}{% endif %}
             </span>
             {% else %}
-            <span style="flex:1;text-align:right;font-size:10px;color:var(--muted);">—</span>
+            <span data-m-label="Cost" style="flex:1;text-align:right;font-size:10px;color:var(--muted);">—</span>
             {% endif %}
         </div>
         {% endfor %}
         </div>
 
-        {# Total #}
-        <div class="b-table-row" style="border-top:2px solid var(--border);">
+        {# Total. Phones: the label takes the spare width (mfg-total). #}
+        <div class="b-table-row mfg-total" style="border-top:2px solid var(--border);">
             <span style="flex:3;font-size:11px;font-weight:600;color:var(--text);">Estimated Total</span>
             <span style="flex:1;text-align:right;font-size:11px;font-weight:600;color:var(--muted);">{{ "{:,.1f}".format(total_volume | default(0)) }} m³</span>
             <span style="flex:1;text-align:right;font-size:12px;font-weight:600;color:var(--accent);">

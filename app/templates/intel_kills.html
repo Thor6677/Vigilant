@@ -72,7 +72,7 @@
 <div class="b-section">
   <div class="b-section-head kf-head">
     <h1 class="kf-title">KILL FEED</h1>
-    <a href="/intel/kills/search" style="font-size:10px;color:var(--accent);text-decoration:none;letter-spacing:0.06em;">advanced search ↗</a>
+    <a href="/intel/kills/search" class="m-tap" style="font-size:10px;color:var(--accent);text-decoration:none;letter-spacing:0.06em;">advanced search ↗</a>
     <span class="kf-live" id="kf-status">LIVE · 1h · — kills</span>
   </div>
 
@@ -81,7 +81,10 @@
        hx-trigger="load"
        hx-swap="innerHTML"></div>
 
-  <div class="kf-filters">
+  {# Phones fold the filter rows behind one toggle (the fold is phone CSS
+     only; the toggle is m-only, so desktop keeps every row visible). #}
+  <div class="kf-filters kf-fold">
+    <button type="button" class="m-only kf-fold-toggle" data-click="toggleExpanded" data-toggle-target=".kf-fold" aria-expanded="false"><span class="kf-fold-label">Filters</span><span class="kf-fold-count" id="kf-filter-count"></span></button>
     <div class="kf-filter-row">
       <span class="kf-glabel">Space</span>
       <span class="kf-chip" data-space="hs">HS</span>
@@ -124,9 +127,12 @@
 
   <p id="kf-loading" style="color:var(--muted);font-size:11px;">Loading…</p>
   <button type="button" id="kf-new-pill" style="display:none;">↑ <span id="kf-new-pill-count">0</span> new</button>
+  {# kf-reload: the page's filter change and Back to live reload through it.
+     htmx 1.9 runs a `load` trigger once and never listens for a `load`
+     event, so htmx.trigger(feed, 'load') did nothing (ISS-122). #}
   <div id="kf-feed"
        hx-get="/intel/kills/feed"
-       hx-trigger="load, every 15s"
+       hx-trigger="load, every 15s, kf-reload"
        hx-swap="afterbegin"></div>
   <div id="kf-show-more-wrap" style="display:none;text-align:center;padding:8px;">
     <button class="kf-chip" id="kf-show-more-btn" type="button">Show more (<span id="kf-show-more-count">0</span> hidden) &darr;</button>
@@ -191,7 +197,28 @@
       });
       var whRow = document.getElementById('kf-wh-subclasses');
       if (whRow) whRow.style.display = (state.space.indexOf('wh') !== -1) ? 'flex' : 'none';
+      updateFilterCount();
     }
+
+    // Phones: the "Filters" toggle shows how many filter values are on
+    // (each chip and each picked ship / attacker / victim counts once).
+    function updateFilterCount() {
+      var n = state.space.length + state.wh_class.length + (state.shattered ? 1 : 0)
+        + state.ship_ids.length + state.attacker_ids.length + state.victim_ids.length;
+      var el = document.getElementById('kf-filter-count');
+      if (el) el.textContent = n ? n + ' active' : '';
+    }
+
+    // The toggle's aria-expanded follows the fold's is-expanded class
+    // (toggleExpanded in actions.js flips the class).
+    (function() {
+      var fold = document.querySelector('.kf-fold');
+      var btn = fold && fold.querySelector('.kf-fold-toggle');
+      if (!btn || !window.MutationObserver) return;
+      new MutationObserver(function() {
+        btn.setAttribute('aria-expanded', fold.classList.contains('is-expanded') ? 'true' : 'false');
+      }).observe(fold, { attributes: true, attributeFilter: ['class'] });
+    })();
 
     function entitySplit(arr) {
       var by = {character: [], corporation: [], alliance: []};
@@ -261,19 +288,20 @@
 
     function persist() {
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+      updateFilterCount();
       var newQS = buildQS();
       history.replaceState(null, '', '/intel/kills' + newQS);
       var feed = document.getElementById('kf-feed');
       if (feed) {
         // Filter params reach the request via htmx:configRequest below
         // (see comment there) — mutating hx-get here is a no-op for the
-        // polling timer and for htmx.trigger(elt, 'load').
+        // polling timer and for the kf-reload trigger.
         feed.innerHTML = '<p id="kf-loading" style="color:var(--muted);font-size:11px;">Loading…</p>';
         // Reset the cursor: a fresh filter wants the full top-100, not just
         // kills newer than what the previous filter had seen.
         kfSinceCursor = null;
         KF_VISIBLE_CAP = 100;
-        if (window.htmx) htmx.trigger(feed, 'load');
+        if (window.htmx) htmx.trigger(feed, 'kf-reload');
       }
     }
 
@@ -416,7 +444,7 @@
         // just whatever has come in since we entered older-mode.
         kfSinceCursor = null;
         KF_VISIBLE_CAP = 100;
-        if (window.htmx) htmx.trigger(f, 'load');
+        if (window.htmx) htmx.trigger(f, 'kf-reload');
       }
     }
 
@@ -512,6 +540,9 @@
               row.insertAdjacentHTML('afterend', html);
               var panel = row.nextElementSibling;
               if (panel && panel.classList && panel.classList.contains('kf-detail')) {
+                // The panel arrives outside htmx, so actions.js's afterSettle
+                // never gives its "Show all N" an aria-expanded; do it here.
+                if (window.initToggleExpandedAria) window.initToggleExpandedAria(panel);
                 // Force reflow so the transition fires from the collapsed state.
                 void panel.offsetHeight;
                 requestAnimationFrame(function() { panel.classList.add('shown'); });
@@ -526,7 +557,7 @@
     // ── Cursor + filter params injected via configRequest ──────────────
     // htmx 1.9.x captures the hx-get path in a closure at processVerbs time
     // (DOMContentLoaded), so later setAttribute('hx-get', ...) calls do NOT
-    // propagate to the polling timer or to htmx.trigger(elt, 'load'). The
+    // propagate to the polling timer or to the kf-reload trigger. The
     // `since` cursor avoided that by going through configRequest; filter
     // params (space/wh_class/shattered/ship_id/attacker_*/victim_*) need the
     // same treatment, otherwise chip toggles never reach the server and the
@@ -779,10 +810,21 @@
             .then(function(html) {
               if (pendingSlotClear) { clearTimeout(pendingSlotClear); pendingSlotClear = null; }
               slot.innerHTML = html;
+              // As in the feed: the panel's "Show all N" needs its aria-expanded.
+              if (window.initToggleExpandedAria) window.initToggleExpandedAria(slot);
               var panel = slot.querySelector('.kf-detail');
               if (panel) {
                 void panel.offsetHeight;
-                requestAnimationFrame(function() { panel.classList.add('shown'); });
+                requestAnimationFrame(function() {
+                  panel.classList.add('shown');
+                  // Phones: the slot sits below both card grids, far under
+                  // the tapped card, so bring the detail up (site.css keeps
+                  // it clear of the sticky nav). Desktop never scrolls.
+                  if (window.matchMedia && window.matchMedia('(max-width: 640px)').matches) {
+                    slot.scrollIntoView({ block: 'start',
+                      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+                  }
+                });
               }
             })
             .catch(function() { card.classList.remove('open'); });

@@ -113,6 +113,12 @@
 </div>
 
 {# ── Recent request log ────────────────────────────────────────────────────── #}
+{# Phones (mobile R6, D15 A): the three logs below are two-line rows, laid
+   out by site.css's R6 T6 section from these hooks alone: adm-2l on the row;
+   adm-2l-a (code/badge), adm-2l-main (path) and adm-2l-time on line 1;
+   adm-2l-sub cells muted on line 2. No m-row and no tap-to-open: this
+   section is re-rendered every 5s, which would shut any opened row. m-head
+   hides the column headers. #}
 <div class="b-panel" style="margin-bottom:1.5rem;">
     <div class="b-panel-head">
         <span class="b-label">Recent Requests</span>
@@ -126,19 +132,19 @@
     </div>
     {% if request_log %}
     <div style="max-height:250px;overflow-y:auto;">
-        <div class="b-table-row" style="border-bottom:2px solid var(--border);position:sticky;top:0;background:var(--surface);z-index:1;">
+        <div class="b-table-row m-head" style="border-bottom:2px solid var(--border);position:sticky;top:0;background:var(--surface);z-index:1;">
             <span style="flex:0 0 140px;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Timestamp (UTC)</span>
             <span style="flex:0 0 40px;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Code</span>
             <span style="flex:0 0 80px;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Group</span>
             <span style="flex:1;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Path</span>
         </div>
         {% for e in request_log %}
-        <div class="b-table-row" style="padding:0.2rem 0.75rem;min-height:22px;">
-            <span style="flex:0 0 140px;font-size:10px;color:var(--muted);font-family:monospace;">{{ e.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</span>
-            <span style="flex:0 0 40px;font-size:10px;{% if e.status_code < 300 %}color:var(--success);{% elif e.status_code < 400 %}color:var(--accent);{% elif e.status_code in (429, 420) %}color:var(--danger);font-weight:600;{% else %}color:var(--warn);{% endif %}"
+        <div class="b-table-row adm-2l" style="padding:0.2rem 0.75rem;min-height:22px;">
+            <span class="adm-2l-time" style="flex:0 0 140px;font-size:10px;color:var(--muted);font-family:monospace;">{{ e.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</span>
+            <span class="adm-2l-a" style="flex:0 0 40px;font-size:10px;{% if e.status_code < 300 %}color:var(--success);{% elif e.status_code < 400 %}color:var(--accent);{% elif e.status_code in (429, 420) %}color:var(--danger);font-weight:600;{% else %}color:var(--warn);{% endif %}"
                   title="{% if e.status_code == 200 %}OK — fresh data returned{% elif e.status_code == 304 %}Not Modified — data unchanged, served from ETag cache (no token cost){% elif e.status_code == 400 %}Bad Request — invalid parameters sent to ESI{% elif e.status_code == 401 %}Unauthorized — token expired, character needs re-auth{% elif e.status_code == 403 %}Forbidden — character lacks in-game role (e.g. Director) for this endpoint{% elif e.status_code == 404 %}Not Found — resource doesn't exist (ship destroyed, contract completed, etc.){% elif e.status_code == 420 %}Error Limited — too many errors, Fenris Creations temporarily blocked this app{% elif e.status_code == 429 %}Rate Limited — too many requests to this endpoint group, auto-retrying after delay{% elif e.status_code == 502 %}Bad Gateway — ESI server error, auto-retried{% elif e.status_code == 503 %}Service Unavailable — ESI is down or in maintenance{% elif e.status_code == 504 %}Gateway Timeout — ESI took too long to respond{% else %}HTTP {{ e.status_code }}{% endif %}">{{ e.status_code }}</span>
-            <span style="flex:0 0 80px;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ e.group or '—' }}</span>
-            <span style="flex:1;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ e.path }}">{{ e.path }}</span>
+            <span class="adm-2l-sub" style="flex:0 0 80px;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ e.group or '—' }}</span>
+            <span class="adm-2l-main" style="flex:1;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ e.path }}">{{ e.path }}</span>
         </div>
         {% endfor %}
     </div>
@@ -172,7 +178,7 @@
     </div>
     {% if recent_events %}
     <div style="max-height:250px;overflow-y:auto;">
-        <div class="b-table-row" style="border-bottom:2px solid var(--border);position:sticky;top:0;background:var(--surface);z-index:1;">
+        <div class="b-table-row m-head" style="border-bottom:2px solid var(--border);position:sticky;top:0;background:var(--surface);z-index:1;">
             <span style="flex:0 0 140px;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Timestamp (UTC)</span>
             <span style="flex:0 0 40px;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Type</span>
             <span style="flex:0 0 80px;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Group</span>
@@ -181,17 +187,17 @@
             <span style="flex:0 0 60px;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);text-align:right;">&nbsp;</span>
         </div>
         {% for ev in recent_events[:20] %}
-        <div class="b-table-row" style="padding:0.2rem 0.75rem;min-height:22px;">
-            <span style="flex:0 0 140px;font-size:10px;color:var(--muted);font-family:monospace;">{{ ev.occurred_at.strftime('%Y-%m-%d %H:%M:%S') if ev.occurred_at else '—' }}</span>
-            <span style="flex:0 0 40px;">
+        <div class="b-table-row adm-2l" style="padding:0.2rem 0.75rem;min-height:22px;">
+            <span class="adm-2l-time" style="flex:0 0 140px;font-size:10px;color:var(--muted);font-family:monospace;">{{ ev.occurred_at.strftime('%Y-%m-%d %H:%M:%S') if ev.occurred_at else '—' }}</span>
+            <span class="adm-2l-a" style="flex:0 0 40px;">
                 {% if ev.event_type == '429' %}<span class="b-badge is-danger" style="font-size:7px;" title="Rate Limited — too many requests to this endpoint group. The app automatically waits and retries.">429</span>
                 {% elif ev.event_type == '420' %}<span class="b-badge is-warn" style="font-size:7px;" title="Error Limited — too many failed requests (4xx errors). Fenris Creations temporarily blocks all requests. Fix: check for auth issues or missing roles.">420</span>
                 {% else %}<span class="b-badge" style="font-size:7px;color:var(--muted);" title="Warning — approaching rate limit threshold for this group.">warn</span>{% endif %}
             </span>
-            <span style="flex:0 0 80px;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ ev.group_name or '—' }}</span>
-            <span style="flex:1;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ ev.path }}">{{ ev.path }}</span>
-            <span style="flex:0 0 50px;font-size:10px;color:var(--muted);text-align:right;" title="Seconds ESI told us to wait before retrying this request">{% if ev.retry_after %}{{ ev.retry_after }}s{% else %}—{% endif %}</span>
-            <span style="flex:0 0 60px;text-align:right;">
+            <span class="adm-2l-sub" style="flex:0 0 80px;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ ev.group_name or '—' }}</span>
+            <span class="adm-2l-main" style="flex:1;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ ev.path }}">{{ ev.path }}</span>
+            <span class="adm-2l-sub adm-retry" style="flex:0 0 50px;font-size:10px;color:var(--muted);text-align:right;" title="Seconds ESI told us to wait before retrying this request">{% if ev.retry_after %}{{ ev.retry_after }}s{% else %}—{% endif %}</span>
+            <span class="adm-2l-sub adm-2l-act" style="flex:0 0 60px;text-align:right;">
                 <button type="button"
                         hx-post="/admin/esi/events/{{ ev.id }}/dismiss"
                         hx-target="#admin-content" hx-swap="innerHTML"
@@ -223,7 +229,7 @@
         </div>
     </summary>
     <div style="max-height:250px;overflow-y:auto;">
-        <div class="b-table-row" style="border-bottom:2px solid var(--border);position:sticky;top:0;background:var(--surface);z-index:1;">
+        <div class="b-table-row m-head" style="border-bottom:2px solid var(--border);position:sticky;top:0;background:var(--surface);z-index:1;">
             <span style="flex:0 0 140px;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Occurred (UTC)</span>
             <span style="flex:0 0 140px;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Archived (UTC)</span>
             <span style="flex:0 0 40px;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Type</span>
@@ -231,16 +237,16 @@
             <span style="flex:1;font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Path</span>
         </div>
         {% for ev in archived_events[:50] %}
-        <div class="b-table-row" style="padding:0.2rem 0.75rem;min-height:22px;opacity:0.75;">
-            <span style="flex:0 0 140px;font-size:10px;color:var(--muted);font-family:monospace;">{{ ev.occurred_at.strftime('%Y-%m-%d %H:%M:%S') if ev.occurred_at else '—' }}</span>
-            <span style="flex:0 0 140px;font-size:10px;color:var(--muted);font-family:monospace;">{{ ev.archived_at.strftime('%Y-%m-%d %H:%M:%S') if ev.archived_at else '—' }}</span>
-            <span style="flex:0 0 40px;">
+        <div class="b-table-row adm-2l" style="padding:0.2rem 0.75rem;min-height:22px;opacity:0.75;">
+            <span class="adm-2l-time" style="flex:0 0 140px;font-size:10px;color:var(--muted);font-family:monospace;">{{ ev.occurred_at.strftime('%Y-%m-%d %H:%M:%S') if ev.occurred_at else '—' }}</span>
+            <span class="adm-2l-sub adm-archived" style="flex:0 0 140px;font-size:10px;color:var(--muted);font-family:monospace;">{{ ev.archived_at.strftime('%Y-%m-%d %H:%M:%S') if ev.archived_at else '—' }}</span>
+            <span class="adm-2l-a" style="flex:0 0 40px;">
                 {% if ev.event_type == '429' %}<span class="b-badge is-danger" style="font-size:7px;">429</span>
                 {% elif ev.event_type == '420' %}<span class="b-badge is-warn" style="font-size:7px;">420</span>
                 {% else %}<span class="b-badge" style="font-size:7px;color:var(--muted);">warn</span>{% endif %}
             </span>
-            <span style="flex:0 0 80px;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ ev.group_name or '—' }}</span>
-            <span style="flex:1;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ ev.path }}">{{ ev.path }}</span>
+            <span class="adm-2l-sub" style="flex:0 0 80px;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ ev.group_name or '—' }}</span>
+            <span class="adm-2l-main" style="flex:1;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="{{ ev.path }}">{{ ev.path }}</span>
         </div>
         {% endfor %}
     </div>

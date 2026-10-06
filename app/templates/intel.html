@@ -43,8 +43,8 @@
         <div class="b-panel-head"><span class="b-label">History</span></div>
         <div style="padding:0.5rem 0.75rem;">
         {% if history %}
-            <table style="width:100%;border-collapse:collapse;font-size:11px;">
-                <thead>
+            <table class="intel-history m-table" style="width:100%;border-collapse:collapse;font-size:11px;">
+                <thead class="m-head">
                     <tr style="border-bottom:1px solid var(--border);color:var(--muted);font-size:9px;letter-spacing:0.1em;text-transform:uppercase;">
                         <th style="padding:0.35rem 0.5rem;text-align:left;">Type</th>
                         <th style="padding:0.35rem 0.5rem;text-align:left;">Label</th>
@@ -54,19 +54,19 @@
                 </thead>
                 <tbody>
                 {% for scan in history %}
-                    <tr class="b-hover-transparent" style="border-bottom:1px solid var(--border);cursor:pointer;"
+                    <tr class="b-hover-transparent m-row m-row--link" style="border-bottom:1px solid var(--border);cursor:pointer;"
                         data-click="goTo" data-href="/intel/{{ scan.id }}">
-                        <td style="padding:0.4rem 0.5rem;">
+                        <td data-m="lead" style="padding:0.4rem 0.5rem;">
                             {% if scan.scan_type == 'dscan' %}
                                 <span style="color:var(--accent);">D-Scan</span>
                             {% else %}
                                 <span style="color:#a78bfa;">Local</span>
                             {% endif %}
                         </td>
-                        <td style="padding:0.4rem 0.5rem;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                        <td data-m="key" style="padding:0.4rem 0.5rem;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
                             {{ scan.label or '—' }}
                         </td>
-                        <td style="padding:0.4rem 0.5rem;color:var(--muted);">{{ scan.detail }}</td>
+                        <td data-m="key" style="padding:0.4rem 0.5rem;color:var(--muted);">{{ scan.detail }}</td>
                         <td style="padding:0.4rem 0.5rem;text-align:right;color:var(--muted);">{{ scan.expires_in }}</td>
                     </tr>
                 {% endfor %}

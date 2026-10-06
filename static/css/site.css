@@ -680,6 +680,11 @@
         min-width: 40px !important; min-height: 40px !important; font-size: 12px !important;
         display: inline-flex !important; align-items: center; justify-content: center;
     }
+    /* A button or .b-btn already has the 44px phone floor (the touch rule
+       near the top of this file); m-tap's 40px must not shrink it. Two-part
+       selectors outrank .m-tap whatever the order, so this needs no other
+       place in the file. Width stays m-tap's 40px minimum. */
+    button.m-tap, .b-btn.m-tap { min-height: 44px !important; }
     .m-unclamp { max-height: none !important; overflow: visible !important; }
     .m-clamp-wrap:not(.is-expanded) .m-clamp > :nth-child(n+11) { display: none !important; }
     .m-clamp-wrap.is-expanded .m-showall { display: none !important; }
@@ -702,12 +707,19 @@
     table.m-table, table.m-table > tbody { display: block; width: 100%; }
     table.m-table > thead { display: none !important; }
     table.m-table > tbody > tr:not(.m-row), table.m-table > tbody > tr:not(.m-row) > td { display: block; }
+    /* min-height: every row is a tap target, so none is shorter than 40px
+       (mobile design §4.6), border included (border-box). A one-line row
+       measures 37–39px from its padding and line height alone. The single
+       row track stretches to fill the extra height and align-items centres
+       the line in it, so the line stays in the middle. Not !important: a
+       page section that wants a taller floor (44px) still sets its own. */
     .m-row {
         display: grid !important;
         grid-template-columns: auto minmax(0, 1fr) auto 14px !important;
         column-gap: 0 !important; row-gap: 0.3rem !important;
         align-items: center !important;
         padding: 0.6rem 0.75rem !important;
+        min-height: 40px;
         cursor: pointer;
     }
     .m-row.m-row--link { cursor: pointer; }
@@ -804,6 +816,15 @@
     #dash-table tr.m-row a.dash-tlink { display: inline-flex; align-items: center; justify-content: center; }
 }
 
+/* Dashboard Compact view rows (mobile design §5.3). Not m-rows: each is a
+   link, <a class="dash-compact-row">, styled in dashboard.html, whose 34px
+   min-height left a one-line row at 37.8px on phones. 40px, as for m-rows.
+   The `a` outranks the template's own .dash-compact-row rule, which loads
+   after this file; its grid already centres the cells (align-items). */
+@media (max-width: 640px) {
+    a.dash-compact-row { min-height: 40px; }
+}
+
 /* Dashboard section toolbar buttons (▾ / ✕). Their desktop size used to be
    inline; it lives here now so the phone tap-target rule (m-tap) doesn't
    have to fight it. Two classes, to outrank .b-btn's own padding and size. */
@@ -876,6 +897,44 @@
     .m-row > [data-m="key"] > .journal-type { max-width: 100% !important; }
 }
 
+/* ═══ v1.9.0 polish A — shared phone-layer fixes ═════════════════════════
+   Central rules every page gets; page sections (R2 T1 onwards) still win
+   where they set their own. All phone-only. */
+@media (max-width: 640px) {
+    /* A .b-btn that isn't a <button> (<a class="b-btn">, mostly) is a block
+       or inline-block box, so the 44px phone floor leaves its label at the
+       top. align-content centres the label without touching the box's
+       display: a block one stays full width, an inline one keeps its width,
+       and a label made of text plus a span stays one line of text (flex
+       would split it into items). Buttons centre their content natively,
+       and boxes a page already made flex are unaffected (one flex line).
+       Chrome 123 / Safari 17.4 and later; older engines keep the label at
+       the top, as before. */
+    .b-btn:not(button) { align-content: center; }
+
+    /* Entity-link chips (partials/_entity_links.html: the kill detail panel,
+       the wormhole system page) were 20px tall on phones. 40px targets, 8px
+       apart (mobile design §4.6). inline-flex makes an .is-ext chip's ↗
+       (::after) a flex item, which drops the space in its content, so the
+       gap stands in for it, as R2 T3's .ent-zkb does. */
+    .el-chips { gap: 8px; }
+    .el-chip {
+        display: inline-flex; align-items: center; justify-content: center; gap: 0.3em;
+        min-height: 40px; min-width: 40px; padding: 0 10px; font-size: 12px;
+    }
+
+    /* .b-switch and .b-check are drawn (appearance: none) at 30x16 and
+       14x14. The 44px min-height every phone input gets stretched them: a
+       30x44 switch with its knob at the top, a 14x44 box whose checked fill
+       barely showed. They keep their drawn size, and the label around them,
+       which is the tap target, keeps the 44px instead. Native checkboxes and
+       radios are left alone: Chrome draws them at their own size in the
+       middle of the 44px box, and that box is all that makes several labels
+       (notification settings, the dashboard column picker) 44px tall. */
+    input.b-switch, input.b-check { min-height: 0; }
+    label:has(> input.b-switch), label:has(> input.b-check) { min-height: 44px; }
+}
+
 /* ── R2 T1 · character overview ── */
 @media (max-width: 640px) {
     /* Can Fly → Can fly now (D1): link rows with no data-click. The fit link
@@ -896,9 +955,10 @@
     .ov-corp.m-row > [data-m="lead"] { min-width: 18px !important; min-height: 18px; }
 
     /* 40px tap targets: the Can Fly, Recently Completed and Corporation
-       History toggles. line-height centres the text and keeps the summary a
-       list item, so its native disclosure marker stays. */
-    summary.ov-toggle { min-height: 40px; line-height: 40px; }
+       History toggles, at 11px over their inline 9-10px. line-height
+       centres the text and keeps the summary a list item, so its native
+       disclosure marker stays. */
+    summary.ov-toggle { min-height: 40px; line-height: 40px; font-size: 11px !important; }
     /* Asset-location and jump-clone headers (already flex, align-items
        centre); the class is only used on the character overview. */
     .asset-location-header { min-height: 40px; }
@@ -915,6 +975,23 @@
     }
     .ks-isk > .ks-isk-tile:last-child { border-bottom: none; }
     .ks-isk > .ks-isk-tile > * { margin-top: 0 !important; }
+    /* The label (each tile's last line) at 11px over its inline 9px: the
+       size every label · value line's label has on phones. */
+    .ks-isk > .ks-isk-tile > :last-child { font-size: 11px !important; }
+    /* 9px text at 11px (the toggles' is in their rule above): the card
+       titles, the security status, the skill training times, the asset
+       location type counts and Can Fly's sort note. Element plus class
+       outranks the page's own rules; !important beats the note's inline
+       size. */
+    span.card-title, div.card-title, span.sec-status, div.skill-time,
+    span.asset-location-count { font-size: 11px; }
+    .cf-note { font-size: 11px !important; }
+    /* Wallet History range buttons: 44px tall from the global button rule;
+       here at least 40px wide (35px before) with 12px labels over the
+       shared 9px, as Market's and Net Worth's range buttons. The ID beats
+       the shared .range-btn rule; the Mining Ledger reuses the ID, so the
+       section head scopes it to this page. */
+    .b-section-head > #range-buttons > .range-btn { min-width: 40px; font-size: 12px; }
     /* Ship Usage Stream: its legend moves below the plot on phones and would
        take half of the desktop 200px box, so the box grows. !important beats
        the inline height. */
@@ -929,15 +1006,17 @@
        border. Lines are separated by a bottom border, with none under the
        last: it would double against the "saves …" line's top border or the
        remap box's own border. The label leads whatever its DOM position (the
-       queue's tiles put the value first). The value keeps its inline colour
-       and weight, and wraps inside itself rather than past the edge. */
+       queue's tiles put the value first), at 11px over its inline 9px: the
+       size every label · value line's label has on phones. The value keeps
+       its inline colour and weight, and wraps inside itself rather than
+       past the edge. */
     .skills-tiles { flex-direction: column; }
     .skills-tiles > .skills-tile {
         display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem;
         flex: none !important; border-right: none !important; border-bottom: 1px solid var(--border);
     }
     .skills-tiles > .skills-tile:last-child { border-bottom: none; }
-    .skills-tile > .skills-tile-label { order: -1; flex: none; margin: 0 !important; text-align: left; }
+    .skills-tile > .skills-tile-label { order: -1; flex: none; margin: 0 !important; text-align: left; font-size: 11px !important; }
     .skills-tile > .skills-tile-value { min-width: 0; overflow-wrap: anywhere; text-align: right; }
 
     /* Key 1 of the queue and remap rows (D4 B, D5 A): the skill name
@@ -957,6 +1036,12 @@
        row is the only place a phone shows it, so it takes the muted colour.
        !important beats the inline desktop colour. */
     .skills-queue .skills-rank { color: var(--muted) !important; }
+
+    /* 9px text at 11px: the Optimal Remap attribute names and their ± lines
+       (every line of an attribute but its value), and the What-If Remap
+       slider labels (their value spans inherit). !important beats the
+       inline sizes. */
+    .skills-opt > div > div:not(:nth-child(2)), .skills-whatif label { font-size: 11px !important; }
 }
 /* ── end R2 T2 ── */
 
@@ -989,15 +1074,22 @@
     /* Stats: the zKillboard chip is an m-tap target. As an inline-flex box
        its ::after arrow is a flex item and loses the space in its content. */
     .ent-zkb { gap: 0.3em; }
+    /* Stats: the summary tiles' labels and the heatmap's Less/More legend
+       at 11px over the page's 9px. The page's <style> loads after this
+       file; element plus class outranks its rules. The heatmap's 8px day
+       and hour labels stay: 24 columns of cells leave them no room. */
+    div.ent-tile-label, div.ent-hm-legend { font-size: 11px; }
 
     /* Blueprint filter row (ISS-111): two buttons per line, each on one
        line. The separator becomes an empty spacer row between the filter
        and group-by buttons. Inline display, gap and font-size need the
-       !important. The active button's accent border is inline and stays. */
+       !important. The active button's accent border is inline and stays.
+       The buttons keep the global phone .b-btn height of 44px (no height
+       here); flex centres each label in it. */
     .bp-filters { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px !important; }
     .bp-filters > .b-btn {
         display: flex; align-items: center; justify-content: center;
-        min-height: 40px; font-size: 12px !important; white-space: nowrap;
+        font-size: 12px !important; white-space: nowrap;
     }
     .bp-filters > .bp-filter-sep { grid-column: 1 / -1; height: 0; overflow: hidden; }
 }
@@ -1032,6 +1124,8 @@
        which also sets the row's height. */
     .corp-char-row { padding-top: 0; padding-bottom: 0; }
     .corp-char-row > a { display: inline-flex; align-items: center; min-height: 40px; }
+    /* The permissions link at 11px over its inline 9px. */
+    .corp-char-row > .corp-char-perm { font-size: 11px !important; }
 
     /* Corp page links (D12 A): a two-column grid of 40px links. The 1px gap
        over the border colour draws the dividers; an odd last link spans
@@ -1051,6 +1145,10 @@
        range buttons. */
     .corp-wallet-head { flex-wrap: wrap; }
     .corp-wallet-head > .corp-wallet-caption { order: 1; flex-basis: 100%; }
+    /* The range buttons: 44px tall from the global button rule; here at
+       least 40px wide (30px before) with 12px labels over their inline 9px,
+       as Market's and Net Worth's range buttons. */
+    .b-btn.corp-wallet-range { min-width: 40px; font-size: 12px !important; }
 
     /* Industry jobs (D11 A): the tile grid becomes one column, so its 1px
        gaps read as dividers between rows. Key 1 (product) is 12px, as other
@@ -1082,10 +1180,11 @@
        always on show; on phones it takes the muted colour too. */
     .skp-shared-rank { color: var(--muted) !important; }
 
-    /* Remove (plan and ACL rows): .b-btn's flex:1 would stretch the 40px ×
-       across the whole open row. */
-    .skill-row > [data-m-label] > .m-tap,
-    .skp-acl-row > [data-m-label] > .m-tap { flex: none; }
+    /* Remove (plan and ACL rows): a 44px square ×. The height is the global
+       phone button rule's (no m-tap, whose 40px would shrink it); .b-btn's
+       flex:1 would stretch it across the whole open row. */
+    .skill-row > [data-m-label] > .b-btn,
+    .skp-acl-row > [data-m-label] > .b-btn { flex: none; min-width: 44px; }
 
     /* Gap rows (D15 A): both keys at 12px. Their desktop spans carry 10–11px
        inline, and key 1 also takes the 16px phone body size as its line
@@ -1107,6 +1206,12 @@
        percentage width adds nothing to its column's min-content). */
     .skp-gap-pick { flex-wrap: wrap; }
     .skp-gap-pick > select { flex: 1 1 100% !important; min-width: 0; width: 100%; }
+    /* Analyze at 11px over its inline 9px. The detail page's already was
+       (.skp-tools .b-btn below); the shared page has no .skp-tools. */
+    .skp-gap-pick > .b-btn { font-size: 11px !important; }
+    /* The shared view's attributes and rank ("Mem/Per ×2"): 11px over the
+       inline 9px; the rank inherits it. */
+    .skp-shared-attr { font-size: 11px !important; }
 
     /* Share link: its own full-width line (the inline flex:1 left it 117px
        wide beside the label and Copy), ending in an ellipsis since it is
@@ -1117,10 +1222,13 @@
         white-space: nowrap; text-overflow: ellipsis;
     }
 
-    /* Skills toolbar (Export, Sort: Name / Optimal / Level): its buttons are
-       m-tap; the toolbar wraps and centres "Sort:" on them, at 12px rather
-       than the inline 9px. */
+    /* Skills toolbar (Export, Sort: Name / Optimal / Level): the toolbar
+       wraps and centres "Sort:" on its buttons, at 12px rather than the
+       inline 9px. The buttons keep the global 44px phone button height (no
+       m-tap, whose 40px would shrink them), are at least 40px wide and
+       take 12px labels over their inline 9px. */
     .skp-sortbar { flex-wrap: wrap; align-items: center; font-size: 12px !important; }
+    .skp-sortbar button { min-width: 40px; font-size: 12px !important; }
 
     /* Add Skill / Add from Ship typeahead: 40px rows at 12px. The dropdown
        is absolutely positioned inside a panel that clips (overflow:hidden,
@@ -1132,6 +1240,16 @@
         display: flex; align-items: center; min-height: 40px;
         font-size: 12px !important; text-align: left;
     }
+
+    /* 8-9px text at 11px: the skill count and scope badge under the title,
+       every action and form button (header, scope bar, ACL, share, Gap
+       Analysis, Add Skill, Add from Ship, the imports), the scope bar's
+       note, the ACL count and hint, the share label, View Ship and the
+       fitting import's hint. !important beats the inline sizes; an open
+       row's Remove keeps the open row's 12px (its rule outranks this). */
+    .skp-meta > span, .skp-actions .b-btn, .skp-scope .b-btn, .skp-scope > span,
+    .skp-acl-count, .skp-acl-add > .b-btn, .skp-acl-hint, .skp-share > span, .skp-share > .b-btn,
+    .skp-tools .b-btn, #ship-link, .skp-hint { font-size: 11px !important; }
 }
 /* ── end R2 T6 ── */
 
@@ -1175,6 +1293,1663 @@
     .fit-actions > .save-one-status:not(:empty) { margin-top: 0.35rem; }
 }
 /* ── end R2 P ── */
+
+/* ── R3 T1 · landing/manufacturing ── */
+@media (max-width: 640px) {
+    /* Tool landings, /industry /intel /tools (D1 A): compact cards in one
+       column; the desktop 320px minimum is wider than a 320px phone. Each
+       card is its title and a one-line description ending in an ellipsis
+       (the full text is on the tool's own page). The features list is
+       m-hide in the markup, so the description's bottom margin goes too.
+       The URL label and subtitle go from 9–10px to 11px. !important: the
+       page's own <style> loads after this file, and the subtitle's size is
+       inline. */
+    .tl-grid { grid-template-columns: minmax(0, 1fr) !important; gap: 0.5rem !important; }
+    .tl-card { padding: 0.75rem !important; }
+    .tl-card-title { flex-wrap: wrap; }
+    .tl-card-desc {
+        margin-bottom: 0 !important;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+    }
+    .tl-card-url, .tl-subtitle { font-size: 11px !important; }
+
+    /* Manufacturing controls stack (m-stack); Runs and the ME/TE sliders,
+       and a component panel's ME slider, go full width over their inline
+       70/120/90px. */
+    .mfg-fill { width: 100% !important; }
+    /* Blueprint search results: 40px tap targets at 12px. */
+    .mfg-pick { min-height: 40px; }
+    .mfg-pick > span { font-size: 12px !important; }
+
+    /* Build time (D3 A): one label · value line per box, its caption on a
+       second line under the label. The boxes join into one bordered block:
+       no 1px gap, no doubled border between them. */
+    .mfg-tiles { flex-direction: column; gap: 0 !important; }
+    .mfg-tiles > .mfg-tile {
+        display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; column-gap: 0.75rem;
+        flex: none !important; padding: 0.5rem 0.75rem !important; text-align: left !important;
+    }
+    .mfg-tiles > .mfg-tile + .mfg-tile { border-top: none !important; }
+    .mfg-tile > .mfg-tile-label { flex: none; margin: 0 !important; }
+    .mfg-tile > .mfg-tile-value { min-width: 0; overflow-wrap: anywhere; text-align: right; }
+    .mfg-tile > .mfg-tile-sub { flex-basis: 100%; margin-top: 0 !important; }
+    /* Their inline 9px labels and 8px captions are 11px, the size of the
+       other label · value lines' labels. */
+    .mfg-tile > .mfg-tile-label, .mfg-tile > .mfg-tile-sub { font-size: 11px !important; }
+
+    /* Material rows (bill of materials and component panels, D2 A) and
+       shopping-list rows (D4 A). Both keys at 12px: key 1's outer cell has
+       no size of its own and would take the 16px phone body line box beside
+       an 11px key 2. The icon lead keeps a 20px slot when the icon fails to
+       load (data-on-error hides it), so names stay in line. */
+    .mfg-mat.m-row > [data-m="lead"] { min-width: 20px !important; min-height: 20px; }
+    .mfg-mat > [data-m="key"],
+    .mfg-mat > [data-m="key"] > * { font-size: 12px !important; }
+    .mfg-shop > [data-m="key"] { font-size: 12px !important; }
+
+    /* Nested component panels and the Build/Buy lines under a material
+       indent 0.75rem instead of 2.25–3rem, so a build three levels deep
+       still fits. */
+    .mfg-comp { margin-left: 0.75rem !important; }
+    /* A component panel's "× N" stays whole beside a long product name. */
+    .mfg-comp-qty { white-space: nowrap; flex: none; }
+    .mfg-build { padding-left: 0.75rem !important; }
+
+    /* Total rows: label · value. The spacer columns are m-hide; the label
+       takes the spare width and wraps, values keep their own width. */
+    .mfg-total { align-items: baseline; }
+    .mfg-total > :first-child { flex: 1 1 auto !important; min-width: 0; }
+    .mfg-total > :not(:first-child) { flex: none !important; }
+
+    /* Shopping list: Copy / Send Minerals / Send to Hauling wrap, at least
+       8px apart (the inline gap is 6px). */
+    .mfg-shop-actions { flex-wrap: wrap; gap: 0.5rem !important; }
+
+    /* Build ▸ (bill of materials and component panels), Build All and
+       ↓ Parent: 12px labels over their inline 8–9px, and at least 40px
+       wide. No height here and no m-tap (whose 40px would shrink them):
+       the global phone button rule makes them 44px tall. Build All keeps
+       its own width in the panel head, where .b-btn's flex:1 would stretch
+       it; ↓ Parent is a full-width line in the stacked settings. */
+    .mfg-build > .b-btn,
+    #build-all-btn,
+    .mfg-comp > .m-stack > .b-btn { min-width: 40px; font-size: 12px !important; }
+    #build-all-btn { flex: none; }
+
+    /* Small text at 11px over its inline 8–9px: "has blueprint" beside each
+       Build ▸, a component panel's ME / Structure / Rig / Security labels,
+       its Build Cost / Buy Cost labels and their Save / each captions
+       (every line of the comparison but the value), and the Multibuy hint
+       under the shopping list's text box. */
+    .mfg-build > span,
+    .mfg-comp > .m-stack label,
+    .mfg-cmp > div > div:not(:nth-child(2)),
+    #multibuy-text + div { font-size: 11px !important; }
+}
+/* ── end R3 T1 ── */
+
+/* ── R3 T2 · build finder ── */
+@media (max-width: 640px) {
+    /* Results (D5 A): both keys at 12px. Key 2 is the desktop Margin % cell
+       with its inline 11px, and key 1 would take the 16px phone body size
+       as its line height, so the two keys would sit at different heights. */
+    .bf-row > [data-m="key"] { font-size: 12px !important; }
+    /* "Show all" inside the results panel: inset, so its border doesn't
+       double against the panel's own sides and bottom. */
+    .bf-clamp > .m-showall { width: calc(100% - 1.5rem); margin: 0.4rem 0.75rem 0.6rem; }
+    /* The phone-only Skills line and Market link take their colours here
+       rather than inline, since a group can return 200 rows. The link is an
+       m-tap inline-flex box, so its arrow is a flex item and the space
+       before it collapses; the gap puts back one character of the
+       monospace face. */
+    .bf-row > [data-m-label="Skills"] { color: var(--danger); }
+    .bf-row > [data-m-label="Market"] > .m-tap { color: var(--accent); text-decoration: none; gap: 0.6em; }
+
+    /* The form's two control blocks stack in one column. The fields' inline
+       min-width (220px, 240px) and flex shorthands need !important. The
+       page's <style> loads after this file, so the select's 150px and the
+       ME box's 60px are beaten with a second class instead. */
+    #bf-form > .bf-controls { flex-direction: column; align-items: stretch; }
+    #bf-form > .bf-controls > .bf-field { flex: none !important; min-width: 0 !important; }
+    .bf-field > .bf-select { min-width: 0; }
+    .bf-field > .bf-me { width: 100%; }
+    /* Field labels at 11px over the page's 9px; the ID outranks the page's
+       `.bf-field label`, and the child combinator leaves the decryptor
+       chips (labels inside .bf-chip-row) at their 12px. The "Up to N
+       items" note under the form: 11px over its inline 9px. */
+    #bf-form .bf-field > label { font-size: 11px; }
+    .bf-note { font-size: 11px !important; }
+
+    /* Decryptor chips: 40px tap targets. They are labels, so the global
+       44px rule for buttons and fields doesn't reach them. */
+    .bf-chip-row > .bf-chip {
+        display: inline-flex; align-items: center; justify-content: center;
+        min-height: 40px; min-width: 40px; font-size: 12px;
+    }
+
+    /* Market-group tree: rows at least 40px tall whose two buttons fill the
+       row's height, a 40px-wide expand arrow with a 12px glyph, and a leaf
+       spacer as wide, so leaf names line up with branch names. Classes
+       only: the rows are htmx-loaded and the page JS keys on them. */
+    .bft-node > .bft-row { min-height: 40px; align-items: stretch; }
+    .bft-row > .bft-arrow { width: 40px; font-size: 12px; }
+    .bft-row > .bft-arrow-empty { width: 40px; }
+    .bft-row > .bft-select { font-size: 12px; }
+    /* The tree box: 60vh instead of 260px, which shows fewer than six of
+       these rows. The page's overflow-y:auto stays, so it still scrolls. */
+    .bf-field > .bf-tree { max-height: 60vh; }
+}
+/* ── end R3 T2 ── */
+
+/* ── R3 T3 · active jobs ── */
+@media (max-width: 640px) {
+    /* Jobs the filters leave out carry the `hidden` attribute. R1's
+       `.m-row { display: grid !important }` would beat it; between two
+       !important rules the more specific one wins, (0,3,1) over (0,1,0). */
+    .ij-table tr.m-row[hidden] { display: none !important; }
+
+    /* One divider per job, drawn by the row. The page's
+       `.ij-table tbody td` pads and underlines every cell, which as grid
+       items would rule a line under each shown cell. Its <style> loads
+       after this file, so the reset needs the extra class. */
+    .ij-table tr.m-row { border-bottom: 1px solid var(--border); }
+    .ij-table tr.m-row > td { padding: 0; border-bottom: none; }
+
+    /* Both keys at 12px, as on other phone rows (the table is 11px). */
+    .ij-table tr.m-row > [data-m="key"] { font-size: 12px; }
+
+    /* The product icon keeps its 24px slot when a job has none, or it
+       fails and data-on-error hides it, so key 1 lines up with its
+       neighbours. min-width beats `.m-row > * { min-width: 0 !important }`.
+       The border matches the desktop icon's. */
+    .ij-table tr.m-row > [data-m="lead"] { min-width: 24px !important; min-height: 24px; }
+    .ij-table tr.m-row > [data-m="lead"] > img { border: 1px solid var(--border); }
+
+    /* Name: "from <blueprint>" on its own line under the product, as in
+       the desktop product cell. */
+    .ij-table tr.m-row > [data-m-label] .ij-sub { display: block; }
+
+    /* Character and Corp pickers. The panel (220px wide, anchored to its
+       button's left edge) could run off the right of the screen when its
+       button wraps to the right. Here it spans the filter row instead,
+       just below it. Option rows are 40px targets at 12px; the global
+       `input { min-height: 44px }` would otherwise size each row by its
+       checkbox. */
+    .ij-filters { position: relative; }
+    .ij-filters .ij-picker { position: static; }
+    .ij-filters .ij-picker-panel { left: 0; right: 0; min-width: 0; }
+    .ij-picker-panel .ij-picker-row { min-height: 40px; font-size: 12px; }
+    .ij-picker-panel .ij-picker-row input { min-height: 0; }
+
+    /* 9px text at 11px: the stat labels, the pickers' All / None and each
+       option's count. Each rule has one more class than the page's own,
+       whose <style> loads after this file. */
+    .ij-summary .ij-stat-label { font-size: 11px; }
+    .ij-picker-panel > .ij-picker-head > button { font-size: 11px; }
+    .ij-picker-panel .ij-picker-row .pcount { font-size: 11px; }
+
+    /* "+ Include completed" / "Including completed ×": links styled as
+       chips, 24.5px tall. As inline-flex boxes they are 40px targets with
+       the label centred. The filter chips are buttons, already 44px. */
+    a.ij-chip { display: inline-flex; align-items: center; min-height: 40px; }
+}
+/* ── end R3 T3 ── */
+
+/* ── R3 T4 · compression/hauling ── */
+@media (max-width: 640px) {
+    /* Compression: the character skill chips (built in app/routes/industry.py,
+       compression_skills) are read-only spans, so they keep their natural
+       height; only the label grows to 12px for legibility. !important beats
+       their inline 10px. */
+    .comp-skill-chip { font-size: 12px !important; }
+    /* Beside them, the Reprocessing and Efficiency labels and "Loaded":
+       11px over their inline 9px. */
+    .comp-skill-label, .comp-skill-loaded { font-size: 11px !important; }
+    /* Compression results head: Copy for Multibuy and Send to Hauling wrap
+       as whole buttons instead of squeezing. .b-btn is flex:1 (basis 0%),
+       which shares the line out equally and breaks a label inside its
+       button; a content basis and nowrap wrap the pair instead. The head
+       itself already wraps; the inline 6px gap spaces a wrapped line too. */
+    .comp-head-actions { flex-wrap: wrap; }
+    .comp-head-actions > .b-btn { flex: 1 1 auto; white-space: nowrap; }
+    /* Ore total row (not an m-row): its two spacer cells are m-hide, and the
+       figures take their own width so ISK and volume stay on one line.
+       !important beats the inline flex. */
+    .comp-ore-total > * { flex: 0 0 auto !important; }
+    .comp-ore-total > :first-child { flex: 1 1 auto !important; }
+    /* Ore name (key 1): its 11px name is an inner span, so the cell's own
+       line box would be the page's 16px one and sit 4px off key 2. */
+    .comp-ore-key { font-size: 11px; }
+
+    /* Hauling ship entry: the eight fields go two to a row. !important beats
+       the inline flex, the 50/140/160px minimums and the 50px inputs (the
+       selects have no inline width). */
+    .haul-entry-fields { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .haul-entry-fields > * { min-width: 0 !important; }
+    .haul-entry-fields input { width: 100% !important; }
+    .haul-entry-fields select { width: 100%; }
+    /* The remove ✕ stays a 44px square at the start of its column instead
+       of stretching across it like an empty field. !important beats the
+       inline 11px glyph. */
+    .haul-entry-fields > .haul-entry-remove { align-items: flex-start; }
+    .haul-entry-remove > button { min-width: 44px; font-size: 14px !important; }
+    /* The bay labels in each ship's capacity chips (built in hauling.html's
+       renderEntryCapacity): 11px over their inline 8px. */
+    .haul-bay-label { font-size: 11px !important; }
+
+    /* Hauling trip breakdown (built as a string in hauling.html's
+       recalcTrips): the ship and its m³/trip share line 1, m³/trip at its
+       own width rather than a third of the row, and the bay detail wraps
+       onto its own line below. !important beats the inline flex. 1-3 ships,
+       so no tap-to-open. */
+    .haul-breakdown-row { flex-wrap: wrap; row-gap: 0.2rem; }
+    .haul-breakdown-row > .haul-breakdown-trip { flex: 0 0 auto !important; white-space: nowrap; }
+    .haul-breakdown-row > .haul-breakdown-bays { order: 1; flex: 1 1 100% !important; text-align: left !important; }
+}
+/* ── end R3 T4 ── */
+
+/* ── R3 T5 · mining ledger ── */
+@media (max-width: 640px) {
+    /* Corp card character rows (D12 A). The lead is the .ml-check checkbox
+       inside a <label>: a 40px tap target that ticks the box (toggleMRow
+       ignores taps on labels and inputs, so the row stays shut). Its
+       negative margins cancel R1's `.m-row { padding: 0.6rem 0.75rem }`
+       (the m-row block above), so the row stays one 40px line and the
+       target starts at the card's edge. In an open row the bottom margin
+       takes the label 5px into the Name line below; z-index keeps it on
+       top there, so a tap in that strip still ticks the box. min-width is
+       !important to beat `.m-row > *`. The box grows from 14px to 20px;
+       !important beats its inline size, and min-height:0 the global 44px
+       input height, which would stretch it. */
+    .m-row.ml-char-row > [data-m="lead"] {
+        min-width: 40px !important; min-height: 40px; justify-content: center;
+        margin: -0.6rem 0.4rem -0.6rem -0.75rem; z-index: 1;
+    }
+    .ml-char-row .ml-check { width: 20px !important; height: 20px !important; min-height: 0; margin: 0; }
+    /* View (the Ledger line): .b-btn's flex:1 would stretch the button
+       across the open row. It keeps the global 44px phone button height
+       (no m-tap, whose 40px would shrink it) and is at least 40px wide. */
+    .ml-char-row > [data-m-label] > .b-btn { flex: none; min-width: 40px; }
+
+    /* Combined ledger lists, as R2 T4's mining.html: the ore key (By Ore
+       Type, Full Detail) stays a flex line, so its icon keeps its size
+       beside an ellipsised name; "Show all" is inset inside its panel. */
+    .m-row > [data-m="key"].ml-ore { display: flex !important; align-items: center; }
+    .m-row > .ml-ore > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ml-clamp > .m-showall { width: calc(100% - 1.5rem); margin: 0.4rem 0.75rem 0.6rem; }
+
+    /* Chart: a fixed box, which the chart fills on phones (the page script
+       drops maintainAspectRatio there). 280px: with legend names cut to 20
+       characters, twelve items fit in the half of the chart Chart.js allows
+       a legend and the plot keeps about 150px. With no chart data the
+       script marks it is-empty, so no blank box sits under "No chart
+       data". */
+    .ml-chart-box { position: relative; height: 280px; }
+    .ml-chart-box.is-empty { display: none; }
+    /* Chart range buttons: 44px tall from the global button rule; here at
+       least 40px wide with 12px labels over the shared 9px, as Market's
+       and Net Worth's range buttons. The character overview reuses the
+       ID, so the panel head scopes it to this page. */
+    .b-panel-head > #range-buttons > .range-btn { min-width: 40px; font-size: 12px; }
+
+    /* Selection bar ("N character(s) selected", Clear, View Combined
+       Ledger): when the buttons don't fit beside the count they wrap to a
+       line of their own, on the right, and on a very narrow screen onto
+       two. flex:none: .b-btn's flex:1 would split the line evenly and wrap
+       "View Combined Ledger" onto three lines. The buttons keep the global
+       44px phone button height (no m-tap, whose 40px would shrink them),
+       are at least 40px wide and take 12px labels over their inline 10px. */
+    .ml-selection-bar { flex-wrap: wrap; gap: 0.5rem; }
+    .ml-selection-bar > div { margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+    .ml-selection-bar .b-btn { flex: none; min-width: 40px; font-size: 12px !important; }
+    /* A corp card's View Corp Ledger: 12px over its inline 9px, as the
+       selection bar's buttons. */
+    .ml-corp-view { font-size: 12px !important; }
+    /* Full Detail's head opens the table (togglePanel); 36.7px before. The
+       head is already a flex line with its items centred. */
+    .b-panel-head.ml-detail-head { min-height: 40px; }
+}
+/* ── end R3 T5 ── */
+
+/* ── R3 T6 · planetary tools ── */
+@media (max-width: 640px) {
+    /* Calculator form (ISS-111 part 2). Row 1's inline grid was ~724px
+       wide: it stacks (system, target, cycles, then Calculate and Reset
+       sharing the last line). The advanced row goes two up, its note
+       across both. !important beats the inline grid templates. */
+    .pi-calc-row1 { grid-template-columns: minmax(0, 1fr) !important; }
+    .pi-calc-row2 { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+    .pi-calc-row1 > *, .pi-calc-row2 > *,
+    .pi-calc-row1 input, .pi-calc-row1 select,
+    .pi-calc-row2 input, .pi-calc-row2 select { min-width: 0; }
+    .pi-calc-row2 > .pi-calc-note { grid-column: 1 / -1; }
+    .pi-calc-actions > .b-btn { flex: 1 1 0; }
+
+    /* Chain Explorer (D15 A): the inline 2fr/1fr grid beats .b-grid-2's
+       phone rule, so the hook stacks it; the detail panel sits below the
+       list and stops being sticky. The page script scrolls this panel into
+       view after a load; the margin clears the 46px sticky nav plus a gap. */
+    .pi-chain-grid { grid-template-columns: minmax(0, 1fr) !important; }
+    .pi-chain-detail-panel { position: static !important; scroll-margin-top: 52px; }
+    /* The script then focuses #chain-detail (a tabindex=-1 it drops on
+       blur; not a control);
+       after a tap on a tile, which can't take focus, that counts as
+       focus-visible and would draw a stray accent bar under the head. */
+    #chain-detail:focus-visible { outline: none; }
+    /* Recipe links are 40px m-tap boxes here: underline the name rather
+       than draw the dotted border at the foot of the box, and centre the
+       "× qty" beside it instead of top-aligning it. */
+    .pi-node-input {
+        border-bottom: none !important;
+        text-decoration: underline dotted var(--muted) !important; text-underline-offset: 3px;
+    }
+    .pi-node-recipe { align-items: center; }
+
+    /* System Lookup: tier chips (inline display:block, ~21px) and the
+       system-search dropdown rows (~28px, the calculator's too) become
+       40px tap targets. */
+    .pi-tier-item { display: flex !important; align-items: center; min-height: 40px; }
+    .sys-dd-item, .calc-dd-item { min-height: 40px; align-items: center; }
+
+    /* Planet detail (Colonies): an opened pin row's Contents <details>
+       opens from a 40px summary (toggleMRow ignores taps on a summary). */
+    .pi-pin-row > [data-m-label] > details > summary { min-height: 40px; line-height: 40px; }
+
+    /* Calculator pipeline: key 1's phone-only P-tier tag at 11px over its
+       inline 9px. */
+    .pi-pipe-tier { font-size: 11px !important; }
+}
+/* ── end R3 T6 ── */
+
+/* ── R3 T7 · stockpiles/farm/appraisal ── */
+@media (max-width: 640px) {
+    /* Stockpiles and Skill Farm rows (D17 A, D18 A) are table rows in an
+       m-table. Each cell carries the page's desktop padding and bottom
+       rule; as grid items those would draw a line under every cell, so
+       the row draws one instead. These outrank the page's `.sp-table td`
+       / `.sf-table td`, whose <style> loads later.
+       Every Skill Farm selector starts at #skill-farm-content: Saved
+       Fittings (fitting_saved.html) has its own .sf-table, and neither
+       page's phone rules may reach the other. */
+    .sp-table tr.m-row,
+    #skill-farm-content .sf-table tr.m-row { border-bottom: 1px solid var(--border); }
+    .sp-table tr.m-row > td,
+    #skill-farm-content .sf-table tr.m-row > td { padding: 0; border-bottom: none; }
+
+    /* Stockpiles: the under-stocked tint moves from the cells to the row,
+       so the gaps between an open row's lines are tinted too (beats the
+       page's `.sp-table tr.is-under td`). A covered target's "—" in key 2
+       is muted; a short one keeps the page's red. */
+    .sp-table tr.m-row.is-under { background: color-mix(in srgb, var(--danger) 12%, transparent); }
+    .sp-table tr.m-row.is-under > td { background: none; }
+    .sp-table tr.m-row:not(.is-under) > .sp-deficit { color: var(--muted); }
+
+    /* Remove (both tables): a 44px square ×. The height is the global
+       phone button rule's (no m-tap, whose 40px would shrink it); .b-btn's
+       flex:1 would stretch it across the whole open row. */
+    .sp-table tr.m-row > td > .sp-del,
+    #skill-farm-content .sf-table tr.m-row > td > .sf-del { flex: none; min-width: 44px; }
+
+    /* Skill Farm, Base SP in an open row: the desktop 100px box holds 7
+       digits at 12px. Phones force inputs to 16px, so it widens to hold
+       the 10-digit maximum. */
+    #skill-farm-content .sf-table tr.m-row > [data-m-label] .sf-input { width: 10em; }
+
+    /* Skill Farm, Monthly profit (open rows and the Total line) in the
+       page's own green/red. The page's `.sf-table td` colour outranks its
+       `.sf-profit` / `.sf-loss`, so desktop draws it in the text colour;
+       desktop is left as it is. */
+    #skill-farm-content .sf-table td.sf-profit { color: #93c47d; }
+    #skill-farm-content .sf-table td.sf-loss { color: #e06666; }
+
+    /* Skill Farm Total: not an m-row, so it becomes a "Total" line and two
+       label/value lines. In a block table (m-table) the footer would
+       otherwise be wrapped in anonymous table boxes. The 2px rule moves
+       from every cell to the row and the empty cells hide. A value cell's
+       label comes from data-sf-label, floated left of its right-aligned
+       value; Ready now's ISK keeps its own second line. The ID outranks
+       the page's `.sf-table tfoot td` and `td:first-child`. */
+    #skill-farm-content .sf-table > tfoot,
+    #skill-farm-content .sf-table > tfoot > tr { display: block; }
+    #skill-farm-content .sf-table > tfoot > tr { border-top: 2px solid var(--border); padding: 0.3rem 0; }
+    #skill-farm-content .sf-table > tfoot > tr > td { display: none; }
+    #skill-farm-content .sf-table > tfoot > tr > td:first-child,
+    #skill-farm-content .sf-table > tfoot > tr > td[data-sf-label] { display: block; border-top: none; padding: 0.3rem 0.75rem; }
+    #skill-farm-content .sf-table > tfoot > tr > td[data-sf-label]::before {
+        content: attr(data-sf-label); float: left; padding-right: 0.6rem;
+        color: var(--muted); font-size: 11px; font-weight: 400; letter-spacing: 0.06em; text-transform: uppercase;
+    }
+
+    /* Appraisal: "Show all" inside the panel, inset so its border doesn't
+       double against the panel's own sides and bottom. */
+    .apr-clamp > .m-showall { width: calc(100% - 1.5rem); margin: 0.4rem 0.75rem 0.6rem; }
+
+    /* Appraisal Total row (not an m-row): its two empty spacers are m-hide
+       on phones, and the total and volume stay on one line each instead
+       of breaking "ISK" and "m³" onto a second line. Their inline flex:1
+       still shares the width; a value's own text width is its minimum. */
+    .apr-total > span { white-space: nowrap; }
+
+    /* The form field labels on Stockpiles and Skill Farm ("Find an item",
+       "Sales tax %", …) are 11px rather than the pages' 9px. The element
+       and class (or the ID) outrank each page's own rule, which loads
+       after site.css. */
+    span.sp-field-label, #skill-farm-content .sf-field-label { font-size: 11px; }
+}
+/* ── end R3 T7 ── */
+
+/* ── R4 T1 · market ── */
+@media (max-width: 640px) {
+    /* Search results (D1 A): link rows whose key 1 is two lines, the name
+       and its group below it, each ellipsising on its own. R1's key cell
+       is one nowrap line; in this list its children are block lines, so
+       the global key rule stays as it is. Sizes and the group's muted
+       colour come from the page's .mk-row-name / .mk-row-group. */
+    .mk-results > .m-row > .mk-row-key > * { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mk-results > .m-row > .mk-row-go { color: var(--muted); font-size: 12px; }
+
+    /* Order book (D2 A): Sell above Buy. The global [style*="1fr 1fr"]
+       rule already stacks this grid; this names it, and minmax(0, …) keeps
+       any row content from widening the column past the screen. Keys at
+       12px, as other phone rows; !important beats their inline 11px. */
+    .mk-book { grid-template-columns: minmax(0, 1fr) !important; }
+    .mk-book .m-row > [data-m="key"] { font-size: 12px !important; }
+
+    /* Stat cards (D3 A; both the Latest strip and the order book's): one
+       label · value line per card, as R2 T2's Queue Summary. Each card
+       keeps its own border and the cards close up into one box. The label
+       leads although each card puts its value first, at 11px over the
+       page's 9px (the size every label · value line's label has on
+       phones); the value keeps its colour and size and wraps inside
+       itself. The page's <style> loads after this file, so the strip's
+       rule takes a second class to win. */
+    .b-main .mk-stats { grid-template-columns: minmax(0, 1fr); gap: 0; }
+    .mk-stats > .mk-stat { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; }
+    .mk-stats > .mk-stat + .mk-stat { border-top: none; }
+    .mk-stat > .mk-stat-label { order: -1; flex: none; margin: 0; text-align: left; font-size: 11px; }
+    .mk-stat > .mk-stat-val { min-width: 0; overflow-wrap: anywhere; text-align: right; }
+
+    /* Price-history range buttons: the global phone rule already makes
+       them 44px tall, and a <button> already centres its label. Here the
+       label grows from 10px to 12px and each button is at least 40px
+       wide; the flex centring only restates what the button does. The
+       44px height stays. */
+    #mk-ranges > .b-btn { display: flex; align-items: center; justify-content: center; min-width: 40px; font-size: 12px; }
+}
+/* ── end R4 T1 ── */
+
+/* ── R4 T2 · lp store ── */
+@media (max-width: 640px) {
+    /* Offers (D5 A): both keys at 12px, as other phone rows' names. The
+       page's own <style> sets .lp-row to 11px and loads after this file. */
+    .lp-row.m-row > [data-m="key"] { font-size: 12px; }
+
+    /* Corp picker (D6 A). market_lp.html's script adds .is-folded on phones
+       once a corp is picked: the body (filter and tree) hides and the
+       one-line Picked button shows, label on the left and the corp on the
+       right; tapping it unfolds the tree. The button is m-only, so it never
+       shows above 640px; here it hides until the section folds. */
+    .lp-picked { display: none; }
+    .lp-corp-sec.is-folded > .lp-corp-body { display: none; }
+    .lp-corp-sec.is-folded > .lp-picked {
+        display: flex; align-items: center; gap: 0.6rem; width: 100%; min-height: 44px;
+        padding: 0 0.75rem; background: none; border: none; border-bottom: 1px solid var(--border);
+        color: var(--text); font-family: inherit; font-size: 12px; text-align: left; cursor: pointer;
+    }
+    .lp-picked > .lp-picked-label {
+        flex: none; color: var(--muted); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
+    }
+    .lp-picked > .lp-picked-name {
+        flex: 1 1 auto; min-width: 0; text-align: right; color: var(--accent);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .lp-picked::after { content: "▾"; content: "▾" / ""; flex: none; color: var(--muted); font-size: 11px; }
+
+    /* The Offers heading names the picked corp; the span is empty (and so
+       draws no separator) until a pick. */
+    .lp-offers-corp { color: var(--accent); }
+    .lp-offers-corp:not(:empty)::before { content: "·"; margin: 0 0.5em; color: var(--muted); }
+    /* The scroll to the offers stops clear of the sticky 46px nav. */
+    #lp-offers-sec { scroll-margin-top: 56px; }
+
+    /* Faction tree: faction and corp buttons stay 44px tap targets (the
+       global phone button rule, pinned here) with 12px text. The ID outranks
+       the tree fragment's own <style>, which loads after this file. display
+       is left alone: the filter hides buttons with an inline display:none,
+       and display:flex would drop the space before a faction's "(N)". */
+    #lp-corp-tree .lpt-fac, #lp-corp-tree .lpt-corp { min-height: 44px; font-size: 12px; }
+}
+/* ── end R4 T2 ── */
+
+/* ── R4 T3 · pnl/net worth ── */
+@media (max-width: 640px) {
+    /* Stat cards on both pages (R2 T2's Queue Summary pattern): each card
+       becomes one label · value line, and a row of cards becomes one list
+       with a rule between lines. Each page's own <style> loads after
+       site.css, so the container rules use div.<class> to outrank it, and
+       P&L's grid also needs !important against its second row's inline
+       2-column grid; the card rules win on specificity.
+       The label leads (the value comes first in the markup) at 11px, the
+       size of an open row's labels. The value keeps its colour and size, and
+       wraps inside itself rather than past the edge. */
+    div.pnl-stats { grid-template-columns: minmax(0, 1fr) !important; gap: 0; }
+    div.nw-stats { grid-template-columns: minmax(0, 1fr); gap: 0; }
+    .pnl-stats > .pnl-stat, .nw-stats > .nw-stat {
+        display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem;
+    }
+    .pnl-stats > .pnl-stat + .pnl-stat, .nw-stats > .nw-stat + .nw-stat { border-top: none; }
+    .pnl-stat > .pnl-stat-label, .nw-stat > .nw-stat-label {
+        order: -1; flex: none; margin: 0; text-align: left; font-size: 11px;
+    }
+    .pnl-stat > .pnl-stat-val, .nw-stat > .nw-stat-val { min-width: 0; overflow-wrap: anywhere; text-align: right; }
+
+    /* P&L items (D7 A): every cell carries the table's 5px 10px padding and
+       a bottom border. As m-row grid items those would draw a rule under
+       each cell, so the row draws one line instead. Cells start left-aligned
+       (the table right-aligns its numbers); key 2 and open values keep R1's
+       right alignment, which outranks this. */
+    .pnl-table tr.m-row { border-bottom: 1px solid var(--border); }
+    .pnl-table tr.m-row > td { padding: 0; border-bottom: none; text-align: left; }
+    /* Both keys at 12px, as Market's, LP's and Corp Inventory's rows (the
+       table is 11px). */
+    .pnl-table tr.m-row > [data-m="key"] { font-size: 12px; }
+
+    /* Net Worth range buttons and Snapshot now: 12px text, and the global
+       phone rule's 44px height (no height set here, so it applies). The
+       element plus two classes outrank the page's own .nw-ranges .b-btn
+       (which loads after site.css). Snapshot now has no border on desktop;
+       here it gets one so it reads as a button without hover, and keeps its
+       own width. */
+    .nw-ranges > button.b-btn { min-width: 40px; font-size: 12px; }
+    .nw-snap > button.b-btn {
+        flex: none; padding: 0 0.85rem; font-size: 12px; border: 1px solid var(--border);
+    }
+    /* The Snapshot status goes on its own full-width line under the button
+       and wraps there (R2 T3's Save all pattern): the DOM keeps it first,
+       `order` moves it. The group stretches across the stacked page header,
+       so the line doesn't resize as text arrives. row-gap 0 beats the inline
+       gap, so the empty status adds no space. */
+    .nw-snap { align-self: stretch; row-gap: 0 !important; }
+    .nw-snap > #nw-status { order: 1; flex-basis: 100%; min-width: 0; overflow-wrap: anywhere; font-size: 12px; }
+    .nw-snap > #nw-status:not(:empty) { margin-top: 0.35rem; }
+
+    /* The P&L assumptions and the Net Worth explanation stay, at 12px. The
+       element plus class outranks each page's own 10px rule. */
+    p.pnl-note, p.nw-note { font-size: 12px; }
+}
+/* ── end R4 T3 ── */
+
+/* ── R4 T4 · corp inventory/contracts ── */
+@media (max-width: 640px) {
+    /* Tracked items, hangar scan and contract thresholds (D10–D12 A): both
+       keys at 12px, as other phone rows' keys. Their desktop spans carry
+       11px inline. */
+    .cinv-item > [data-m="key"],
+    .cinv-scan > [data-m="key"],
+    .cctr-item > [data-m="key"] { font-size: 12px !important; }
+
+    /* Tracked items' location heading: .b-row-label doesn't shrink, so a
+       long structure name would widen the page. It wraps instead. */
+    .cinv-loc > .b-row-label { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+
+    /* Contract title matches: the "T" glyph lead keeps its 24px box.
+       `.m-row > *` sets width:auto, which would shrink it to the letter. */
+    .cctr-item > span[data-m="lead"] { width: 24px !important; }
+
+    /* Hangar scan, Track line of an opened row: the Low and Critical inputs
+       and the button are one group. Its inline display:contents (desktop
+       keeps them as row cells) would otherwise spill them into the cell as
+       separate items. stretch: the 44px inputs and the button share one
+       height. The inputs widen from the desktop 50px to fit 16px digits. */
+    .cinv-scan > [data-m-label="Track"] > span { display: inline-flex !important; align-items: stretch; gap: 6px; }
+    .cinv-scan > [data-m-label="Track"] > span > input { width: 4.5rem !important; }
+    /* The m-only "L" and "C" before each input, centred on it. Polish B sets
+       open-row descendants to font-size:inherit !important at (0,4,1); this
+       selector is (0,4,2), so the letters keep their 11px. */
+    .m-row.cinv-scan > [data-m-label="Track"] > span > span.m-only {
+        align-self: center; color: var(--muted); font-size: 11px !important;
+    }
+
+    /* Remove × in an opened tracked-item or contract row: a 44px square.
+       The height is the global phone button rule's (no m-tap, whose 40px
+       would shrink it). */
+    .cinv-item > [data-m-label="Remove"] > .b-btn,
+    .cctr-item > [data-m-label="Remove"] > .b-btn { min-width: 44px; }
+
+    /* "Show all" inside the bordered scan box: inset, so its border doesn't
+       double against the box's sides. */
+    .cinv-scan-wrap .m-showall { width: calc(100% - 1.5rem); margin: 0.4rem 0.75rem 0.6rem; }
+
+    /* The forms' field labels (Structure, Item, Hangar, Low, Critical,
+       Match By, Keyword, Item Type) and the contracts hint: 11px over their
+       inline 9px. */
+    .cinv-form label, .cctr-hint { font-size: 11px !important; }
+
+    /* Item type search results (Add Item, Add Threshold): 40px rows at
+       12px. The rows come from the shared type-search route. */
+    .corp-type-results > .b-row { min-height: 40px; }
+    .corp-type-results > .b-row > .b-row-val { font-size: 12px; }
+}
+/* ── end R4 T4 ── */
+
+/* ── R5 T1 · kills ── */
+@media (max-width: 640px) {
+    /* Kill rows (Kill Feed and Kill Search share the row partial): ship
+       thumb, one truncating "victim · ship" line (m-only), ISK. They are not
+       m-rows: a tap still loads the full detail below (bindRowClicks), and
+       nothing here sets display on .kf-row or .kf-detail, so the feed's
+       100-row cap (inline display:none) keeps hiding rows. */
+    .kf-row { grid-template-columns: 36px minmax(0, 1fr) auto; font-size: 12px; }
+    .kf-row > .kf-meta { min-width: 0; }
+    .kf-meta-line { display: flex; align-items: center; }
+    .kf-meta-line > .kf-meta-text {
+        min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .kf-meta-text > .kf-meta-ship { color: var(--muted); }
+    .kf-meta-line > .kf-npc-badge { flex: none; }
+    .kf-row > .kf-isk { white-space: nowrap; }
+    .kf-row .kf-ago { display: none; }
+
+    /* Detail panel: victim, fitting, attackers stack in one column. The
+       open animation's 2400px cap would clip the stacked panel, and the
+       attackers lose their inner scroll box (Show all past 10 instead). */
+    .kf-detail-grid { grid-template-columns: minmax(0, 1fr); }
+    .kf-detail.shown { max-height: none; }
+    .kf-detail-right { max-height: none; overflow: visible; padding-right: 0; }
+
+    /* Filters fold behind one 44px toggle (m-only); without .is-expanded
+       every other child of the fold is hidden. Desktop never folds. */
+    .kf-fold > .kf-fold-toggle {
+        display: flex; align-items: center; gap: 0.6rem; width: 100%; min-height: 44px;
+        padding: 0 0.85rem; background: none; border: 1px solid var(--border);
+        color: var(--text); font-family: inherit; font-size: 12px;
+        letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer;
+    }
+    .kf-fold-toggle > .kf-fold-label { flex: 1; text-align: left; color: var(--muted); }
+    .kf-fold-toggle > .kf-fold-count { color: var(--accent); }
+    .kf-fold-toggle::after { content: "▾"; content: "▾" / ""; color: var(--muted); }
+    .kf-fold.is-expanded > .kf-fold-toggle::after { content: "▴"; content: "▴" / ""; }
+    .kf-fold:not(.is-expanded) > :not(.kf-fold-toggle) { display: none !important; }
+
+    /* Inside the fold: a row's label heads it, and chips, picked-entity
+       chips and autocomplete results are 40px. Two classes beat the pages'
+       own <style> blocks, which load after this file. */
+    .kf-fold .kf-glabel, .kf-fold .kfs-glabel { flex-basis: 100%; min-width: 0; margin: 4px 0 0; }
+    .kf-fold .kf-chip, .kf-fold .kfs-chip {
+        display: inline-flex; align-items: center; min-height: 40px; padding: 0 12px; font-size: 12px;
+    }
+    .kf-fold .kf-chip-removable, .kf-fold .kfs-chip-removable {
+        min-height: 40px; padding: 0 0 0 10px; font-size: 12px;
+    }
+    .kf-fold .kf-chip-removable .x, .kf-fold .kfs-chip-removable .x {
+        display: inline-flex; align-items: center; justify-content: center;
+        min-width: 40px; min-height: 40px;
+    }
+    .kf-fold .kfs-mode-btn { min-width: 40px; font-size: 11px; }
+    .kf-fold .kf-ac, .kf-fold .kfs-ac { flex: 1 1 100%; }
+    .kf-fold .kf-ac-input, .kf-fold .kfs-ac-input { width: 100%; }
+    .kf-fold .kf-ac-results, .kf-fold .kfs-ac-results { min-width: 0; right: 0; }
+    .kf-fold .kf-ac-result, .kf-fold .kfs-ac-result {
+        min-height: 40px; padding: 10px 12px; line-height: 20px; font-size: 12px;
+    }
+    .kf-fold .kfs-date-input { flex: 1 1 100%; width: auto; }
+
+    /* Most valuable · last 7 days: two cards a row, smaller renders. */
+    .kf-top-section > .kf-top-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .kf-top-card > .kf-top-img { width: 64px; height: 64px; }
+    /* A tapped card's detail opens below both grids, so the page scrolls it
+       up; the scroll stops clear of the sticky 46px nav. */
+    #kf-top-detail-slot { scroll-margin-top: 56px; }
+
+    /* Kill Search's head: "← Back to live feed" is a link, stretched by
+       the actions row to the height of the 44px Reset button beside it;
+       flex centres its label in that height instead of leaving it at the
+       top. */
+    .kfs-head-actions > a.kfs-btn { display: flex; align-items: center; }
+    /* The Kill Feed's "↑ N new" pill floats over the feed's top: its
+       negative bottom margin cancels its height, so showing it doesn't push
+       the feed down (its top margin collapses into the line above). The
+       page's -28px fitted the 28px desktop pill; the global phone button
+       rule makes it 44px, which pushed the feed down 16px. The element
+       outranks the page's own #kf-new-pill rule, which loads after this
+       file. */
+    button#kf-new-pill { margin-bottom: -44px; }
+
+    /* 8-9px text at 11px: the feed's LIVE status, the Most Valuable
+       section labels and each card's corp line (with the card's 10px type
+       and system lines, so the corp doesn't outsize them), and the NPC
+       badge on a phone row's line. Element plus class outranks the page's
+       own rules (and the shared 8px badge rule). */
+    span.kf-live, div.kf-top-section-label, div.kf-top-type, div.kf-top-meta, div.kf-top-corp,
+    .kf-meta-line > .kf-npc-badge { font-size: 11px; }
+}
+/* ── end R5 T1 ── */
+
+/* ── R5 T2 · dscan/local ── */
+@media (max-width: 640px) {
+    /* Paste page History (D4 A): link rows, type badge · label · count. The
+       panel already pads the table, so the rows drop their side padding and
+       the cells their inline padding. A fixed-width lead lines key 1 up
+       whichever badge (D-Scan or Local) a row has. */
+    .intel-history tr.m-row {
+        min-height: 44px; padding-left: 0 !important; padding-right: 0 !important; font-size: 12px;
+    }
+    .intel-history tr.m-row > td { padding: 0 !important; }
+    .intel-history tr.m-row > td[data-m="lead"] { min-width: 4em !important; }
+    .intel-history tr.m-row > td[data-m="key"] ~ td[data-m="key"] { font-size: 11px; }
+
+    /* Scan views, header buttons: the row's inline flex:none kept all four
+       on one line, wider than a 360px screen, so they wrap two by two.
+       inline-flex centres the New Intel link's text, a block .b-btn, in the
+       44px height the global phone rule gives every .b-btn. */
+    .intel-actions { flex-wrap: wrap; align-self: stretch; }
+    .intel-actions > .b-btn {
+        flex: 1 1 calc(50% - 0.25rem) !important;
+        display: inline-flex; align-items: center; justify-content: center;
+        font-size: 11px !important;
+    }
+    /* The meta line under the title ("15 pilots · 5 corps · … · Expires in
+       2d 4h") didn't wrap, so each phrase broke over two lines instead. It
+       now wraps between phrases. !important beats the row half of the
+       inline gap shorthand. */
+    .intel-meta { flex-wrap: wrap; row-gap: 0.15rem !important; }
+    .intel-meta > span { white-space: nowrap; }
+
+    /* D-Scan, Merge Additional D-Scan: the Filter duplicates label keeps
+       its own line and the Merge button takes a full-width one below. */
+    .intel-merge-row { flex-wrap: wrap; gap: 0.5rem; }
+    .intel-merge-row > .b-btn { flex: 1 1 100%; }
+
+    /* D-Scan, By Type (D7 A): every group still lists its ships, with a
+       shallower indent and less space between count and name. */
+    .dscan-group-row, .dscan-ship-row { gap: 0.4rem; }
+    .dscan-group-row > span + span, .dscan-ship-row > span + span { padding-left: 0.4rem !important; }
+    .dscan-ship-row { min-height: 26px; padding-left: 1.25rem !important; }
+
+    /* D-Scan, Raw Paste: its Copy sits straight in the panel head, where
+       .b-btn's flex:1 stretched it across the free width (229px at 360).
+       It keeps its own width, as the Ships and By Type Copy buttons do
+       inside their wrappers. */
+    #copy-raw-btn { flex: none; }
+
+    /* Scan views, the fold-out toggles: D-Scan's Other on Scan and Local's
+       All Pilots, the only way into the pilot list. Their inline padding
+       made them 32.5px tall; a tap target is at least 40px. Only the height
+       changes: the summary keeps its inline display:flex and ▼ marker. */
+    .intel-toggle { min-height: 40px; }
+
+    /* Local, All Pilots (D5 A): line 1 is the portrait and name, line 2 the
+       m-only "corporation · alliance" copy, muted and truncating. Pilot,
+       corp and alliance rows never get a display with !important here:
+       applyFilter hides them with an inline display:none, which that would
+       beat. */
+    .intel-pilot-row { flex-wrap: wrap; row-gap: 0.15rem; }
+    .intel-pilot-row > .intel-pilot-name { font-size: 12px !important; }
+    .intel-pilot-row > .intel-pilot-org {
+        flex: 0 0 100%; min-width: 0; padding-left: 20px;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        font-size: 11px; color: var(--muted);
+    }
+
+    /* Local, By Corporation (D6 A): corp name and count on line 1, the
+       alliance on a muted line 2. Its inline flex-shrink:0 let a long
+       alliance name run off a 360px screen; here it truncates. A row tap
+       still filters, so rows are at least 40px. */
+    .intel-corp-row {
+        display: grid; grid-template-columns: minmax(0, 1fr) auto;
+        column-gap: 0.6rem; row-gap: 0.1rem; min-height: 40px; align-content: center;
+    }
+    .intel-corp-row > .intel-corp-name {
+        grid-row: 1; grid-column: 1; padding-left: 0 !important; overflow-wrap: anywhere;
+    }
+    .intel-corp-row > .intel-corp-count { grid-row: 1; grid-column: 2; }
+    .intel-corp-row > .intel-corp-alliance {
+        grid-row: 2; grid-column: 1 / -1; min-width: 0;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        font-size: 11px !important;
+    }
+    /* By Alliance rows keep their layout; a tap filters, so 40px tall. */
+    .intel-alliance-row { min-height: 40px; }
+}
+/* ── end R5 T2 ── */
+
+/* ── R5 T3 · gatecheck/watch/trending ── */
+@media (max-width: 640px) {
+    /* Gate Check's tabs (D9 A): an equal-width 44px bar. Selectors outrank
+       the page's own .gc-tabs/.gc-tab head rules, which load after this
+       file; colour and border stay with them, so .gc-tab.is-active still
+       marks the active tab. Long labels wrap inside their third. */
+    div.gc-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; }
+    div.gc-tabs > .gc-tab {
+        min-height: 44px; padding: 0.25rem 0.4rem; line-height: 1.25;
+        display: flex; align-items: center; justify-content: center; text-align: center;
+    }
+
+    /* Common Routes buttons keep the global 44px button floor (no height
+       here, so it isn't lowered) at a readable 12px. The autocomplete rows
+       are divs with no floor of their own: 40px targets. */
+    #tab-checker .gc-route-btn { font-size: 12px; }
+    .gc-dropdown > .gc-dd-item { min-height: 40px; font-size: 12px; }
+
+    /* Waypoints, gatecamps and war-target systems fold into two lines
+       (D8 A): number, security, system and kills (or ✓) first; region and
+       danger flags below, under the system name. The empty ::after is a
+       full-width break ordered between the two. The inline gap sets both
+       gaps, so these need !important. */
+    .gc-wp { flex-wrap: wrap; row-gap: 0.15rem !important; column-gap: 0.5rem !important; }
+    .gc-wp::after { content: ""; flex-basis: 100%; order: 1; }
+    .gc-wp > .gc-wp-l2 { order: 2; }
+    .gc-wp > .gc-wp-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* Line 2 starts under the name: past the 30px security cell, and on a
+       route past the 22px jump number too. The region grows from zero to
+       its own width, so it ellipsises rather than pushing a flag onto a
+       third line. */
+    .gc-wp > .gc-wp-region {
+        margin-left: calc(30px + 0.5rem);
+        flex: 1 1 0; max-width: max-content; min-width: 0 !important;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .gc-wp--jump > .gc-wp-region { margin-left: calc(52px + 1rem); }
+
+    /* Trending's Gained and Lost lists stay plain rows: 40px tall, and the
+       alliance name truncates (a grid item won't shrink below its content
+       without min-width:0). The alliance link is a 40px line filling the
+       name cell (the row drops its 4px padding for it), so the whole cell
+       is the tap target, and the link itself ellipsises. */
+    #sov-gained > .b-trending-row, #sov-lost > .b-trending-row { min-height: 40px; padding-top: 0; padding-bottom: 0; }
+    #sov-gained .b-trending-name, #sov-lost .b-trending-name { min-width: 0; }
+    #sov-gained .b-trending-name > a, #sov-lost .b-trending-name > a {
+        display: block; line-height: 40px; overflow: hidden; text-overflow: ellipsis;
+    }
+    /* The violent list already pads its sides; its m-rows keep only their
+       vertical padding, so rows and borders line up as on desktop. Its rows
+       and the Watchlist's alert rows take 11px text, which left them 37-38px
+       tall: they are tapped open, so at least 40px. */
+    #violent-list > .m-row { padding-left: 0 !important; padding-right: 0 !important; }
+    #violent-list > .m-row, .w-row.m-row { min-height: 40px; }
+    /* Two-digit ranks would push key 1 right of the one-digit rows' names;
+       a fixed, right-aligned rank keeps the names in one column. */
+    #violent-list > .m-row > .b-trending-rank { min-width: 2ch !important; justify-content: flex-end; }
+
+    /* Watchlist × and zkb: buttons and a.b-btn get 44px height from the
+       global floor (m-tap would force 40px); a 44px width keeps × square,
+       and inline-flex centres the label in the box. flex:none stops .b-btn's
+       flex:1 stretching zkb across the row and squeezing the hunter's name.
+       .w-row is only here. */
+    .w-row .b-btn { flex: none; min-width: 44px; font-size: 12px !important; display: inline-flex; align-items: center; justify-content: center; }
+
+    /* WH Tracker: thumb-sized character picker, Refresh now at 12px (its
+       44px height is the global button floor), and the 28px system name
+       wraps rather than overflowing. Scoped to the tracker panel: .ws-*
+       also styles the wormhole system page. */
+    label.wht-pick { min-height: 40px; }
+    #wht-refresh { font-size: 12px !important; }
+    #wht-panel .ws-name { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+
+    /* Small links raised to the 40px tap floor (R5 T4 does the same on the
+       wormhole system page): on the WH Tracker panel the static and
+       wandering codes (also at least 40px wide), "full page →" and the
+       resident corps; on Gate Check the "Avoid systems" toggle, its text
+       at 12px (line-height keeps the summary a list item, so its marker
+       stays), and "Open in Star Map". !important beats the link's inline
+       display:inline-block. */
+    #wht-panel .ws-conn a, #wht-panel .wht-full, #wht-panel .wht-res > a {
+        display: inline-flex; align-items: center; min-height: 40px;
+    }
+    #wht-panel .ws-conn a { min-width: 40px; }
+    .gc-avoid > summary { min-height: 40px; line-height: 40px; font-size: 12px !important; }
+    .gc-starmap { display: inline-flex !important; align-items: center; min-height: 40px; }
+
+    /* 8-9px text at 11px: the Watchlist's counts, hunter kinds and alert
+       kind leads; Gate Check's field labels, legend note, jump count and
+       danger flags; Trending's ranks; the WH Tracker's "(no location
+       scope)", section titles (and the System Intelligence subtitle) and
+       effect table heads. !important beats inline sizes; the element or ID
+       selectors outrank the pages' own rules, which load after this file. */
+    .w-count, .w-kind, .w-row.m-row > [data-m="lead"] { font-size: 11px !important; }
+    label.gc-lbl { font-size: 11px; }
+    .gc-legend > span, .gc-jumps, .gc-wp > .gc-flag { font-size: 11px !important; }
+    #sov-gained .b-trending-rank, #sov-lost .b-trending-rank, #violent-list .b-trending-rank { font-size: 11px; }
+    label.wht-pick > span { font-size: 11px !important; }
+    #wht-panel .ws-section-title, #wht-panel .ws-effect-table th { font-size: 11px; }
+    #wht-panel .ws-section-title > span { font-size: 11px !important; }
+}
+/* ── end R5 T3 ── */
+
+/* ── R5 T4 · wormholes ── */
+@media (max-width: 640px) {
+    /* The phone layer already makes every <button> at least 44px tall, so
+       the buttons below only get a 40px minimum width and a 12px glyph. A
+       min-height here would outrank `button` and shrink them. */
+
+    /* System finder results (D12 A): link rows of class badge · system ·
+       statics. min-width beats .m-row > *'s reset so the badges line up. */
+    .wh-sys-list > .m-row > .wh-sys-class {
+        justify-content: center; min-width: 2.75rem !important;
+        padding: 1px 5px; border: 1px solid currentColor;
+        font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+    }
+    .wh-sys-list > .m-row > .wh-sys-statics,
+    .wh-sys-list > .m-row > .wh-sys-statics > span { color: var(--muted) !important; }
+    .wh-sys-list > .m-row > .wh-sys-statics { font-size: 12px !important; }
+    /* One line height for both keys, so the 16px name and the 12px statics
+       share a top edge as well as a centre line. */
+    .wh-sys-list > .m-row > [data-m="key"] { line-height: 1.5rem; }
+
+    /* Paging sits outside the panel, so it wraps instead of widening the page. */
+    .wh-pager { flex-wrap: wrap; row-gap: 0.4rem; }
+    .wh-pager > button { min-width: 40px; font-size: 12px !important; }
+    .wh-pager > span {
+        display: inline-flex; align-items: center; justify-content: center;
+        min-width: 40px; min-height: 40px; font-size: 12px !important;
+    }
+
+    /* Finder filters (D13 A): the toggle rows fold behind one Filters
+       button that names the active filters; the search row stays. */
+    .wf-panel:not(.is-expanded) > .wf-fold { display: none !important; }
+    .wf-fold-toggle {
+        display: flex; align-items: center; gap: 0.75rem; width: 100%; min-height: 44px;
+        margin: 0.25rem 0 0; padding: 0.7rem 0.85rem;
+        background: none; border: 1px solid var(--border); color: var(--text); cursor: pointer;
+        font-family: inherit; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; text-align: left;
+    }
+    .wf-fold-toggle .wf-fold-label { flex: none; color: var(--muted); }
+    .wf-fold-toggle .wf-fold-current {
+        flex: 1 1 auto; min-width: 0; text-align: right; color: var(--accent);
+        overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+    }
+    .wf-fold-toggle::after { content: "▾"; content: "▾" / ""; flex: none; color: var(--muted); }
+    .wf-panel.is-expanded > .wf-fold-toggle { margin-bottom: 0.6rem; }
+    .wf-panel.is-expanded > .wf-fold-toggle::after { content: "▴"; content: "▴" / ""; }
+    .wf-panel .wf-toggles { gap: 6px; }
+    .wf-panel .wf-btn { min-width: 40px; font-size: 12px; }
+
+    /* Types matrix: swipes inside .wm-scroll with the From column pinned
+       and opaque. The page script sets is-more while there is more to the
+       right. Codes become 40px tap targets, one per line without the <br>s.
+       Collapsed borders are painted by the table and scroll away from a
+       sticky cell, so the codes showed through its edge: separate borders
+       belong to each cell instead (right and bottom; left on the first
+       column, top on the header row, so every line stays 1px). The
+       template's <style> loads after site.css, hence .wm-scroll >. */
+    .wm-scroll.is-more {
+        -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent);
+        mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent);
+    }
+    .wm-scroll > .wm-table { border-collapse: separate; border-spacing: 0; }
+    /* Whole-pixel padding keeps every row a whole number of pixels tall, so
+       the sticky From cells don't drop a hairline at fractional offsets. */
+    .wm-scroll > .wm-table th, .wm-scroll > .wm-table td { border-width: 0 1px 1px 0; padding: 3px 5px; }
+    .wm-scroll > .wm-table tr > :first-child { border-left-width: 1px; }
+    /* A whole 23px header row (9px text at line-height 15px), so the line
+       under the sticky corner isn't lost either. */
+    .wm-scroll > .wm-table thead th { border-top-width: 1px; line-height: 15px; }
+    .wm-table th:first-child, .wm-table td.wm-from { position: sticky; left: 0; z-index: 1; }
+    .wm-table td.wm-from { background: var(--bg); }
+    .wm-table td a {
+        display: flex; align-items: center; justify-content: center;
+        min-width: 40px; min-height: 40px; font-size: 12px;
+    }
+    .wm-table td br { display: none; }
+    #wh-type-detail { scroll-margin-top: 4rem; }
+    /* The structure-age card's "Full tool" link sits in a sentence; give it
+       the 40px link floor. */
+    .wsp-fulltool { display: inline-flex; align-items: center; min-height: 40px; }
+
+    /* Effect tables (D14 A): the C1–C6 values swipe sideways inside
+       .we-scroll; the Modifier column is pinned and wraps at 8.5rem. */
+    .we-table th, .we-table td { white-space: nowrap; }
+    /* Separate borders, as on the types matrix: collapsed borders under a
+       sticky column drop some row lines at fractional row heights. */
+    .we-scroll > .we-table { border-collapse: separate; border-spacing: 0; }
+    /* Whole-pixel padding and line-heights: with rem padding and 1.65 line
+       heights some rows still landed on fractional offsets. */
+    .we-scroll > .we-table th { padding: 6px 8px; line-height: 15px; }
+    .we-scroll > .we-table td { padding: 6px 8px; line-height: 18px; }
+    .we-table th:first-child, .we-table td:first-child {
+        position: sticky; left: 0; z-index: 1;
+        width: 8.5rem; min-width: 8.5rem; white-space: normal;
+        box-shadow: inset -1px 0 0 var(--border);
+    }
+    .we-table td:first-child { background: var(--surface-2); }
+    .we-nav a { display: inline-flex; align-items: center; min-height: 40px; }
+
+    /* Kill activity (wormhole_kills.html, also in the WH Tracker): the
+       heatmap keeps its own sideways scroll (D15 A); the range buttons and
+       Most Active rows become 40px. */
+    .whk-range > button { min-width: 40px; font-size: 12px !important; }
+    .whk-active > a { min-height: 40px; }
+    /* The "Most Active" and "Activity Heatmap" titles: 11px over inline 9px. */
+    .whk > .whk-title { font-size: 11px !important; }
+    /* The panel's min-content width (the ~540px heatmap table, the recent
+       kills' nowrap pilot lines) would widen the grid column it sits in
+       (the system page's and the tracker's .ws-grid): the page would scroll
+       sideways and the heatmap's own box never would. The panel always sits
+       in block flow, so it still fills its column. */
+    .whk { contain: inline-size; }
+
+    /* System page tap targets, scoped by its own wsp-* hooks (the WH
+       Tracker reuses the ws-* classes). */
+    .wsp-conns .ws-conn a { display: inline-flex; align-items: center; min-width: 40px; min-height: 40px; }
+    .wsp-links a { display: inline-flex; align-items: center; min-height: 40px; }
+    .wsp-zoom > button { min-width: 40px; font-size: 12px !important; }
+    /* System page text at 11px over its 9px: the section titles (and the
+       Celestials count beside its title), the effect table heads and the
+       diagram legend. Two classes outrank the page's own rules, which load
+       after this file; !important beats inline sizes. */
+    .wsp-conns .ws-section-title, .wsp-grid .ws-section-title,
+    .wsp-grid .ws-effect-table th { font-size: 11px; }
+    .wsp-grid .ws-section-title > span, .wsp-legend { font-size: 11px !important; }
+
+    /* Type page: the back link. */
+    .wh-back { display: inline-flex; align-items: center; min-height: 40px; }
+}
+/* ── end R5 T4 ── */
+
+/* ── R5 T5 · maps/alliance ── */
+@media (max-width: 640px) {
+    /* Star Map / Wormhole Map: 100vh includes iOS's collapsing URL bar, which
+       covered the bottom of the map. dvh is the visible height; the vh line
+       stays as the fallback. The id outranks the template's own #map-root
+       rule, which loads after this file. */
+    #map-root.map-fill { height: calc(100vh - 48px); height: calc(100dvh - 48px); }
+
+    /* Alliance, Recent Changes rows. The list keeps its own side padding, as
+       on desktop, so the rows drop theirs. Key 2 ("from X") can hold a
+       50-character alliance name: its column stops at 60% of the row and
+       ellipsises, so the system in key 1 keeps its room. */
+    #changes-list .m-row {
+        grid-template-columns: auto minmax(0, 1fr) fit-content(60%) 14px !important;
+        padding-left: 0 !important; padding-right: 0 !important;
+        /* The page drops the last row's bottom border, which left it at
+           38.98px; hold every row at the 40px floor. */
+        min-height: 40px;
+    }
+    #changes-list .m-row > [data-m="key"] ~ [data-m="key"] { overflow: hidden; text-overflow: ellipsis; }
+    /* No labelled line repeats the counterparty, so an open row wraps key 2
+       to show the whole name, with the arrow, system and chevron on its
+       first line. */
+    #changes-list .m-row.is-open:not(.m-row--link) { align-items: start !important; }
+    #changes-list .m-row.is-open:not(.m-row--link) > [data-m="key"] ~ [data-m="key"] { white-space: normal; text-overflow: clip; overflow-wrap: anywhere; overflow: visible; }
+    /* Keys at 12px like other phone lists (key 2's inline 10px needs
+       !important); at their desktop sizes collapsed rows sat under 40px. */
+    #changes-list .m-row > [data-m="key"] { font-size: 12px !important; }
+    /* The counterparty link is the phone's only way to that alliance. In an
+       open row key 2 stops clipping (above), and padding with a matching
+       negative margin gives the link a 40px+ hit area without moving its
+       text. The text sits about 11px below the row's top, so the area grows
+       10px up and 18px down: it stays inside its own row instead of
+       catching a tap meant for the row above. */
+    #changes-list .m-row.is-open:not(.m-row--link) > [data-m="key"] ~ [data-m="key"] > a { padding: 10px 0 18px; margin: -10px 0 -18px; }
+}
+/* ── end R5 T5 ── */
+
+/* ── R6 T1 · server activity ── */
+@media (max-width: 640px) {
+    /* The page's own <style> loads after site.css and wins ties, so every
+       .ta-* override here is more specific (IDs, child combinators) or
+       beats an inline value with !important. */
+
+    /* "Window ▾" dropdown (tab_dropdown) in the main section head: the
+       head's own padding already spaces it. Its open list floats over the
+       page: the page script closes it on an outside pointerdown, and an
+       in-flow list would pull the page up under the finger before that
+       tap's click landed. left/right -1px line it up with the summary's
+       border; z-index keeps it under the sticky nav bar. */
+    .ta-windows ~ details.m-tabs { margin-bottom: 0; position: relative; }
+    .ta-windows ~ details.m-tabs > .m-tabs-list {
+        position: absolute; top: 100%; left: -1px; right: -1px; z-index: calc(var(--z-nav) - 1);
+        background: var(--bg); border: 1px solid var(--border);
+    }
+
+    /* Stat tiles 2×2; beats the inline repeat(4,1fr). */
+    .b-pad-md > .ta-stats { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+
+    /* Text at 11px over the page's 9px: the stat tile labels, the heatmap's
+       Measure / Space / Region labels, the sample-coverage source line (its
+       <code> inherits) and the chart titles over each pair (inline 9px). */
+    .ta-stat > .ta-stat-label, .ta-hm-group > .ta-hm-label, .b-pad-md > .ta-source { font-size: 11px; }
+    .ta-pair .ta-chart-title { font-size: 11px !important; }
+
+    /* The PvP and security-zone chart pairs stack. minmax(0,1fr), so a
+       canvas can't push its column wider than the screen. Two classes beat
+       the global inline-1fr-1fr rule without relying on source order. */
+    .b-section > .ta-pair { grid-template-columns: minmax(0, 1fr) !important; }
+
+    /* Weekly heatmap fits the screen (ISS-103). The grid, its hour labels,
+       the presence strip and the band overlay share one track template, so
+       the bands stay aligned. Cells drop the 14px floor, which aspect-ratio
+       also carried over to their width. */
+    #pcu-heatmap, #ta-hm-col-labels, #ta-presence-strip, #ta-hm-bands {
+        grid-template-columns: 30px repeat(24, minmax(0, 1fr));
+    }
+    /* cursor: iOS fires click on a plain div only when it looks clickable. */
+    #pcu-heatmap > .ta-heatmap-cell { min-width: 0; min-height: 0; cursor: pointer; }
+    #pcu-heatmap > .ta-heatmap-cell.is-picked { outline: 2px solid var(--text); outline-offset: -1px; }
+    /* Every 3rd hour keeps its label (hours 0, 3 … 21: child 1 is the empty
+       gutter, so hour h is child h+2). visibility keeps each label's track. */
+    #ta-hm-col-labels > div[data-hr]:not(:nth-child(3n+2)) { visibility: hidden; }
+    /* Three lines held from the start (a per-capita title wraps to three at
+       360px), so the first tap doesn't push the legend down. */
+    .ta-hm-readout { margin-top: 0.5rem; min-height: 5em; font-size: 12px; color: var(--text); }
+
+    /* Tap targets. Every .b-btn here is already 44px tall (the global
+       phone floor), so nothing sets a height and nothing uses m-tap, whose
+       40px !important would shrink them. The live delta buttons and the
+       clock toggle widen to 44px; their inline 9px/10px needs !important. */
+    #ta-delta-btns > .ta-delta-btn, #ta-tz-toggle { min-width: 44px; font-size: 12px !important; }
+    /* Compare carries the same inline 10px; it matches the page's 12px. */
+    #ta-compare-toggle { font-size: 12px !important; }
+
+    /* Heatmap controls: one group per line, the region select on a line of
+       its own under the label and filter box. */
+    .ta-hm-controls > .ta-hm-group { flex: 1 1 100%; }
+    /* Measure and space pills. An <a class="b-btn"> is display:block, so
+       its label would sit at the top of the 44px box: inline-flex centres
+       it. They wrap whole: .b-btn's flex:1 (basis 0) would squeeze every
+       pill onto one line and break "PILOTS ONLINE" inside its button; each
+       still grows to fill its line. (0,2,1) beats the page's own
+       .ta-hm-group .b-btn, which loads later. */
+    .ta-hm-group > a.b-btn {
+        display: inline-flex; align-items: center; justify-content: center;
+        flex: 1 1 auto; min-width: 44px; white-space: nowrap; font-size: 12px;
+    }
+    #ta-region-form > #ta-region-filter { flex: 1 1 0; width: auto; min-width: 0; }
+    #ta-region-form > #ta-region-select { flex: 1 1 100%; width: 100%; max-width: none; }
+
+    /* History browser: ‹ year · slider · year › on one line, the date span
+       below. The buttons keep their own width (.b-btn is flex:1), so the
+       slider gets the rest. */
+    .ta-hist-nav { flex-wrap: wrap; }
+    .ta-hist-nav > .b-btn { flex: none; }
+    .ta-hist-nav > #hist-span { flex: 1 1 100%; min-width: 0 !important; }
+}
+/* ── end R6 T1 ── */
+
+/* ── R6 T2 · structure timers ── */
+@media (max-width: 640px) {
+    /* Active rows (D3 A). Lead: the phase code on its desktop chip colour,
+       one width for S and AN alike so names line up. min-width beats
+       `.m-row > * { min-width: 0 !important }`. */
+    .timer-row > .st-lead {
+        justify-content: center; min-width: 22px !important; height: 18px; padding: 0 3px;
+        border-radius: 2px; color: #000; font-size: 10px; font-weight: 700; line-height: 1;
+    }
+    .timer-row > [data-m="key"] { font-size: 12px; }
+    .timer-row > .st-name { font-weight: 600; color: var(--text); }
+    .timer-row > .st-cd { font-variant-numeric: tabular-nums; }
+
+    /* The page's small buttons (and the a.b-btn Discord link): wider, 12px
+       and centred. No height here: every button and .b-btn already gets the
+       phone layer's 44px min-height, and the shared .m-tap would force it
+       down to 40px !important. inline-flex centres the link's text, since
+       .b-btn is display:block. */
+    .st-tap {
+        min-width: 44px; font-size: 12px !important;
+        display: inline-flex; align-items: center; justify-content: center;
+    }
+
+    /* Actions (D4 A): Edit, Discord and × side by side. .b-btn's flex:1
+       would stretch each across the open row. */
+    .timer-row > [data-m-label] > .st-actions {
+        display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 0.5rem;
+    }
+    .st-actions > .b-btn, .st-actions > form > .b-btn { flex: none; }
+    .st-actions > form { display: flex; margin: 0; }
+
+    /* Archived rows (D5 A): both keys at 12px; the name is the desktop cell,
+       inline 10px. Delete is a 44px × that mustn't stretch either. */
+    .st-arch > [data-m="key"] { font-size: 12px !important; }
+    .st-arch > [data-m-label] > .st-tap { flex: none; }
+
+    /* Filter buttons are st-tap (12px); less tracking than the desktop
+       0.18em keeps the 12px labels compact. */
+    .st-filters > .range-btn { letter-spacing: 0.1em; }
+
+    /* Add Timer, Edit and the ACL rows: the fields' inline 10px and tight
+       padding need !important (16px also stops iOS zooming in). */
+    .st-form input:not([type="radio"]):not([type="hidden"]),
+    .st-form select, .st-form textarea { font-size: 16px !important; padding: 0.45rem 0.6rem !important; }
+    /* Hostile / Friendly: the label is the 40px target, at 12px. The radio
+       drops the phone layer's 44px input min-height, which sat it below
+       its label's text. */
+    .st-form label { min-height: 40px; font-size: 12px !important; }
+    .st-form input[type="radio"] { min-height: 0; margin: 0 0.35rem 0 0; }
+    /* The | between the side and Critical filters ends up alone at the end
+       of a wrapped line; the buttons' gap separates them on phones. */
+    .st-sep { display: none; }
+
+    /* Section heads (Add Timer, Access Control Groups, Archived Timers):
+       <summary>s 38.4px and 36.7px tall, raised to the 40px floor. Each is
+       a .b-panel-head, already flex with align-items:center, so its text
+       stays centred; display and list-style are left alone. */
+    .st-sum { min-height: 40px; }
+    /* The Side and Visibility field labels (inline 9px) and the ACL entry
+       type badge (inline 8px) read at 11px. */
+    .st-flabel, .st-acl-type { font-size: 11px !important; }
+}
+/* Every width: the filter hides rows with `hidden`. On phones this (0,2,0)
+   beats .m-row's display:grid !important (0,1,0). On desktop Tailwind's
+   preflight [hidden] already hides them; without it, .b-table-row's
+   display:flex would beat the browser's own [hidden]. */
+.timer-row[hidden] { display: none !important; }
+/* ── end R6 T2 ── */
+
+/* ── R6 T3 · images/discord/age ── */
+@media (max-width: 640px) {
+    /* Image Host uploads (D6 A): key 1 the label or file name, key 2 the
+       expiry, muted. The m-only copies have no size of their own, so they
+       would otherwise take the phone body's 16px. */
+    .img-up-row > [data-m="key"] { font-size: 12px; }
+    .img-up-row > .img-up-exp { font-size: 11px; color: var(--muted); }
+    /* The open row's Actions line: the View link (a 40px m-tap) and Delete
+       side by side. Delete is a button, so the global rule makes it 44px.
+       .b-btn is flex:1 with only a right border on desktop. */
+    .img-up-actions { display: flex; align-items: center; gap: 0.5rem; }
+    .img-up-actions > form { margin: 0; }
+    .img-up-actions > .b-link { color: var(--accent); }
+    .img-up-actions .b-btn { flex: none; padding: 0 0.75rem; border: 1px solid var(--danger); }
+    /* The image page's share fields: a live URL is wider than a phone at
+       the 16px input size, so each one ends in an ellipsis rather than a
+       silent cut. Copy still copies the whole value. */
+    .img-share-url { white-space: nowrap; text-overflow: ellipsis; }
+    /* The image page's owner Back (a block a.b-btn) and Delete, both 44px
+       from the global rule. At 360px "Back to Image Host" wraps to two
+       lines: Back centres its text in the taller box, and Delete's form
+       stretches its button to the same height. */
+    .img-owner-actions > a { display: flex; align-items: center; justify-content: center; }
+    .img-owner-actions > form { display: flex; }
+
+    /* Discord Time formats (D8 A): two lines, label + Copy, then the full
+       preview wrapping. The <t:…> tag is hidden but stays in the row: Copy
+       copies it, and dtCopy finds its button through #dt-tag-X's parent.
+       The page's own <style> loads after site.css, so every selector here
+       outranks its single-class rule. */
+    #dt-output > .dt-format-row {
+        display: grid; grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas: "label copy" "preview preview";
+        align-items: center; gap: 0.15rem 0.75rem;
+    }
+    .dt-format-row > .dt-fmt-label { grid-area: label; width: auto; min-width: 0; font-size: 11px; }
+    .dt-format-row > .dt-tag { display: none; }
+    .dt-format-row > .dt-preview {
+        grid-area: preview; font-size: 12px;
+        white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere;
+    }
+    .dt-format-row > .dt-copy-btn { grid-area: copy; }
+    /* Every Copy, plus Copy All and Share Link: the global button rule makes
+       them 44px tall; this only widens them and lifts the 9px label. Never
+       set display here: Copy All and Share Link start inline display:none
+       until a time exists. */
+    button.dt-copy-btn { min-width: 40px; padding: 0 0.75rem; font-size: 11px; }
+    /* UTC / Local / From Now: a 44px bar in three equal parts. */
+    .dt-tabs > .dt-tab { flex: 1 1 0; min-width: 0; min-height: 44px; padding: 0.25rem 0.4rem; }
+
+    /* Structure Age: the help text's long in-game link wraps. */
+    .sa-showinfo { overflow-wrap: anywhere; }
+    /* The result card, on the tool page and where the WH Tracker panel and
+       the wormhole system page embed it: its System link is a 44px tap
+       target (an 18px line otherwise; 44px, as every height in this
+       section), and the 9px date labels and method badge are 11px. Later
+       in the file than the shared .sa-* rules, so the single classes win. */
+    .sa-meta-item > a { display: inline-flex; align-items: center; min-height: 44px; }
+    .sa-date-lbl, .sa-method { font-size: 11px; }
+}
+/* ── end R6 T3 ── */
+
+/* ── R6 T4 · fitting tool ── */
+@media (max-width: 640px) {
+    /* Header toolbar. The global phone rule already makes these 44px tall
+       and the row wraps; .b-btn is display:block, which pins the Saved
+       Fits link's label to the top of that box, so centre every label. */
+    .fit-toolbar > .b-btn { display: inline-flex; align-items: center; justify-content: center; }
+    /* Custom damage weights: a 2x2 grid instead of a ~380px row. The class
+       is set only while the sliders are shown (the inline display:none
+       hides them otherwise). */
+    #dmg-custom-sliders.fit-dmg-on {
+        display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.25rem 0.75rem !important; flex: 1 1 100%; padding: 0.25rem 0.5rem !important; font-size: 12px !important;
+    }
+    #dmg-custom-sliders.fit-dmg-on > label { gap: 0.4rem !important; min-width: 0; }
+    #dmg-custom-sliders.fit-dmg-on input[type="range"] { flex: 1 1 auto; width: auto !important; min-width: 0; }
+    /* The single 1fr track would otherwise grow to its widest unbreakable
+       content (a nowrap name, a long implant name) and push the page
+       sideways; min-width:0 holds each column to the screen width. */
+    .fit-grid > * { min-width: 0; }
+
+    /* Module browser overlay (D9 A). ID-level, since the template's own
+       #browser-close display rule outranks a class; the global button rule
+       already gives it 44px of height, so only the width is raised to make
+       a square target. The tree and item rows are divs, which the floor
+       doesn't reach, so they are raised to 40px here. */
+    #browser-panel #browser-close { min-width: 44px; }
+    #browser-panel .fit-brow { min-height: 40px; }
+    .fit-nofit-why { display: block; font-size: 11px; color: var(--danger); }
+    .fit-added-note {
+        position: absolute; left: 0.5rem; right: 0.5rem; bottom: 0.5rem; z-index: 1;
+        padding: 0.6rem 0.75rem; border: 1px solid var(--accent); background: var(--surface);
+        color: var(--text); font-size: 12px; line-height: 1.4;
+        opacity: 0; pointer-events: none; transition: opacity 0.3s;
+    }
+    .fit-added-note.is-shown { opacity: 1; }
+
+    /* Slot, drone, implant and booster controls (D11 A), and the stats
+       %/EHP toggles: 40px wide, 44px tall, with a 12px glyph. The global
+       phone button rule supplies the 44px height; no min-height here, since
+       a class would outrank that floor. 40px rather than 44px leaves a high
+       slot's name 146px at 360px, enough for "200mm AutoCannon II" whole
+       (at 44px it was 134px and lost the "II"). */
+    .fit-ctl {
+        min-width: 40px; display: inline-flex; align-items: center; justify-content: center;
+        vertical-align: middle; font-size: 12px !important;
+    }
+    /* The m-only name copy: the module name truncates, and a loaded charge
+       is a muted second line under it. */
+    .fit-name { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; font-size: 12px; line-height: 1.3; }
+    .fit-name-text, .fit-charge-name, .fit-dname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .fit-name-text { color: var(--text); }
+    .fit-charge-name { color: var(--muted); font-size: 11px; cursor: pointer; }
+
+    /* Stats panel: the summary line wraps. */
+    .fit-sum { flex-wrap: wrap; row-gap: 0.25rem; }
+    .fit-sum-vals { flex-wrap: wrap; row-gap: 0.25rem !important; }
+
+    /* Pinned summary bar (D10 A). Below the nav (z 50) and the browser
+       backdrop (49); it is hidden anyway while those layers are open.
+       The gap is only a minimum: space-between spreads ordinary values
+       across the bar. Values are 12px and keys 11px. Measured with the
+       JetBrains Mono webfont: a capital's spool DPS, EHP and cap time
+       ("12,345 / 23,456", "12,345,678", "12m34s") need 371px, so they fit
+       whole from 375px up (at 13px they needed 384px); the largest values
+       ("98,765 / 187,654", "123,456,789") need 385px and fit from 390px.
+       Below that, each value gives up its tail to an ellipsis instead of
+       pushing Cap off-screen. Ordinary values fit at every width. */
+    .fit-sumbar {
+        position: fixed; left: 0; right: 0; bottom: 0; z-index: 45;
+        display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+        width: 100%; min-height: 44px; margin: 0; padding: 0 1rem env(safe-area-inset-bottom, 0px);
+        border: 0; border-top: 1px solid var(--accent); background: var(--surface);
+        color: var(--text); font: inherit; font-size: 12px; text-align: left; cursor: pointer;
+    }
+    .fit-sumbar[hidden], .fit-sumbar.is-covered { display: none !important; }
+    .fit-sumbar-item { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .fit-sumbar-k { margin-right: 0.35rem; color: var(--muted); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+    .fit-sumbar-v { color: var(--accent); font-weight: 600; }
+    .fit-sumbar-v[data-sumbar="cap"] { color: var(--success); }
+    .fit-sumbar-v[data-sumbar="cap"].is-bad { color: var(--danger); }
+    .fit-sumbar-go { color: var(--muted); }
+    body:has(#fit-sumbar:not([hidden])) { padding-bottom: calc(44px + env(safe-area-inset-bottom, 0px)); }
+    #stats-panel { scroll-margin-top: 56px; }
+
+    /* EFT import: the box sits at the top, so Import and Cancel stay above
+       the on-screen keyboard, and it scrolls inside the screen with the
+       buttons in a sticky row. */
+    #import-modal { align-items: flex-start !important; }
+    .fit-import-box {
+        top: 0 !important; margin: 1rem auto !important; padding: 1rem !important;
+        max-height: calc(100% - 2rem); overflow-y: auto;
+    }
+    .fit-import-box textarea { height: 140px !important; }
+    .fit-import-actions { position: sticky; bottom: 0; padding: 0.5rem 0; background: var(--surface); }
+
+    /* Info and character-import modals: the corner × becomes a square
+       44px target (height from the global button rule) in the corner
+       itself, and the info header keeps clear of it (a long module name
+       used to run under the glyph). */
+    .fit-modal-x { min-width: 44px; top: 0 !important; right: 0 !important; }
+    #info-modal-body > div:first-child { padding-right: 1.75rem; }
+
+    /* Charge selector (showChargeDropdown): Clear becomes a 44px square
+       (height from the global button rule; it was 27px wide) with a 12px
+       label over its inline 9px, and each charge row a 40px target (31px
+       before). */
+    .fit-charge-modal [data-click="clearCharge"] { min-width: 44px; font-size: 12px !important; }
+    .fit-charge-modal [data-click="selectCharge"] { min-height: 40px; }
+}
+/* ── end R6 T4 ── */
+
+/* ── R6 T5 · saved fits/compare ── */
+@media (max-width: 640px) {
+    /* Every selector starts at an id only Saved Fits or Compare has. The
+       Skill Farm also uses .sf-table (R3 T7 scoped its own rules to
+       #skill-farm-content), and neither page's phone rules may reach the
+       other. The ids also outrank the pages' own <style> rules, which load
+       after this file. */
+
+    /* Saved fit rows (D12 A, D13 A). Each cell carries the page's desktop
+       padding and bottom rule; as grid items those would draw a line under
+       every cell, so the row draws one instead. */
+    #sf-tbody > tr.m-row { border-bottom: 1px solid var(--border); }
+    #sf-tbody > tr.m-row > td { padding: 0; border-bottom: none; }
+    /* The search filter hides rows with `hidden`. This (1,2,1) beats
+       .m-row's display:grid !important (0,1,0). Desktop needs no rule: the
+       browser's own [hidden] does it there. */
+    #sf-tbody > tr.m-row[hidden] { display: none !important; }
+    /* Collapsed line: icon · fit name · DPS, at 12px rather than 11px. */
+    #sf-tbody > tr.m-row > [data-m="key"] { font-size: 12px; }
+    #sf-tbody > tr.m-row > [data-m="lead"] > img { border: 1px solid var(--border); }
+    /* Actions, inside the open row: the compare box, Move and Delete side
+       by side. The buttons already get the 44px phone height; min-width
+       makes each a square target, and their glyphs grow from 11px (the
+       !important beats the open row's font-size:inherit). The checkbox is
+       the only copy there is, since the compare state lives in it. Its
+       label (no box on desktop) is the 44px target here and ticks it; the
+       box itself is drawn at 20px, because a native checkbox paints at
+       whatever size it is given and the global 44px input height would
+       make it a 40px white block. toggleMRow ignores taps on labels. The
+       12px gaps keep a tap near one target's edge from being snapped by
+       the browser's touch adjustment onto its neighbour (Move sits next
+       to the box, Delete next to Move). */
+    #sf-tbody .sf-act { display: inline-flex; align-items: center; gap: 0.75rem; }
+    #sf-tbody .sf-act > .sf-cmp {
+        display: inline-flex; align-items: center; justify-content: center;
+        min-width: 44px; min-height: 44px; cursor: pointer;
+    }
+    #sf-tbody .sf-act > .sf-cmp > .sf-compare-check { width: 20px; height: 20px; min-height: 0; margin: 0; }
+    #sf-tbody .sf-act > button { min-width: 44px; font-size: 16px !important; }
+
+    /* Toolbar: search on its own full-width line (it was 220px minimum),
+       the spacer that pushed the chips right goes, and the chips (already
+       44px tall as buttons) read at 12px. + New Fit is a link, so it is
+       raised to the height of the Import button beside it. */
+    input#sf-search { flex: 1 1 100%; min-width: 0; }
+    input#sf-search + span { display: none; }
+    #sf-toolbar > .sf-chip, #sf-head-actions > .sf-chip { font-size: 12px; }
+    #sf-head-actions > a.sf-chip { min-height: 44px; display: inline-flex; align-items: center; }
+
+    /* Import-from-character dialog: each fit's checklist row (a <label>)
+       is a 40px target at 12px. Its checkbox drops the global 44px input
+       height, which would otherwise size the row; the close × is square.
+       A fieldset's default min-width is its min-content, so one long
+       nowrap fit name widened its whole group past the dialog and the list
+       scrolled sideways; at 0 the name ellipsises as the row intends. */
+    #charimport-dialog fieldset { min-width: 0; }
+    #charimport-dialog fieldset > label { min-height: 40px; font-size: 12px; }
+    #charimport-dialog fieldset > label > input { min-height: 0; }
+    #charimport-dialog button[aria-label="Close"] { min-width: 44px; }
+
+    /* Compare (D14 A): four columns kept. The head reads A and B (the
+       icons and names are m-hide); the line above the table names them.
+       Narrower side padding keeps the table inside 360px. */
+    #fit-compare > .fc-names {
+        padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border);
+        font-size: 12px; color: var(--muted); overflow-wrap: anywhere;
+    }
+    #fit-compare > .fc-names > b, #fit-compare .fc-fit-head > .m-only { color: var(--accent); font-weight: 600; }
+    #fit-compare .fc-fit-head > .m-only { font-size: 12px; }
+    #fit-compare th, #fit-compare td { padding-left: 0.4rem; padding-right: 0.4rem; }
+    /* The Stat and Δ B−A header cells: 11px over the page's 9px. */
+    #fit-compare thead th { font-size: 11px; }
+}
+/* ── end R6 T5 ── */
+
+/* ── R6 T6 · admin ── */
+@media (max-width: 640px) {
+    /* Section dropdown (admin.html #admin-tabs-m): the tab_dropdown macro's
+       look, for buttons instead of links. Height comes from the 44px rule. */
+    #admin-tabs-m .m-tabs-list button {
+        display: block; width: 100%; padding: 0.75rem 0.85rem;
+        border: none; border-bottom: 1px solid var(--border); background: none;
+        font-family: inherit; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase;
+        text-align: left; color: var(--text); cursor: pointer;
+    }
+    #admin-tabs-m .m-tabs-list button:last-child { border-bottom: none; }
+    #admin-tabs-m .m-tabs-list button.is-active { color: var(--accent); }
+
+    /* Two-line rows for the lists that re-render themselves (D15 A): ESI
+       logs and the scheduler's sync table. Line 1 is code/badge · main text ·
+       time; the ::after break pushes every adm-2l-sub cell to a muted line 2.
+       Pure CSS, no open state, so a refresh has nothing to lose. !important
+       beats the cells' inline flex-basis, padding and 8-10px sizes. */
+    .adm-2l {
+        flex-wrap: wrap !important; align-items: baseline !important;
+        column-gap: 0.5rem !important; row-gap: 0 !important;
+        padding: 0.45rem 0.75rem !important; min-height: 0 !important;
+    }
+    .adm-2l > * {
+        order: 4; flex: none !important; width: auto !important; min-width: 0 !important; max-width: 100%;
+        font-size: 11px !important; text-align: left !important;
+    }
+    .adm-2l::after { content: ""; order: 3; flex: 0 0 100%; height: 0.2rem; }
+    .adm-2l > .adm-2l-a { order: 0; }
+    .adm-2l > .adm-2l-main {
+        order: 1; flex: 1 1 0 !important; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        font-size: 12px !important; color: var(--text) !important;
+    }
+    .adm-2l > .adm-2l-time { order: 2; margin-left: auto; white-space: nowrap; }
+    .adm-2l > .adm-2l-sub { flex: 0 1 auto !important; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .adm-2l > .adm-2l-act { margin-left: auto; overflow: visible; }
+    .adm-2l > :not(.adm-2l-a, .adm-2l-main, .adm-2l-time, .adm-2l-sub) { display: none !important; }
+    .adm-2l .b-badge { font-size: 9px !important; }
+    .adm-2l > .adm-retry::before { content: "retry "; color: var(--muted); }
+    .adm-2l > .adm-archived::before { content: "archived "; color: var(--muted); }
+    .adm-2l > .adm-stale::before { content: "stale "; color: var(--muted); }
+    .adm-2l-act > button { min-width: 44px; padding: 0 0.75rem !important; font-size: 12px !important; }
+
+    /* Updates › run history: the same two lines, CSS only (the panel's
+       markup is pinned by tests/test_updater_panel.py). Columns are placed
+       by position: When, Kind, Change, Outcome, Delivered. Line 1 is
+       outcome · change · when; kind and delivery go below. */
+    #updater-panel .upd-table, #updater-panel .upd-table tbody { display: block; width: 100%; }
+    #updater-panel .upd-table thead { display: none; }
+    #updater-panel .upd-table tr {
+        display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 0.5rem;
+        padding: 0.45rem 0.75rem; border-bottom: 1px solid var(--border);
+    }
+    #updater-panel .upd-table tr:last-child { border-bottom: none; }
+    #updater-panel .upd-table tr::after { content: ""; order: 3; flex: 0 0 100%; height: 0.2rem; }
+    #updater-panel .upd-table td { order: 4; padding: 0; border-bottom: none; font-size: 11px; color: var(--muted); }
+    #updater-panel .upd-table td:nth-child(4) { order: 0; }
+    #updater-panel .upd-table td:nth-child(3) {
+        order: 1; flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        font-size: 12px; color: var(--text);
+    }
+    #updater-panel .upd-table td:nth-child(1) { order: 2; margin-left: auto; white-space: nowrap; }
+
+    /* Updater tap targets. Buttons, selects and inputs already get 44px;
+       the <summary> toggles don't. The two plain ones keep display:list-item
+       (and so their marker): padding plus min-height, never display:flex. */
+    #updater-panel .updater-outcome details > summary,
+    #updater-panel .updater-schedule-form > summary { min-height: 44px; padding: 0.75rem 0; box-sizing: border-box; }
+    #updater-panel .updater-policy > summary,
+    #updater-panel .updater-notify > summary { min-height: 44px; }
+    /* The "Latest release" link: a 14px line of text otherwise. */
+    #updater-panel .upd-status .b-row-val > a { display: inline-flex; align-items: center; min-height: 40px; }
+
+    /* Users (D16 A): the header row keeps togglePanel; role and Delete are
+       m-hide there and reappear at the top of the opened user. */
+    .adm-user { min-height: 44px; }
+    .adm-user .adm-user-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .adm-user .b-badge { font-size: 9px !important; }
+    .adm-user > .adm-user-age { min-width: 0 !important; font-size: 11px !important; white-space: nowrap; }
+    .adm-user-ctl {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem;
+        padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--border);
+    }
+    .adm-user-ctl > .adm-user-role {
+        display: flex; align-items: center; gap: 0.6rem; flex: 1 1 12rem; min-width: 0;
+        font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    }
+    .adm-user-role > select {
+        flex: 1 1 auto; min-width: 0; padding: 0 0.5rem;
+        background: var(--bg); border: 1px solid var(--border); color: var(--text); font-family: inherit;
+    }
+    .adm-user-ctl > .adm-user-del {
+        flex: none; padding: 0 0.9rem; border: 1px solid var(--danger); color: var(--danger); font-size: 12px;
+    }
+    /* Character sub-rows: portrait · name · Sync ✕, then corp, token, sync
+       state and age below, muted. */
+    .adm-char { flex-wrap: wrap !important; row-gap: 0 !important; padding: 0.4rem 0.75rem !important; }
+    .adm-char::after { content: ""; order: 2; flex: 0 0 100%; height: 0.15rem; }
+    .adm-char > * { order: 3; flex: none !important; font-size: 11px !important; }
+    .adm-char > img, .adm-char > .adm-char-name { order: 0; }
+    .adm-char > .adm-char-name { flex: 1 1 0 !important; min-width: 0; font-size: 12px !important; }
+    .adm-char > .adm-char-btns { order: 1; gap: 0.5rem !important; }
+    .adm-char-btns > .b-btn { min-width: 44px; padding: 0 0.6rem !important; font-size: 12px !important; }
+    /* Corp takes line 2's free space and ellipsises, so token, sync and
+       age never wrap to a third line under a long corporation name. */
+    .adm-char > .adm-char-corp { flex: 1 1 0 !important; min-width: 0 !important; margin-left: calc(18px + 0.5rem); }
+    .adm-char > .adm-char-tok, .adm-char > .adm-char-sync { display: inline-flex; align-items: center; gap: 0.3rem; color: var(--muted); }
+    .adm-char > .adm-char-tok::before { content: "token"; }
+    .adm-char > .adm-char-sync::before { content: "sync"; }
+    .adm-char .b-badge { font-size: 9px !important; }
+    /* Allowlist rows fit once their 80px minimums go; the add form stacks
+       (m-stack on the form row). */
+    .adm-allow > span { min-width: 0 !important; }
+    .adm-allow > .b-btn { min-width: 44px; font-size: 12px !important; }
+    .adm-allow .b-badge { font-size: 9px !important; }
+
+    /* Audit log (D17 A): badge · character · age. A long event type
+       ellipsises so key 1 keeps its room; the open row's Event line has it
+       in full. */
+    .adm-audit-row > [data-m="lead"] .b-badge {
+        font-size: 9px !important; max-width: 8rem; overflow: hidden; text-overflow: ellipsis;
+    }
+    .adm-audit-row > [data-m="key"] { font-size: 12px !important; }
+    .adm-audit-row > [data-m="key"] ~ [data-m="key"] { font-size: 11px !important; color: var(--muted); }
+    .adm-audit-filter { flex: 1 1 100%; width: 100%; }
+}
+/* ── end R6 T6 ── */
+
+/* ── R6 T7 · account ── */
+@media (max-width: 640px) {
+    /* Account (ISS-101): each card's 25 chips and their legend fold behind
+       the m-only "N of 25 shared" button, which toggles is-expanded on the
+       card (toggleExpanded). The template opens a card when anything isn't
+       shared. The head's own count is m-hide, so it isn't shown twice. */
+    .acct-char:not(.is-expanded) > .acct-perms,
+    .acct-char:not(.is-expanded) > .acct-legend { display: none; }
+    .acct-perms-toggle {
+        display: flex; align-items: center; gap: 0.5rem; width: 100%;
+        margin: 0; padding: 0 0.8rem; background: none; border: none;
+        font-family: inherit; font-size: var(--fs-sm); letter-spacing: var(--ls-wider);
+        text-transform: uppercase; color: var(--muted); text-align: left; cursor: pointer;
+    }
+    .acct-perms-toggle b { color: var(--accent); font-weight: 600; }
+    .acct-perms-toggle::after { content: "▸"; content: "▸" / ""; margin-left: auto; color: var(--muted); }
+    .acct-char.is-expanded > .acct-perms-toggle::after { content: "▾"; content: "▾" / ""; }
+    /* Change permissions / Renew: a link styled as a button, which the 44px
+       rule makes taller; centre its text in that height. */
+    .acct-char-stat > .b-btn { display: inline-flex; align-items: center; }
+
+    /* Permission picker (D18 A): every card stays, the "unlocks" chips go.
+       CSS only: the picker also serves the logged-out sign-up flow, where
+       actions.js isn't loaded. The chips were also what made it scroll
+       sideways at 360px. */
+    .perm-card .perm-powers { display: none; }
+    /* The ESI scope summary, the footer's Cancel link and each group's
+       All / None reach 44px. line-height keeps the summary a list item, so
+       its marker stays. */
+    .perm-scopes > summary { line-height: 44px; }
+    .perm-footer > a { display: inline-flex; align-items: center; min-height: 44px; }
+    .perm-group-actions > button { min-width: 44px; }
+    /* The footer's Continue button is flex:none (.b-btn.is-primary in
+       design-system/css/components.css), so with
+       Cancel beside it the count was pushed off the left edge at 360px.
+       Letting the button shrink wraps its label instead. */
+    .perm-footer > .b-btn { flex: 0 1 auto; }
+}
+/* ── end R6 T7 ── */
 
 /* ── m-hide wins ties: keep this the last phone rule in the file ── */
 @media (max-width: 640px) {

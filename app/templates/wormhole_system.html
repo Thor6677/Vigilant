@@ -56,8 +56,10 @@
 </div>
 <div style="margin-bottom:1.25rem;">{{ entity_links("system", system['system_id'], system['system_name'], current="wh", jspace=True) }}</div>
 
+{# The wsp-* classes are phone tap-target hooks for this page only: the WH
+   Tracker panel reuses the ws-* classes. #}
 <!-- Connections -->
-<div class="ws-section">
+<div class="ws-section wsp-conns">
     <div class="ws-section-title">Connections</div>
     <div style="margin-bottom:0.5rem;">
         {% if statics %}
@@ -103,7 +105,7 @@
     </div>
 </div>
 
-<div class="ws-grid">
+<div class="ws-grid wsp-grid">
     <div>
         <!-- Effect -->
         {% if effect %}
@@ -136,7 +138,7 @@
         <div class="ws-section">
             <div class="ws-section-title" style="display:flex;justify-content:space-between;align-items:center;">
                 System Diagram
-                <div style="display:flex;gap:2px;">
+                <div class="wsp-zoom" style="display:flex;gap:2px;">
                     <button id="zoom-full" data-click="drawDiagramFromEl" data-mode="full" style="background:var(--accent);color:var(--bg);border:1px solid var(--accent);padding:2px 8px;font-size:8px;font-family:inherit;text-transform:uppercase;letter-spacing:0.1em;cursor:pointer;">Full</button>
                     <button id="zoom-dscan" data-click="drawDiagramFromEl" data-mode="dscan" style="background:var(--surface);color:var(--muted);border:1px solid var(--border);padding:2px 8px;font-size:8px;font-family:inherit;text-transform:uppercase;letter-spacing:0.1em;cursor:pointer;">D-scan</button>
                 </div>
@@ -144,7 +146,7 @@
             <div class="ws-diagram-wrap">
                 <svg id="sys-diagram" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;max-width:400px;">
                 </svg>
-                <div style="display:flex;justify-content:center;gap:0.75rem;flex-wrap:wrap;margin-top:0.3rem;font-size:9px;color:var(--muted);">
+                <div class="wsp-legend" style="display:flex;justify-content:center;gap:0.75rem;flex-wrap:wrap;margin-top:0.3rem;font-size:9px;color:var(--muted);">
                     <span><span style="display:inline-block;width:14px;border-top:1px dashed rgba(100,180,255,0.6);vertical-align:middle;margin-right:3px;"></span>D-scan (14.3 AU)</span>
                     <span>{{ celestials['planets']|length }} planet{{ 's' if celestials['planets']|length != 1 }}</span>
                 </div>
@@ -315,7 +317,7 @@
             <div class="b-panel" style="padding:0.75rem;">
                 <p class="b-muted-sm" style="margin-bottom:0.5rem;">
                     Paste a structure showinfo link to estimate when it was anchored.
-                    <a href="/tools/structure-age" style="color:var(--accent);">Full tool →</a>
+                    <a href="/tools/structure-age" class="wsp-fulltool" style="color:var(--accent);">Full tool →</a>
                 </p>
                 <form hx-get="/tools/structure-age/partial" hx-target="#ws-structure-age-result"
                       hx-swap="innerHTML" style="display:flex;flex-direction:column;gap:0.5rem;">
@@ -330,7 +332,7 @@
         <!-- External Links -->
         <div class="ws-section">
             <div class="ws-section-title">External Links</div>
-            <div class="ws-links">
+            <div class="ws-links wsp-links">
                 <a href="https://zkillboard.com/system/{{ system['system_id'] }}/" target="_blank" rel="noopener">zKillboard</a>
                 <a href="https://evemaps.dotlan.net/system/{{ system['system_name'] }}" target="_blank" rel="noopener">DOTLAN</a>
                 <a href="https://anoik.is/systems/{{ system['system_name'] }}" target="_blank" rel="noopener">Anoik.is</a>

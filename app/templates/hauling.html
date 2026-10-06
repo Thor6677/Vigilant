@@ -62,7 +62,7 @@
         <div id="panel-manual" class="b-pad-md">
             <div style="display:flex;flex-direction:column;gap:3px;margin-bottom:0.75rem;">
                 <label class="b-eyebrow">Total Volume to Haul (m³)</label>
-                <input type="text" id="vol-total" value="0" data-input="recalcTrips"
+                <input type="text" id="vol-total" value="0" data-input="recalcAll"
                        style="padding:0.5rem;background:var(--bg);border:1px solid var(--accent);color:var(--text);font-family:inherit;font-size:14px;text-align:right;max-width:250px;">
             </div>
         </div>
@@ -84,7 +84,8 @@
 {# ── Ship entry template (hidden, cloned by JS) ─────────────────────────── #}
 <template id="ship-entry-tpl">
     <div class="ship-entry" style="padding:0.75rem;border-bottom:1px solid var(--border);">
-        <div style="display:flex;flex-wrap:wrap;gap:0.75rem;align-items:flex-end;">
+        {# haul-entry-fields: two fields to a row on phones (site.css, R3 T4). #}
+        <div class="haul-entry-fields" style="display:flex;flex-wrap:wrap;gap:0.75rem;align-items:flex-end;">
             <div style="display:flex;flex-direction:column;gap:3px;min-width:50px;">
                 <label class="b-eyebrow">Qty</label>
                 <input type="number" data-field="qty" value="1" min="1" max="50" data-change="recalcAll"
@@ -136,9 +137,9 @@
                     <option value="3">3</option><option value="4">4</option><option value="5" selected>5</option>
                 </select>
             </div>
-            <div style="display:flex;flex-direction:column;gap:3px;">
+            <div class="haul-entry-remove" style="display:flex;flex-direction:column;gap:3px;">
                 <label class="b-eyebrow">&nbsp;</label>
-                <button data-click="removeShipEntry" class="b-btn" style="padding:0.35rem 0.5rem;border:1px solid var(--danger);color:var(--danger);font-size:11px;">✕</button>
+                <button data-click="removeShipEntry" class="b-btn" aria-label="Remove ship" style="padding:0.35rem 0.5rem;border:1px solid var(--danger);color:var(--danger);font-size:11px;">✕</button>
             </div>
         </div>
         <div class="ship-capacity" style="padding-top:0.5rem;display:none;">
@@ -275,7 +276,7 @@ function renderEntryCapacity(entry, cap) {
         var label = BAY_LABELS[bay] || bay;
         var div = document.createElement('span');
         div.style.cssText = 'display:inline-flex;align-items:center;gap:0.35rem;padding:0.2rem 0.5rem;background:var(--surface);border:1px solid var(--border);border-radius:3px;font-size:10px;';
-        div.innerHTML = '<span style="color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-size:8px;">' + label + '</span>' +
+        div.innerHTML = '<span class="haul-bay-label" style="color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-size:8px;">' + label + '</span>' +
             '<span style="color:var(--accent);font-weight:600;">' + formatNumber(val) + '</span>';
         inner.appendChild(div);
     }
@@ -294,6 +295,9 @@ function renderEntryCapacity(entry, cap) {
 }
 
 /* ── Recalculate everything ───────────────────────────────────────────────── */
+/* Also the Manual m³ field's data-input handler. actions.js calls it with
+   the input event, which it ignores; recalcTrips needs the fleet figures
+   worked out here, so the field must not name it directly (ISS-131). */
 function recalcAll() {
     var entries = document.querySelectorAll('.ship-entry');
     var fleetCapacity = 0;
@@ -339,10 +343,13 @@ function recalcTrips(fleetCapacity, fleetShipNames) {
             return (BAY_LABELS[b] || b) + ': ' + formatNumber(cap.bays[b]);
         }).join(' + ');
 
-        breakdownHtml += '<div class="b-table-row">' +
+        /* haul-breakdown-*: on phones the row wraps, the bay detail on its own
+           line under the ship and m³/trip (site.css, R3 T4). Only 1-3 ships,
+           so no tap-to-open. */
+        breakdownHtml += '<div class="b-table-row haul-breakdown-row">' +
             '<span style="flex:2;font-size:11px;color:var(--text);">' + cap.name + (cap.qty > 1 ? ' ×' + cap.qty : '') + '</span>' +
-            '<span style="flex:2;text-align:right;font-size:10px;color:var(--muted);">' + bayDetail + '</span>' +
-            '<span style="flex:1;text-align:right;font-size:11px;font-weight:600;color:var(--accent);">' + formatNumber(perTrip) + ' m³/trip</span>' +
+            '<span class="haul-breakdown-bays" style="flex:2;text-align:right;font-size:10px;color:var(--muted);">' + bayDetail + '</span>' +
+            '<span class="haul-breakdown-trip" style="flex:1;text-align:right;font-size:11px;font-weight:600;color:var(--accent);">' + formatNumber(perTrip) + ' m³/trip</span>' +
             '</div>';
     });
 

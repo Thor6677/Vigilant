@@ -7,7 +7,7 @@
         <h1 class="b-page-title">Ship Fitting</h1>
         <div style="font-size:10px;color:var(--muted);margin-top:0.25rem;">Build and analyze ship fittings</div>
     </div>
-    <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+    <div class="fit-toolbar" style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
         <select id="skill-char-select" data-change="onSkillCharChange"
                 title="Check fit against a character's trained skills"
                 style="padding:3px 10px;font-size:10px;border:1px solid var(--border);background:var(--surface);color:var(--muted);font-family:inherit;cursor:pointer;white-space:nowrap;">
@@ -137,6 +137,11 @@
             <div style="padding:1rem;font-size:10px;color:var(--muted);text-align:center;">Select a category above</div>
         </div>
     </div>
+    {# Phone-only add confirmation (mobile R6 T4, D9 A). addModuleFromBrowser
+       fills it on each add from the overlay and it fades on its own. It
+       floats over the bottom of the list with pointer-events:none, so it
+       never blocks a tap. #}
+    <div id="browser-added-note" class="m-only fit-added-note" role="status" aria-live="polite"></div>
 </div>
 
 {# ── Center: Ship + Slots ───────────────────────────────────────────────── #}
@@ -306,6 +311,20 @@
 
 </div>
 
+{# Phone-only pinned summary (mobile R6 T4, D10 A). On phones the stats panel
+   sits below every slot section, so this bar keeps DPS, EHP and Cap in view.
+   _fitSumBarUpdate copies the values from the stats partial's data-sum-*
+   hooks after every #stats-panel write; it stays hidden until the first
+   stats render, and _fitSumBarSync hides it while the module browser
+   overlay, a modal or the charge selector is open. Tapping it jumps to the
+   stats. m-only: it never shows above 640px. #}
+<button type="button" id="fit-sumbar" class="m-only fit-sumbar" data-click="scrollToFitStats" hidden>
+    <span class="fit-sumbar-item"><span class="fit-sumbar-k">DPS</span><span class="fit-sumbar-v" data-sumbar="dps"></span></span>
+    <span class="fit-sumbar-item"><span class="fit-sumbar-k">EHP</span><span class="fit-sumbar-v" data-sumbar="ehp"></span></span>
+    <span class="fit-sumbar-item"><span class="fit-sumbar-k">Cap</span><span class="fit-sumbar-v" data-sumbar="cap"></span></span>
+    <span class="fit-sumbar-go" aria-hidden="true">&#9662;</span>
+</button>
+
 {# Folder option list for the "Save to folder" picker (used by saveFitting()) #}
 <datalist id="fit-folder-options">
     {% for fp in folder_paths %}
@@ -316,7 +335,7 @@
 {# ── Module Info Modal ───────────────────────────────────────────────────── #}
 <div id="info-modal" data-click="closeModalOnBackdrop" data-modal-closer="hideInfoModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:100;">
     <div style="background:var(--surface);border:1px solid var(--border);padding:1.25rem;max-width:520px;width:90%;margin:auto;position:relative;top:12%;max-height:80vh;overflow-y:auto;">
-        <button data-click="hideInfoModal" style="position:absolute;top:0.5rem;right:0.75rem;background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;line-height:1;">&times;</button>
+        <button class="fit-modal-x" data-click="hideInfoModal" style="position:absolute;top:0.5rem;right:0.75rem;background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;line-height:1;">&times;</button>
         <div id="info-modal-body">
             <div style="padding:1rem;font-size:11px;color:var(--muted);text-align:center;">Loading...</div>
         </div>
@@ -326,7 +345,7 @@
 {# ── Character Fittings Import Modal ─────────────────────────────────────── #}
 <div id="charimport-modal" data-click="closeModalOnBackdrop" data-modal-closer="hideCharImportModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:100;">
     <div style="background:var(--surface);border:1px solid var(--border);padding:1.25rem;max-width:560px;width:92%;margin:auto;position:relative;top:10%;max-height:82vh;overflow-y:auto;">
-        <button data-click="hideCharImportModal" style="position:absolute;top:0.5rem;right:0.75rem;background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;line-height:1;">&times;</button>
+        <button class="fit-modal-x" data-click="hideCharImportModal" style="position:absolute;top:0.5rem;right:0.75rem;background:none;border:none;color:var(--muted);cursor:pointer;font-size:18px;line-height:1;">&times;</button>
         <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:0.75rem;">Import from Character</div>
         <div id="charimport-body">
             <div style="padding:1rem;font-size:11px;color:var(--muted);text-align:center;">Loading...</div>
@@ -336,7 +355,7 @@
 
 {# ── EFT Import Modal ────────────────────────────────────────────────────── #}
 <div id="import-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:100;align-items:center;justify-content:center;">
-    <div style="background:var(--surface);border:1px solid var(--border);padding:1.5rem;max-width:500px;width:90%;margin:auto;position:relative;top:20%;">
+    <div class="fit-import-box" style="background:var(--surface);border:1px solid var(--border);padding:1.5rem;max-width:500px;width:90%;margin:auto;position:relative;top:20%;">
         <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:0.75rem;">Import EFT Fitting</div>
         <textarea id="eft-input" placeholder="Paste EFT format here...
 [Ship Name, Fitting Name]
@@ -345,7 +364,7 @@ Module 2
 ..."
                   style="width:100%;height:200px;padding:0.5rem;font-size:11px;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;resize:vertical;"></textarea>
         <div id="import-error" style="font-size:10px;color:var(--danger);margin-top:0.25rem;display:none;"></div>
-        <div style="display:flex;gap:0.5rem;margin-top:0.75rem;justify-content:flex-end;">
+        <div class="fit-import-actions" style="display:flex;gap:0.5rem;margin-top:0.75rem;justify-content:flex-end;">
             <button data-click="hideImportModal" class="b-btn" style="padding:4px 12px;font-size:10px;border:1px solid var(--border);color:var(--muted);">Cancel</button>
             <button data-click="doImportEFT" class="b-btn" style="padding:4px 12px;font-size:10px;border:1px solid var(--accent);color:var(--accent);">Import</button>
         </div>
@@ -468,6 +487,107 @@ function _fitErrorHtml(status) {
 function _fitCheckOk(r) {
     if (!r.ok) { var e = new Error('HTTP ' + r.status); e.status = r.status; throw e; }
     return r;
+}
+
+/* ── Phone layer (mobile R6 T4) ─────────────────────────────────────────────
+   Everything here acts on m-only elements or is gated on the phone media
+   query, so desktop renders exactly as before. */
+var FIT_PHONE_MQ = window.matchMedia ? window.matchMedia('(max-width: 640px)') : null;
+function _fitIsPhone() {
+    return !!(FIT_PHONE_MQ && FIT_PHONE_MQ.matches);
+}
+
+/* D9 A: the module browser overlay stays open, so each add from it is
+   confirmed by a short note inside the overlay. A new add replaces the
+   note and restarts its fade. Once the 0.3s fade has run, the text is
+   cleared too, so a screen reader can't land on a stale note. Both steps
+   share one timer, so a new add cancels whichever is pending and an
+   earlier add's clear can never wipe the newer text. */
+var RACK_NAMES = {high: 'high', med: 'mid', low: 'low', rig: 'rig', subsystem: 'subsystem'};
+var _addNoteTimer = null;
+function _noteBrowserAdd(text) {
+    if (!_fitIsPhone()) return;
+    var note = document.getElementById('browser-added-note');
+    if (!note) return;
+    note.textContent = text;
+    note.classList.add('is-shown');
+    clearTimeout(_addNoteTimer);
+    _addNoteTimer = setTimeout(function() {
+        note.classList.remove('is-shown');
+        _addNoteTimer = setTimeout(function() { note.textContent = ''; }, 300);
+    }, 2500);
+}
+
+function _rackFill(slot) {
+    return (RACK_NAMES[slot] || slot) + ' ' + getSlotCount(slot) + '/' + getSlotLimit(slot);
+}
+
+function _browserAddNoteText(typeId, typeName, slot) {
+    var where;
+    if (slot === 'drone') {
+        var stack = state.items.filter(function(i) { return i.slot === 'drone' && i.type_id === typeId; })[0];
+        where = 'drones ×' + (stack ? stack.quantity : 1);
+    } else if (slot === 'cargo') {
+        where = 'cargo';
+    } else {
+        where = _rackFill(slot);
+    }
+    return '✓ Added ' + typeName + ' · ' + where;
+}
+
+/* D10 A: the pinned summary bar. recalcStats calls this after every write
+   to #stats-panel, so the bar mirrors the panel: values from the stats
+   partial's data-sum-* hooks, hidden when the panel holds no stats (before
+   a ship is picked, or after an error). */
+function _fitSumBarUpdate() {
+    var bar = document.getElementById('fit-sumbar');
+    if (!bar) return;
+    var src = document.querySelector('#stats-panel [data-fit-sum]');
+    bar.hidden = !src;
+    if (!src) return;
+    ['dps', 'ehp', 'cap'].forEach(function(k) {
+        var cell = bar.querySelector('[data-sumbar="' + k + '"]');
+        if (cell) cell.textContent = src.getAttribute('data-sum-' + k) || '–';
+    });
+    var cap = bar.querySelector('[data-sumbar="cap"]');
+    if (cap) cap.classList.toggle('is-bad', src.getAttribute('data-sum-cap-ok') !== '1');
+}
+
+/* The bar steps aside while the module browser overlay, a modal or the
+   charge selector is open. Each modal is shown with an inline display
+   value other than none. */
+function _fitSumBarSync() {
+    var bar = document.getElementById('fit-sumbar');
+    if (!bar) return;
+    var panel = document.getElementById('browser-panel');
+    var covered = (!!panel && panel.getAttribute('data-overlay') === '1') ||
+        !!document.getElementById('charge-overlay') ||
+        ['info-modal', 'charimport-modal', 'import-modal'].some(function(id) {
+            var m = document.getElementById(id);
+            return !!m && m.style.display !== '' && m.style.display !== 'none';
+        });
+    bar.classList.toggle('is-covered', covered);
+}
+
+/* One observer covers every open and close path (buttons, backdrop, Esc,
+   an import finishing) without touching each show/hide function. */
+function _fitSumBarWatch() {
+    _fitSumBarSync();
+    if (!window.MutationObserver) return;
+    var mo = new MutationObserver(_fitSumBarSync);
+    ['browser-panel', 'info-modal', 'charimport-modal', 'import-modal'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) mo.observe(el, {attributes: true, attributeFilter: ['style', 'data-overlay']});
+    });
+    /* The charge selector is appended to <body> while it is open. */
+    mo.observe(document.body, {childList: true});
+}
+
+function scrollToFitStats() {
+    var panel = document.getElementById('stats-panel');
+    if (!panel) return;
+    var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    panel.scrollIntoView({behavior: still ? 'auto' : 'smooth', block: 'start'});
 }
 
 /* ── Mobile module-browser overlay (ISS-008) ────────────────────────────── */
@@ -755,11 +875,15 @@ function renderSlots() {
             var isOverheated = item.overheated === true;
             var opacity = isOnline ? '1' : '0.4';
             var chargeInfo = '';
+            // Phones (mobile R6 T4) show the charge as a muted second line
+            // under a truncated name, in the m-only name copy below.
+            var chargeLine = '';
             if (item.charge_type_id) {
                 chargeInfo = '<span style="font-size:9px;color:var(--accent);margin-left:0.25rem;cursor:pointer;" data-click="openChargeSelector" data-item-idx="' + globalIdx + '" title="Change charge">' + escapeHtml(item.charge_name || 'loaded') + '</span>';
+                chargeLine = '<span class="fit-charge-name" data-click="openChargeSelector" data-item-idx="' + globalIdx + '" title="Change charge">' + escapeHtml(item.charge_name || 'loaded') + '</span>';
             }
             var chargeBtn = (slot === 'high' || slot === 'med') ?
-                '<button data-click="openChargeSelector" data-item-idx="' + globalIdx + '" style="background:none;border:none;color:' + (item.charge_type_id ? 'var(--accent)' : 'var(--border)') + ';cursor:pointer;font-size:10px;padding:0 0.15rem;" title="' + (item.charge_type_id ? 'Change charge' : 'Load charge') + '">&#9679;</button>' : '';
+                '<button class="fit-ctl" data-click="openChargeSelector" data-item-idx="' + globalIdx + '" style="background:none;border:none;color:' + (item.charge_type_id ? 'var(--accent)' : 'var(--border)') + ';cursor:pointer;font-size:10px;padding:0 0.15rem;" title="' + (item.charge_type_id ? 'Change charge' : 'Load charge') + '">&#9679;</button>' : '';
             // State toggle: green=online, red=overheated, grey=offline. The
             // dot alone has no affordance (T-ISS: discoverability) — title
             // gives a hover tooltip and aria-label carries the same text to
@@ -770,15 +894,16 @@ function renderSlots() {
                 (isOnline && canOH ? 'Online — click to overheat' :
                     (isOnline ? 'Online — click to offline' : 'Offline — click to online'));
             var onlineBtn = slot !== 'rig' ?
-                '<button data-click="toggleOnline" data-item-idx="' + globalIdx + '" aria-label="' + stateTitle + '" style="background:none;border:none;color:' + stateColor + ';cursor:pointer;font-size:8px;padding:0 0.15rem;" title="' + stateTitle + '">&#9679;</button>' : '';
+                '<button class="fit-ctl" data-click="toggleOnline" data-item-idx="' + globalIdx + '" aria-label="' + stateTitle + '" style="background:none;border:none;color:' + stateColor + ';cursor:pointer;font-size:8px;padding:0 0.15rem;" title="' + stateTitle + '">&#9679;</button>' : '';
             container.innerHTML += '<div class="b-table-row" data-type-id="' + item.type_id + '" style="padding:0.2rem 0.75rem;display:flex;align-items:center;gap:0.4rem;opacity:' + opacity + ';">' +
                 onlineBtn +
                 '<img src="https://images.evetech.net/types/' + item.type_id + '/icon?size=32" style="width:20px;height:20px;border:1px solid var(--border);cursor:pointer;" data-click="showModuleInfo" data-type-id="' + item.type_id + '" title="Show info" data-on-error="hide">' +
-                '<span style="flex:1;font-size:11px;color:var(--text);">' + escapeHtml(item.type_name) + chargeInfo + '</span>' +
+                '<span class="m-hide" style="flex:1;font-size:11px;color:var(--text);">' + escapeHtml(item.type_name) + chargeInfo + '</span>' +
+                '<span class="m-only fit-name"><span class="fit-name-text">' + escapeHtml(item.type_name) + '</span>' + chargeLine + '</span>' +
                 '<span class="skill-warn" title="">&#9888;</span>' +
-                '<button data-click="showModuleInfo" data-type-id="' + item.type_id + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.2rem;font-style:italic;font-family:serif;" title="Show info">i</button>' +
+                '<button class="m-hide" data-click="showModuleInfo" data-type-id="' + item.type_id + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.2rem;font-style:italic;font-family:serif;" title="Show info">i</button>' +
                 chargeBtn +
-                '<button data-click="removeItem" data-item-idx="' + globalIdx + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0 0.25rem;" title="Remove">&times;</button>' +
+                '<button class="fit-ctl" data-click="removeItem" data-item-idx="' + globalIdx + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0 0.25rem;" title="Remove">&times;</button>' +
                 '</div>';
         });
 
@@ -800,15 +925,15 @@ function renderSlots() {
         var globalIdx = state.items.indexOf(item);
         droneContainer.innerHTML += '<div class="b-table-row" data-type-id="' + item.type_id + '" style="padding:0.2rem 0.75rem;display:flex;align-items:center;gap:0.5rem;">' +
             '<img src="https://images.evetech.net/types/' + item.type_id + '/icon?size=32" style="width:20px;height:20px;border:1px solid var(--border);cursor:pointer;" data-click="showModuleInfo" data-type-id="' + item.type_id + '" title="Show info" data-on-error="hide">' +
-            '<span style="flex:1;font-size:11px;color:var(--text);">' + escapeHtml(item.type_name) + '</span>' +
+            '<span class="fit-dname" style="flex:1;font-size:11px;color:var(--text);">' + escapeHtml(item.type_name) + '</span>' +
             '<span class="skill-warn" title="">&#9888;</span>' +
-            '<button data-click="showModuleInfo" data-type-id="' + item.type_id + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.2rem;font-style:italic;font-family:serif;" title="Show info">i</button>' +
+            '<button class="m-hide" data-click="showModuleInfo" data-type-id="' + item.type_id + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.2rem;font-style:italic;font-family:serif;" title="Show info">i</button>' +
             '<div style="display:flex;align-items:center;gap:0.25rem;">' +
-            '<button data-click="changeDroneQty" data-item-idx="' + globalIdx + '" data-delta="-1" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.15rem;">-</button>' +
+            '<button class="fit-ctl" data-click="changeDroneQty" data-item-idx="' + globalIdx + '" data-delta="-1" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.15rem;">-</button>' +
             '<span style="font-size:10px;color:var(--accent);min-width:16px;text-align:center;">' + item.quantity + '</span>' +
-            '<button data-click="changeDroneQty" data-item-idx="' + globalIdx + '" data-delta="1" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.15rem;">+</button>' +
+            '<button class="fit-ctl" data-click="changeDroneQty" data-item-idx="' + globalIdx + '" data-delta="1" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.15rem;">+</button>' +
             '</div>' +
-            '<button data-click="removeItem" data-item-idx="' + globalIdx + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0 0.25rem;" title="Remove">&times;</button>' +
+            '<button class="fit-ctl" data-click="removeItem" data-item-idx="' + globalIdx + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0 0.25rem;" title="Remove">&times;</button>' +
             '</div>';
     });
 }
@@ -835,7 +960,7 @@ function renderImplantSlots() {
             : '';
         var nameCell = rec
             ? '<span class="b-text">' + escapeHtml(rec.name || ('Type ' + rec.type_id)) + '</span>' + cloneTag +
-              '<button data-click="removeImplant" data-slot="' + s + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;margin-left:0.5rem;" title="Remove">&times;</button>'
+              '<button class="fit-ctl" data-click="removeImplant" data-slot="' + s + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;margin-left:0.5rem;" title="Remove">&times;</button>'
             : '<span style="color:var(--muted);font-style:italic;">empty</span>';
         html +=
             '<div style="display:flex;align-items:center;gap:0.5rem;font-size:10px;padding:2px 0.5rem;border-bottom:1px solid var(--border);">' +
@@ -1038,7 +1163,7 @@ function renderBoosterSlots() {
                 '<div style="display:flex;align-items:center;gap:0.5rem;">' +
                     '<span style="color:var(--muted);width:28px;font-size:9px;">#' + slot + '</span>' +
                     '<span class="b-text" style="flex:1;font-size:10px;">' + escapeHtml(b.name || ('Type ' + b.type_id)) + '</span>' +
-                    '<button data-click="removeBooster" data-slot="' + slot + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;" title="Remove">&times;</button>' +
+                    '<button class="fit-ctl" data-click="removeBooster" data-slot="' + slot + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;" title="Remove">&times;</button>' +
                 '</div>';
         if (b.effects && b.effects.length) {
             html += b.effects.map(function(e) {
@@ -1181,7 +1306,11 @@ function getCustomWeights() {
 function _syncCustomSliderUI() {
     var wrap = document.getElementById('dmg-custom-sliders');
     if (!wrap) return;
-    wrap.style.display = getSelectedProfile() === 'custom' ? 'inline-flex' : 'none';
+    var isCustom = getSelectedProfile() === 'custom';
+    wrap.style.display = isCustom ? 'inline-flex' : 'none';
+    /* Phone hook (mobile R6 T4): the shown sliders become a 2x2 grid there.
+       No desktop rule reads this class. */
+    wrap.classList.toggle('fit-dmg-on', isCustom);
     document.querySelectorAll('.dmg-custom-w').forEach(function(inp) {
         var val = inp.parentElement.querySelector('.dmg-custom-val');
         if (val) val.textContent = inp.value;
@@ -1288,9 +1417,11 @@ function recalcStats() {
     .then(function(r) { return r.text(); })
     .then(function(html) {
         document.getElementById('stats-panel').innerHTML = html;
+        _fitSumBarUpdate();
     })
     .catch(function(e) {
         document.getElementById('stats-panel').innerHTML = _fitErrorHtml(e.status);
+        _fitSumBarUpdate();
     });
     /* Skill check runs in parallel with the stats fetch — warnings don't
        block stats from appearing. */
@@ -1856,6 +1987,8 @@ function showChargeDropdown(itemIndex, charges) {
     overlay.onclick = closeChargeDropdown;
 
     var modal = document.createElement('div');
+    /* fit-charge-modal: the phone CSS hook (site.css R6 T4). */
+    modal.className = 'fit-charge-modal';
     modal.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:100;background:var(--surface);border:1px solid var(--border);max-height:400px;width:300px;display:flex;flex-direction:column;';
 
     var header = '<div style="padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">' +
@@ -1982,14 +2115,14 @@ function renderBrowseTree(groups, parentId) {
     var tree = document.getElementById('browse-tree');
     var html = '';
     if (parentId !== null) {
-        html += '<div class="b-hover-accent" style="padding:0.3rem 0.75rem;cursor:pointer;display:flex;align-items:center;gap:0.4rem;border-bottom:1px solid var(--border);" ' +
+        html += '<div class="b-hover-accent fit-brow" style="padding:0.3rem 0.75rem;cursor:pointer;display:flex;align-items:center;gap:0.4rem;border-bottom:1px solid var(--border);" ' +
                 'data-click="browseBack">' +
                 '<span style="font-size:11px;color:var(--accent);">\u2190 Back</span></div>';
     }
     for (var i = 0; i < groups.length; i++) {
         var g = groups[i];
         var arrow = g.has_children ? '<span style="color:var(--muted);font-size:9px;">&#9656;</span>' : '';
-        html += '<div class="b-hover-accent" style="padding:0.3rem 0.75rem;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:0.4rem;border-bottom:1px solid var(--border);" ' +
+        html += '<div class="b-hover-accent fit-brow" style="padding:0.3rem 0.75rem;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:0.4rem;border-bottom:1px solid var(--border);" ' +
                 'data-click="browseIntoGroup" data-group-id="' + g.market_group_id + '" data-group-name="' + escapeHtml(g.market_group_name) + '">' +
                 '<span style="font-size:11px;color:var(--text);">' + escapeHtml(g.market_group_name) + '</span>' +
                 arrow + '</div>';
@@ -2023,10 +2156,12 @@ function renderBrowseItems(items) {
         var slotBadge = item.slot_type
             ? '<span style="font-size:9px;color:var(--muted);text-transform:uppercase;padding:1px 4px;border:1px solid var(--border);border-radius:2px;">' + item.slot_type + '</span>'
             : '';
-        var restrictLabel = !canFit ? ' <span style="font-size:9px;color:var(--danger);" title="Cannot fit this ship">\u2716</span>' : '';
+        // The title is hover-only, so phones also get the reason as text.
+        var restrictLabel = !canFit ? ' <span style="font-size:9px;color:var(--danger);" title="Cannot fit this ship">\u2716</span><span class="m-only fit-nofit-why">Cannot fit this ship</span>' : '';
         // ISS-020: conditional hover collapses cleanly \u2014 only add the hover
         // class when canFit. Click handler via data-* only when canFit.
-        var rowClass = canFit ? 'b-hover-accent' : '';
+        // fit-brow: a 40px row on phones (mobile R6 T4).
+        var rowClass = (canFit ? 'b-hover-accent ' : '') + 'fit-brow';
         var clickAttrs = canFit
             ? ' data-click="addModuleFromBrowser" data-type-id="' + item.type_id + '" data-type-name="' + escapeHtml(item.type_name) + '" data-slot-type="' + (item.slot_type || 'cargo') + '"'
             : '';
@@ -2045,13 +2180,19 @@ function addModuleFromBrowser(typeId, typeName, slotType) {
         typeName = this.dataset.typeName;
         slotType = this.dataset.slotType;
     }
-    if (slotType !== 'drone' && slotType !== 'cargo' && isSlotFull(slotType)) return;
+    if (slotType !== 'drone' && slotType !== 'cargo' && isSlotFull(slotType)) {
+        // On a phone the rack is out of sight behind the overlay, so say why
+        // nothing happened (no-op above 640px, like the add note).
+        _noteBrowserAdd('✖ Not added · ' + _rackFill(slotType) + ' full');
+        return;
+    }
     // Browser already checked fit restrictions, skip the wrapper
     if (slotType === 'drone') {
         addDrone(typeId, typeName);
     } else {
         _origAddModule(typeId, typeName, slotType);
     }
+    _noteBrowserAdd(_browserAddNoteText(typeId, typeName, slotType));
 }
 
 function updateBreadcrumbs() {
@@ -2156,6 +2297,7 @@ function refreshOverheatCache() {
     refreshOverheatCache();
     loadSkillCharList();
     loadImplantCharList();
+    _fitSumBarWatch();
 })();
 </script>
 

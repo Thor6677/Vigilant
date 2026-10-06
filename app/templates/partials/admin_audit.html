@@ -1,7 +1,7 @@
 <div class="b-panel">
     <div class="b-panel-head">
         <span class="b-label">Audit Log</span>
-        <select data-change="adminAuditFilter"
+        <select class="adm-audit-filter" data-change="adminAuditFilter"
                 style="padding:0.2rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
             <option value="" {% if not filter %}selected{% endif %}>All Events</option>
             {# Built from AUDIT_FILTERS in app/routes/admin.py (T-068), so every
@@ -15,16 +15,24 @@
     {% if not events %}
     <div class="b-empty">No audit events{% for key, label, _prefixes in audit_filters if key == filter %} in {{ label }}{% endfor %}.</div>
     {% else %}
-    <div class="b-table-row" style="border-bottom:2px solid var(--border);">
+    {# Phones (mobile R6, D17 A): each event is an m-row, event badge ·
+       character · age, opening to the full detail. This section never
+       auto-refreshes, so an opened row stays open. The m-only cells are
+       phone-only copies: key 1 (the character, first so it is key 1) and the
+       labelled Name / Event / Detail / When lines. Desktop keeps its own cells,
+       with the detail cut at 100 characters and the full text in title. #}
+    <div class="b-table-row m-head" style="border-bottom:2px solid var(--border);">
         <span style="flex:0 0 80px;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Time</span>
         <span style="flex:0 0 100px;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Event</span>
         <span style="flex:0 0 100px;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Character</span>
         <span style="flex:1;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Detail</span>
     </div>
     {% for e in events %}
-    <div class="b-table-row">
-        <span style="flex:0 0 80px;font-size:10px;color:var(--muted);">{{ format_age(e.created_at) }}</span>
-        <span style="flex:0 0 100px;">
+    {% set who = char_names.get(e.character_id, '') %}
+    <div class="b-table-row m-row adm-audit-row" data-click="toggleMRow">
+        <span class="m-only" data-m="key">{{ who or '—' }}</span>
+        <span style="flex:0 0 80px;font-size:10px;color:var(--muted);" data-m="key">{{ format_age(e.created_at) }}</span>
+        <span style="flex:0 0 100px;" data-m="lead">
             {% if 'error' in e.event_type or 'failed' in e.event_type %}
             <span class="b-badge is-danger" style="font-size:7px;">{{ e.event_type }}</span>
             {% elif 'admin' in e.event_type %}
@@ -40,6 +48,10 @@
               title="{{ e.detail or '' }}">
             {{ (e.detail or '')[:100] }}
         </span>
+        {% if who %}<span class="m-only" data-m-label="Name">{{ who }}</span>{% endif %}
+        <span class="m-only" data-m-label="Event">{{ e.event_type }}</span>
+        {% if e.detail %}<span class="m-only" data-m-label="Detail">{{ e.detail }}</span>{% endif %}
+        {% if e.created_at %}<span class="m-only" data-m-label="When">{{ e.created_at.strftime('%Y-%m-%d %H:%M:%S') }} UTC</span>{% endif %}
     </div>
     {% endfor %}
     {% endif %}

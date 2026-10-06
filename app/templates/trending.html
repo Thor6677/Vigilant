@@ -132,9 +132,18 @@
                 const sys = systemMap.get(s.system_id);
                 const sysName = sys?.name || ('System ' + s.system_id);
                 const regName = sys?.regName || '';
+                // Phones (D11 A): rank · system · ship kills, the rest on tap.
+                // The m-only cells carry the row there; the desktop cells
+                // after the rank are hidden.
                 return `
-                    <div class="b-trending-row">
-                        <span class="b-trending-rank">${i + 1}</span>
+                    <div class="b-trending-row m-row" data-click="toggleMRow">
+                        <span class="b-trending-rank" data-m="lead">${i + 1}</span>
+                        <span class="m-only" data-m="key">${sysName}</span>
+                        <span class="m-only b-trending-count neg" data-m="key">${s.ship_kills.toLocaleString()} ships</span>
+                        <span class="m-only" data-m-label="Name">${sysName}</span>
+                        <span class="m-only" data-m-label="Region">${regName || '—'}</span>
+                        <span class="m-only" data-m-label="Pods">${(s.pod_kills || 0).toLocaleString()}</span>
+                        <span class="m-only" data-m-label="Map"><a href="/map#${s.system_id}" class="m-tap" style="color:var(--accent);text-decoration:none;">Show on map →</a></span>
                         <span class="b-trending-name">
                             <a href="/map#${s.system_id}">${sysName}</a>
                             <span style="color:var(--muted);margin-left:0.5rem;font-size:9px;">${regName}</span>
@@ -147,6 +156,10 @@
                     </div>
                 `;
             }).join('');
+            // actions.js loads after this page's content, and the fetches
+            // above can resolve before it runs; its DOMContentLoaded init
+            // covers the rows then.
+            if (window.mRowInit) window.mRowInit(vc);
         }
     }
 })();

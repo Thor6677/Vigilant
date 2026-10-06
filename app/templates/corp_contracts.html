@@ -40,7 +40,7 @@
         <span class="b-label">Add Contract Threshold</span>
     </div>
     <div style="padding:0.75rem;border:1px solid var(--border);background:var(--surface);">
-        <div style="display:flex;gap:0.75rem;flex-wrap:wrap;align-items:flex-end;">
+        <div class="m-stack cinv-form" style="display:flex;gap:0.75rem;flex-wrap:wrap;align-items:flex-end;">
             {# Match type selector #}
             <div style="min-width:120px;">
                 <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:2px;">Match By</label>
@@ -70,7 +70,7 @@
                        style="width:100%;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
                 <input type="hidden" id="ct-type-id" value="">
                 <input type="hidden" id="ct-type-name" value="">
-                <div id="ct-search-results" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-top:none;display:none;background:var(--surface);position:relative;z-index:10;"></div>
+                <div id="ct-search-results" class="corp-type-results" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-top:none;display:none;background:var(--surface);position:relative;z-index:10;"></div>
             </div>
 
             {# Thresholds #}
@@ -86,7 +86,7 @@
             </div>
             <button data-click="addContractThreshold" class="b-btn" style="padding:0.35rem 0.6rem;border:1px solid var(--accent);color:var(--accent);flex:none;font-size:10px;">Add</button>
         </div>
-        <div style="margin-top:0.5rem;font-size:9px;color:var(--muted);">
+        <div class="cctr-hint" style="margin-top:0.5rem;font-size:9px;color:var(--muted);">
             Monitors outstanding item exchange contracts. Title match counts contracts whose title contains the keyword. Item match counts contracts containing the item type.
         </div>
     </div>

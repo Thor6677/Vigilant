@@ -86,7 +86,7 @@
     <div class="b-panel">
         <div class="b-panel-head"><span class="b-label">Check Route Safety</span></div>
         <form id="gc-form" hx-post="/intel/gatecheck/check" hx-target="#route-results" hx-swap="innerHTML" hx-indicator="#route-loading">
-            <div style="padding:0.75rem;display:flex;flex-wrap:wrap;gap:0.75rem;align-items:flex-end;">
+            <div class="m-stack" style="padding:0.75rem;display:flex;flex-wrap:wrap;gap:0.75rem;align-items:flex-end;">
 
                 {# Origin #}
                 <div style="flex:1;min-width:180px;position:relative;">
@@ -138,7 +138,7 @@
 
             {# Avoid systems (collapsible) #}
             <div style="padding:0 0.75rem 0.75rem;">
-                <details>
+                <details class="gc-avoid">
                     <summary style="font-size:10px;color:var(--muted);cursor:pointer;letter-spacing:0.08em;">
                         Avoid systems (optional)
                     </summary>
@@ -207,7 +207,7 @@
     <div class="b-panel">
         <div class="b-panel-head"><span class="b-label">War Target Intel</span></div>
         <form hx-post="/intel/gatecheck/wartargets" hx-target="#wt-results" hx-swap="innerHTML" hx-indicator="#wt-loading">
-            <div style="padding:0.75rem;display:flex;gap:0.75rem;align-items:flex-end;flex-wrap:wrap;">
+            <div class="m-stack" style="padding:0.75rem;display:flex;gap:0.75rem;align-items:flex-end;flex-wrap:wrap;">
                 <div style="flex:1;min-width:200px;">
                     <label class="gc-lbl">Character, Corporation, or Alliance</label>
                     <input type="text" name="entity_name" class="gc-input" placeholder="e.g. Pandemic Legion">

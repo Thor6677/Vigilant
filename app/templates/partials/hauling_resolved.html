@@ -35,27 +35,44 @@
 {% endif %}
 
 {# ── Resolved Items Table ─────────────────────────────────────────────────── #}
-<div style="margin-bottom:0.75rem;">
+{# Phones (mobile R3 T4): expand-on-tap rows. Lead is the item icon, key 1
+   the name, key 2 the total m³ (D10 A); Qty, Unit m³ and Bay open as
+   labelled lines under a full Name line. The icon sits inside the name cell
+   on desktop, so phones get their own m-only copy and the in-cell one is
+   m-hide. A big paste runs to 100+ lines, so phones stop at 10 with
+   "Show all N". Only the item rows sit in .m-clamp (nth-child counts every
+   child), and the wrap is never their direct parent (.is-expanded > .m-row
+   would open every row). The last row is still its parent's last child, so
+   desktop keeps its borderless last row. #}
+<div class="m-clamp-wrap" style="margin-bottom:0.75rem;">
     <div style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);margin-bottom:4px;">Items</div>
-    <div class="b-table-row" style="border-bottom:2px solid var(--border);">
+    <div class="b-table-row m-head" style="border-bottom:2px solid var(--border);">
         <span style="flex:3;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Item</span>
         <span style="flex:1;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Qty</span>
         <span style="flex:1;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Unit m³</span>
         <span style="flex:1;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Total m³</span>
         <span style="flex:1;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Bay</span>
     </div>
+    <div class="m-clamp">
     {% for item in items %}
-    <div class="b-table-row">
-        <span style="flex:3;font-size:11px;color:var(--text);display:flex;align-items:center;gap:4px;">
-            <img src="https://images.evetech.net/types/{{ item.type_id }}/icon?size=32" style="width:16px;height:16px;" data-on-error="hide">
+    <div class="b-table-row m-row" data-click="toggleMRow">
+        <img data-m="lead" class="m-only" width="16" height="16" alt="" loading="lazy"
+             src="https://images.evetech.net/types/{{ item.type_id }}/icon?size=32" style="width:16px;height:16px;">
+        <span data-m="key" style="flex:3;font-size:11px;color:var(--text);display:flex;align-items:center;gap:4px;">
+            <img class="m-hide" src="https://images.evetech.net/types/{{ item.type_id }}/icon?size=32" style="width:16px;height:16px;" data-on-error="hide">
             {{ item.name }}
         </span>
-        <span style="flex:1;text-align:right;font-size:11px;color:var(--text);">{{ "{:,}".format(item.qty) }}</span>
-        <span style="flex:1;text-align:right;font-size:11px;color:var(--muted);">{{ "{:,.2f}".format(item.volume) }}</span>
-        <span style="flex:1;text-align:right;font-size:11px;font-weight:600;color:var(--accent);">{{ "{:,.1f}".format(item.total_volume) }}</span>
-        <span style="flex:1;text-align:right;font-size:10px;color:var(--muted);">{{ bay_labels.get(item.bay, item.bay) }}</span>
+        <span class="m-only" data-m-label="Name">{{ item.name }}</span>
+        <span data-m-label="Qty" style="flex:1;text-align:right;font-size:11px;color:var(--text);">{{ "{:,}".format(item.qty) }}</span>
+        <span data-m-label="Unit m³" style="flex:1;text-align:right;font-size:11px;color:var(--muted);">{{ "{:,.2f}".format(item.volume) }}</span>
+        <span data-m="key" style="flex:1;text-align:right;font-size:11px;font-weight:600;color:var(--accent);">{{ "{:,.1f}".format(item.total_volume) }}</span>
+        <span data-m-label="Bay" style="flex:1;text-align:right;font-size:10px;color:var(--muted);">{{ bay_labels.get(item.bay, item.bay) }}</span>
     </div>
     {% endfor %}
+    </div>
+    {% if items | length > 10 %}
+    <button type="button" class="m-only m-showall" data-click="toggleExpanded" data-toggle-target=".m-clamp-wrap">Show all {{ items | length }}</button>
+    {% endif %}
 </div>
 
 {# ── Unresolved Items ─────────────────────────────────────────────────────── #}
@@ -74,21 +91,27 @@
 {% if recommendations %}
 <div>
     <div style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);margin-bottom:4px;">Recommended Ships (max fit, skill V)</div>
-    <div class="b-table-row" style="border-bottom:2px solid var(--border);">
+    <div class="b-table-row m-head" style="border-bottom:2px solid var(--border);">
         <span style="flex:2;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Ship</span>
         <span style="flex:1;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Type</span>
         <span style="flex:1;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Total Cap</span>
         <span style="flex:1;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Trips</span>
     </div>
+    {# Phones: lead is the ship render, key 1 the name, key 2 the trips,
+       colour-coded as on desktop (D11 A); Type and Capacity open as labelled
+       lines under a full Name line. #}
     {% for rec in recommendations %}
-    <div class="b-table-row" {% if loop.first %}style="background:rgba(var(--accent-rgb,200,170,110),0.05);"{% endif %}>
-        <span style="flex:2;font-size:11px;color:var(--text);display:flex;align-items:center;gap:4px;">
-            <img src="https://images.evetech.net/types/{{ rec.type_id }}/render?size=32" style="width:20px;height:20px;" data-on-error="hide">
+    <div class="b-table-row m-row" data-click="toggleMRow" {% if loop.first %}style="background:rgba(var(--accent-rgb,200,170,110),0.05);"{% endif %}>
+        <img data-m="lead" class="m-only" width="20" height="20" alt="" loading="lazy"
+             src="https://images.evetech.net/types/{{ rec.type_id }}/render?size=32" style="width:20px;height:20px;">
+        <span data-m="key" style="flex:2;font-size:11px;color:var(--text);display:flex;align-items:center;gap:4px;">
+            <img class="m-hide" src="https://images.evetech.net/types/{{ rec.type_id }}/render?size=32" style="width:20px;height:20px;" data-on-error="hide">
             {{ rec.name }}
         </span>
-        <span style="flex:1;font-size:10px;color:var(--muted);">{{ rec.group }}</span>
-        <span style="flex:1;text-align:right;font-size:11px;color:var(--accent);">{{ "{:,.0f}".format(rec.total_capacity) }} m³</span>
-        <span style="flex:1;text-align:right;font-size:13px;font-weight:600;{% if rec.trips <= 1 %}color:var(--success);{% elif rec.trips <= 3 %}color:var(--accent);{% else %}color:var(--text);{% endif %}">
+        <span class="m-only" data-m-label="Name">{{ rec.name }}</span>
+        <span data-m-label="Type" style="flex:1;font-size:10px;color:var(--muted);">{{ rec.group }}</span>
+        <span data-m-label="Capacity" style="flex:1;text-align:right;font-size:11px;color:var(--accent);">{{ "{:,.0f}".format(rec.total_capacity) }} m³</span>
+        <span data-m="key" style="flex:1;text-align:right;font-size:13px;font-weight:600;{% if rec.trips <= 1 %}color:var(--success);{% elif rec.trips <= 3 %}color:var(--accent);{% else %}color:var(--text);{% endif %}">
             {{ rec.trips }}
         </span>
     </div>

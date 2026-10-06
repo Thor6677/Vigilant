@@ -14,7 +14,7 @@
 <div class="b-page-header" style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:0.5rem;">
     <div>
         <h1 class="b-page-title" id="plan-title">{{ plan.name }}</h1>
-        <div style="font-size:10px;color:var(--muted);margin-top:0.25rem;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+        <div class="skp-meta" style="font-size:10px;color:var(--muted);margin-top:0.25rem;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
             <span>{{ entries | length }} skill{{ 's' if entries | length != 1 else '' }}</span>
             {# Scope badge #}
             {% if vis == 'personal' %}
@@ -29,7 +29,7 @@
             {% if not can_edit %}<span style="color:var(--warn);">🔒 view-only</span>{% endif %}
         </div>
     </div>
-    <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+    <div class="skp-actions" style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
         {# Duplicate-to-personal: always available to any viewer #}
         <form method="POST" action="/skill-plans/{{ plan.id }}/duplicate" style="display:inline;">
             <button class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;"
@@ -122,7 +122,7 @@
     <div class="b-panel">
         <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;flex-wrap:wrap;">
             <span class="b-label">Access Control List</span>
-            <span style="font-size:9px;color:var(--muted);">
+            <span class="skp-acl-count" style="font-size:9px;color:var(--muted);">
                 {{ (acl_entries or []) | length }} entr{{ 'ies' if (acl_entries or [])|length != 1 else 'y' }}
                 · owner always has admin
             </span>
@@ -165,7 +165,7 @@
             </form>
             <form data-m-label="Remove" method="POST" action="/skill-plans/{{ plan.id }}/acl/{{ e.id }}/delete" style="display:inline;"
                   data-confirm="Remove {{ e.subject_name | e }} from the ACL?">
-                <button class="b-btn m-tap" style="padding:0.1rem 0.3rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
+                <button class="b-btn" style="padding:0.1rem 0.3rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
             </form>
         </div>
         {% endfor %}
@@ -175,7 +175,7 @@
         </div>
         {% endif %}
 
-        <form method="POST" action="/skill-plans/{{ plan.id }}/acl/add" class="m-stack"
+        <form method="POST" action="/skill-plans/{{ plan.id }}/acl/add" class="m-stack skp-acl-add"
               style="display:grid;grid-template-columns:110px 1fr 110px auto;gap:0.4rem;padding:0.5rem 0.75rem;border-top:1px solid var(--border);align-items:center;">
             <select name="subject_type"
                     style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
@@ -195,7 +195,7 @@
                 Add
             </button>
         </form>
-        <div style="padding:0.3rem 0.75rem 0.5rem;font-size:9px;color:var(--muted);border-top:1px solid var(--border);">
+        <div class="skp-acl-hint" style="padding:0.3rem 0.75rem 0.5rem;font-size:9px;color:var(--muted);border-top:1px solid var(--border);">
             Names are resolved via EVE ESI so they must match exactly. Permissions:
             <span class="b-text">View</span> = read-only,
             <span class="b-text">Edit</span> = can modify skills,
@@ -226,7 +226,7 @@
 </div>
 {% endif %}
 
-<div class="b-grid-2">
+<div class="b-grid-2 skp-tools">
 
 {# ── Left Column: Skills in Plan ─────────────────────────────────────────── #}
 <div>
@@ -237,23 +237,24 @@
         <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:0.25rem;">
             <span class="b-label">Skills</span>
             {# Phones: with the drag handle hidden these are the only list
-               controls, so each is a 40px tap target (m-tap). #}
+               controls, so each keeps the 44px phone button height and is
+               at least 40px wide (skp-sortbar, site.css R2 T6). #}
             <div class="skp-sortbar" style="display:flex;gap:0.5rem;font-size:9px;">
-                <button type="button" data-click="exportPlan" class="b-link-btn m-tap" style="color:var(--accent);">Export</button>
+                <button type="button" data-click="exportPlan" class="b-link-btn" style="color:var(--accent);">Export</button>
                 {% if can_edit and entries | length > 1 %}
                 <span style="color:var(--border);">|</span>
                 <span class="b-muted">Sort:</span>
                 <form method="POST" action="/skill-plans/{{ plan.id }}/sort" style="display:inline;">
                     <input type="hidden" name="mode" value="name">
-                    <button class="m-tap" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:9px;font-family:inherit;padding:0;">Name</button>
+                    <button style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:9px;font-family:inherit;padding:0;">Name</button>
                 </form>
                 <form method="POST" action="/skill-plans/{{ plan.id }}/sort" style="display:inline;">
                     <input type="hidden" name="mode" value="optimal">
-                    <button class="m-tap" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:9px;font-family:inherit;padding:0;">Optimal</button>
+                    <button style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:9px;font-family:inherit;padding:0;">Optimal</button>
                 </form>
                 <form method="POST" action="/skill-plans/{{ plan.id }}/sort" style="display:inline;">
                     <input type="hidden" name="mode" value="level">
-                    <button class="m-tap" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:9px;font-family:inherit;padding:0;">Level</button>
+                    <button style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:9px;font-family:inherit;padding:0;">Level</button>
                 </form>
                 {% endif %}
             </div>
@@ -290,7 +291,7 @@
             </span>
             {% if can_edit %}
             <form data-m-label="Remove" method="POST" action="/skill-plans/{{ plan.id }}/remove-skill/{{ e.id }}" style="flex:none;">
-                <button class="b-btn m-tap" style="padding:0.1rem 0.3rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
+                <button class="b-btn" style="padding:0.1rem 0.3rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
             </form>
             {% endif %}
         </div>
@@ -419,7 +420,7 @@
                 </button>
                 <div id="fitting-result" style="flex:1;"></div>
             </div>
-            <div style="font-size:9px;color:var(--muted);">
+            <div class="skp-hint" style="font-size:9px;color:var(--muted);">
                 Adds all skill requirements for ship + every module, rig, drone, etc.
             </div>
         </div>

@@ -103,17 +103,26 @@ EFFECT_COLORS = {
 }
 
 
+def _finder_context() -> dict:
+    """Everything wormholes.html (the system finder) needs. Shared by the
+    finder page and the system page's not-found branch, which re-renders
+    the finder under an error banner (ISS-123: that branch once passed only
+    part of this and the template's colour lookups raised a 500)."""
+    return {
+        "effects_list": list(_wh_data.get("effects", {}).keys()),
+        "effects_labels": {k: v["name"] for k, v in _wh_data.get("effects", {}).items()},
+        "effect_colors": EFFECT_COLORS,
+        "class_colors": _wh_data.get("class_colors", {}),
+    }
+
+
 @router.get("/wormholes", response_class=HTMLResponse)
 async def wormhole_systems_page(request: Request):
     user_id = request.session.get("user_id")
     if not user_id:
         from fastapi.responses import RedirectResponse
         return RedirectResponse("/")
-    return templates.TemplateResponse(request, "wormholes.html", {"effects_list": list(_wh_data.get("effects", {}).keys()),
-        "effects_labels": {k: v["name"] for k, v in _wh_data.get("effects", {}).items()},
-        "effect_colors": EFFECT_COLORS,
-        "class_colors": _wh_data.get("class_colors", {}),
-    })
+    return templates.TemplateResponse(request, "wormholes.html", _finder_context())
 
 
 @router.get("/wormholes/search", response_class=HTMLResponse)
@@ -295,10 +304,10 @@ async def wormhole_system_detail(name: str, request: Request, db: AsyncSession =
 
     ctx = await build_wh_system_context(db, name)
     if ctx is None:
-        return templates.TemplateResponse(request, "wormholes.html", {"error": f"System '{name}' not found.",
-            "effects_list": list(_wh_data.get("effects", {}).keys()),
-            "effects_labels": {k: v["name"] for k, v in _wh_data.get("effects", {}).items()},
-        })
+        return templates.TemplateResponse(
+            request, "wormholes.html",
+            {**_finder_context(), "error": f"System '{name}' not found."},
+            status_code=404)
 
     return templates.TemplateResponse(request, "wormhole_system.html", ctx)
 

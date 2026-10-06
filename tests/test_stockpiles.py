@@ -343,3 +343,55 @@ def test_stockpiles_add_rejected_when_unauthenticated():
 def test_stockpiles_delete_rejected_when_unauthenticated():
     r = _client().delete("/tools/stockpiles/1")
     assert r.status_code in (401, 403)
+
+
+# ── the add form's search box ───────────────────────────────────────────────
+
+def _authed_client():
+    """TestClient carrying a signed session cookie (tests/test_build_finder.py's idiom)."""
+    import base64
+
+    import itsdangerous
+
+    import app.main as main
+    from tests.conftest import ensure_user
+
+    ensure_user(USER_ID)
+    signer = itsdangerous.TimestampSigner(main.settings.secret_key)
+    data = base64.b64encode(json.dumps({"user_id": USER_ID}).encode())
+    client = TestClient(main.app, base_url="https://testserver")
+    client.cookies.set("vigilant_session", signer.sign(data).decode())
+    return client
+
+
+def test_search_box_sends_the_query_the_route_reads(monkeypatch):
+    """The search box had no name. htmx serialises an input by its name, so
+    every keyup reached /tools/stockpiles/search without `q` and the route
+    always answered "Type at least two characters". The box's name must be
+    the route's query parameter, and a search sent under that name lists
+    the matches."""
+    import inspect
+    import re
+
+    from app.routes import stockpiles as stock_mod
+    from tests._mobile import render_page
+
+    html = render_page(stock_mod, "stockpiles.html", "/tools/stockpiles", rows=[])
+    tag = re.search(r'<input[^>]*id="sp-search"[^>]*>', html, re.S).group(0)
+    m = re.search(r'\sname="([^"]+)"', tag)
+    assert m, "an input without a name adds nothing to htmx's request"
+    name = m.group(1)
+    assert name in inspect.signature(stock_mod.stockpiles_search).parameters
+
+    seen = []
+
+    async def fake_search(db, q, cap):
+        seen.append(q)
+        return [{"type_id": 900001, "type_name": "Sample Charge L", "group": "Sample Ammo"}]
+
+    monkeypatch.setattr(stock_mod, "_search_types", fake_search)
+    r = _authed_client().get("/tools/stockpiles/search", params={name: "Sample"})
+    assert r.status_code == 200
+    assert seen == ["Sample"]
+    assert 'data-type-name="Sample Charge L"' in r.text
+    assert "Type at least two characters" not in r.text

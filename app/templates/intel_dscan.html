@@ -9,27 +9,33 @@
 <div class="b-page-header">
     <div>
         <h1 class="b-page-title" style="margin-bottom:2px;">D-Scan{% if dscan.label %} — {{ dscan.label }}{% endif %}</h1>
-        <div style="display:flex;align-items:center;gap:0.75rem;font-size:10px;color:var(--muted);">
+        <div class="intel-meta" style="display:flex;align-items:center;gap:0.75rem;font-size:10px;color:var(--muted);">
             <span>{{ summary.ships }} ship{{ 's' if summary.ships != 1 else '' }}{% if non_ship_items %} · {{ non_ship_items | length }} other{% endif %}</span>
             <span>·</span>
             <span>Expires in {{ expires_str }}</span>
         </div>
     </div>
-    <div style="display:flex;gap:0.5rem;align-items:center;">
-        <button data-click="copyShareUrl" id="copy-url-btn" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--accent);color:var(--accent);font-size:10px;">Copy Link</button>
-        <button data-click="toggleAddScan" id="add-scan-btn" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Add Scan</button>
-        <button data-click="toggleRawPaste" id="raw-paste-btn" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Raw Paste</button>
+    <div class="intel-actions" style="display:flex;gap:0.5rem;align-items:center;">
+        <button id="copy-url-btn" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--accent);color:var(--accent);font-size:10px;">Copy Link</button>
+        {# Merging needs a login: a stranger's merge POST is sent to / and the
+           paste is lost, so Add Scan and its form are for logged-in viewers. #}
+        {% if request.session.get('user_id') %}
+        <button id="add-scan-btn" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Add Scan</button>
+        {% endif %}
+        <button id="raw-paste-btn" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Raw Paste</button>
         <a href="/intel" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">New Intel</a>
     </div>
 </div>
-<input type="text" id="share-url" value="{{ request.url_for('intel_view', scan_id=scan_id) }}" style="position:absolute;left:-9999px;">
+{# The link Copy Link copies. Only its .value is read (copyText uses its own
+   textarea), so it's a hidden input: no unlabelled Tab stop, nothing off-screen. #}
+<input type="hidden" id="share-url" value="{{ request.url_for('intel_view', scan_id=scan_id) }}">
 
 {# ── Raw Paste (hidden by default) ───────────────────────────────────────── #}
 <div id="raw-paste-section" style="display:none;margin-bottom:1rem;">
     <div class="b-panel">
         <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
             <span class="b-label">Raw Paste</span>
-            <button data-click="copyRawPaste" id="copy-raw-btn" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);">Copy</button>
+            <button id="copy-raw-btn" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);">Copy</button>
         </div>
         <div style="padding:0.5rem 0.75rem;">
             <textarea id="raw-paste-text" readonly rows="12"
@@ -38,7 +44,8 @@
     </div>
 </div>
 
-{# ── Add Scan (hidden by default) ─────────────────────────────────────────── #}
+{# ── Add Scan (hidden by default; logged-in viewers only, like its button) ── #}
+{% if request.session.get('user_id') %}
 <div id="add-scan-section" style="display:none;margin-bottom:1rem;">
     <form method="POST" action="/intel/{{ scan_id }}/merge">
         <div class="b-panel">
@@ -48,7 +55,7 @@
             <div style="padding:0.5rem 0.75rem;">
                 <textarea name="paste_text" rows="8" placeholder="Paste additional d-scan here..."
                           style="width:100%;padding:0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:monospace;font-size:10px;line-height:1.5;resize:vertical;"></textarea>
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-top:0.5rem;">
+                <div class="intel-merge-row" style="display:flex;align-items:center;justify-content:space-between;margin-top:0.5rem;">
                     <label style="display:flex;align-items:center;gap:0.5rem;font-size:11px;color:var(--muted);cursor:pointer;">
                         <input type="checkbox" name="dedup" value="on" checked
                                style="accent-color:var(--accent);">
@@ -61,6 +68,7 @@
         </div>
     </form>
 </div>
+{% endif %}
 
 {# ── Two-Column Layout: Ship Types + Ship Classes ─────────────────────────── #}
 <div class="b-grid-2" style="gap:1rem;align-items:start;">
@@ -71,7 +79,7 @@
             <span class="b-label">Ships</span>
             <div style="display:flex;align-items:center;gap:0.5rem;">
                 <span style="font-size:13px;font-weight:600;color:var(--accent);">{{ summary.ships }}</span>
-                <button data-click="copyShipClasses" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);">Copy</button>
+                <button id="copy-classes-btn" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);">Copy</button>
             </div>
         </div>
         {% for cls, count in summary.ship_classes.items() %}
@@ -91,16 +99,16 @@
             <span class="b-label">By Type</span>
             <div style="display:flex;align-items:center;gap:0.5rem;">
                 <span style="font-size:13px;font-weight:600;color:var(--accent);">{{ summary.ships }}</span>
-                <button data-click="copyByType" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);">Copy</button>
+                <button id="copy-types-btn" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);">Copy</button>
             </div>
         </div>
         {% for group in summary.ships_grouped %}
-        <div class="b-table-row" style="padding:0.3rem 0.75rem;border-bottom:1px solid var(--border);">
+        <div class="b-table-row dscan-group-row" style="padding:0.3rem 0.75rem;border-bottom:1px solid var(--border);">
             <span style="font-size:13px;font-weight:600;color:var(--accent);width:30px;text-align:right;flex-shrink:0;">{{ group.total }}</span>
             <span style="flex:1;font-size:12px;font-weight:600;color:var(--text);padding-left:0.75rem;">{{ group.group }}</span>
         </div>
         {% for ship in group.ships %}
-        <div class="b-table-row" style="padding:0.2rem 0.75rem;padding-left:2.5rem;">
+        <div class="b-table-row dscan-ship-row" style="padding:0.2rem 0.75rem;padding-left:2.5rem;">
             <span style="font-size:12px;font-weight:600;color:var(--accent);width:30px;text-align:right;flex-shrink:0;">{{ ship.count }}</span>
             <span style="flex:1;font-size:11px;color:var(--muted);padding-left:0.75rem;display:flex;align-items:center;gap:4px;">
                 <img src="https://images.evetech.net/types/{{ ship.type_id }}/icon?size=32" style="width:14px;height:14px;flex-shrink:0;" data-on-error="hide">
@@ -129,7 +137,7 @@
 {# ── Non-Ship Items (collapsed) ───────────────────────────────────────────── #}
 {% if non_ship_items %}
 <details style="margin-top:0.5rem;">
-    <summary style="cursor:pointer;display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0;">
+    <summary class="intel-toggle" style="cursor:pointer;display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0;">
         <span class="b-eyebrow">Other on Scan ({{ non_ship_items | length }})</span>
         <span class="b-muted-sm">▼</span>
     </summary>
@@ -148,14 +156,61 @@
 {% endif %}
 
 <script nonce="{{ request.state.csp_nonce }}">
+/* This page is public, and base.html loads actions.js only for a logged-in
+   session. So every control here is bound by this script, never through a
+   data-click/data-input: it works for a stranger the link was shared with,
+   and actions.js can't fire it a second time for a logged-in viewer
+   (ISS-120). */
+(function () {
+function bind(id, type, fn) {
+    var el = document.getElementById(id);
+    if (el) el.addEventListener(type, fn);
+}
+
+/* Copy from inside the click: iOS lets a page write the clipboard only
+   during the tap, so writeText is called straight from the handler. With no
+   clipboard API (an insecure context) or a synchronous throw, a temporary
+   textarea and execCommand('copy') stand in. Retrying after a rejection
+   runs outside the tap, so on iOS that retry is best-effort. */
+function legacyCopy(text) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.top = '0';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    document.body.removeChild(ta);
+    return ok;
+}
+
+function copyText(text, done) {
+    try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(done, function () {
+                if (legacyCopy(text)) done();
+            });
+            return;
+        }
+    } catch (e) { /* fall back below */ }
+    if (legacyCopy(text)) done();
+}
+
+function flashCopied(btn, label, color, border) {
+    btn.textContent = 'Copied!';
+    btn.style.color = 'var(--success)';
+    btn.style.borderColor = 'var(--success)';
+    setTimeout(function() { btn.textContent = label; btn.style.color = color; btn.style.borderColor = border; }, 2000);
+}
+
 function copyShareUrl() {
-    var url = document.getElementById('share-url').value;
-    navigator.clipboard.writeText(url).then(function() {
-        var btn = document.getElementById('copy-url-btn');
-        btn.textContent = 'Copied!';
-        btn.style.color = 'var(--success)';
-        btn.style.borderColor = 'var(--success)';
-        setTimeout(function() { btn.textContent = 'Copy Link'; btn.style.color = 'var(--accent)'; btn.style.borderColor = 'var(--accent)'; }, 2000);
+    var btn = this;
+    copyText(document.getElementById('share-url').value, function() {
+        flashCopied(btn, 'Copy Link', 'var(--accent)', 'var(--accent)');
     });
 }
 
@@ -188,13 +243,9 @@ function toggleRawPaste() {
 }
 
 function copyRawPaste() {
-    var text = document.getElementById('raw-paste-text').value;
-    navigator.clipboard.writeText(text).then(function() {
-        var btn = document.getElementById('copy-raw-btn');
-        btn.textContent = 'Copied!';
-        btn.style.color = 'var(--success)';
-        btn.style.borderColor = 'var(--success)';
-        setTimeout(function() { btn.textContent = 'Copy'; btn.style.color = ''; btn.style.borderColor = 'var(--border)'; }, 2000);
+    var btn = this;
+    copyText(document.getElementById('raw-paste-text').value, function() {
+        flashCopied(btn, 'Copy', '', 'var(--border)');
     });
 }
 
@@ -206,11 +257,8 @@ function copyShipClasses() {
     {% endfor %}
     lines.push('');
     lines.push('Total: {{ summary.ships }} ships');
-    navigator.clipboard.writeText(lines.join('\n')).then(function() {
-        btn.textContent = 'Copied!';
-        btn.style.color = 'var(--success)';
-        btn.style.borderColor = 'var(--success)';
-        setTimeout(function() { btn.textContent = 'Copy'; btn.style.color = ''; btn.style.borderColor = 'var(--border)'; }, 2000);
+    copyText(lines.join('\n'), function() {
+        flashCopied(btn, 'Copy', '', 'var(--border)');
     });
 }
 
@@ -225,13 +273,18 @@ function copyByType() {
     lines.push('');
     {% endfor %}
     lines.push('Total: {{ summary.ships }} ships');
-    navigator.clipboard.writeText(lines.join('\n')).then(function() {
-        btn.textContent = 'Copied!';
-        btn.style.color = 'var(--success)';
-        btn.style.borderColor = 'var(--success)';
-        setTimeout(function() { btn.textContent = 'Copy'; btn.style.color = ''; btn.style.borderColor = 'var(--border)'; }, 2000);
+    copyText(lines.join('\n'), function() {
+        flashCopied(btn, 'Copy', '', 'var(--border)');
     });
 }
+
+bind('copy-url-btn', 'click', copyShareUrl);
+bind('add-scan-btn', 'click', toggleAddScan);
+bind('raw-paste-btn', 'click', toggleRawPaste);
+bind('copy-raw-btn', 'click', copyRawPaste);
+bind('copy-classes-btn', 'click', copyShipClasses);
+bind('copy-types-btn', 'click', copyByType);
+})();
 </script>
 
 {% endblock %}

@@ -33,25 +33,28 @@
         <div class="b-panel-head">
             <span class="b-label">Manufacturing Settings</span>
         </div>
-        <div style="padding:0.75rem;display:flex;flex-wrap:wrap;gap:1rem;align-items:flex-end;">
+        {# Phones: the controls stack (m-stack) and Runs and the sliders go full
+           width (mfg-fill, site.css R3 T1). m-stack forces display, so it sits
+           here and never on #settings-panel, which JS shows inline. #}
+        <div class="m-stack" style="padding:0.75rem;display:flex;flex-wrap:wrap;gap:1rem;align-items:flex-end;">
 
             <div style="display:flex;flex-direction:column;gap:3px;">
                 <label class="b-eyebrow">Runs</label>
-                <input type="number" id="inp-runs" value="1" min="1" max="1000"
+                <input type="number" id="inp-runs" class="mfg-fill" value="1" min="1" max="1000"
                        data-change="recalculate"
                        style="width:70px;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:12px;text-align:center;">
             </div>
 
             <div style="display:flex;flex-direction:column;gap:3px;">
                 <label class="b-eyebrow">ME <span id="me-val" class="b-text">0</span></label>
-                <input type="range" id="inp-me" value="0" min="0" max="10" step="1"
+                <input type="range" id="inp-me" class="mfg-fill" value="0" min="0" max="10" step="1"
                        data-input="slideBonus" data-label-id="me-val"
                        style="width:120px;accent-color:var(--accent);">
             </div>
 
             <div style="display:flex;flex-direction:column;gap:3px;">
                 <label class="b-eyebrow">TE <span id="te-val" class="b-text">0</span></label>
-                <input type="range" id="inp-te" value="0" min="0" max="20" step="2"
+                <input type="range" id="inp-te" class="mfg-fill" value="0" min="0" max="20" step="2"
                        data-input="slideBonus" data-label-id="te-val"
                        style="width:120px;accent-color:var(--accent);">
             </div>

@@ -3,10 +3,15 @@
 {% elif not results %}
 <div class="mk-hint">No published items match &ldquo;{{ q }}&rdquo;.</div>
 {% else %}
+{# Phones (D1 A, R4 T1 in site.css): a link row. Key 1 is the name with the
+   group below it, each line ellipsising on its own; key 2 is a muted arrow.
+   Desktop keeps the two spans above; the m-only cells never show there. #}
 {% for r in results %}
-<a class="mk-row" href="/market/type/{{ r.type_id }}">
+<a class="mk-row m-row m-row--link" href="/market/type/{{ r.type_id }}">
     <span class="mk-row-name">{{ r.type_name }}</span>
     <span class="mk-row-group">{{ r.group }}</span>
+    <span class="m-only mk-row-key" data-m="key"><span class="mk-row-name">{{ r.type_name }}</span><span class="mk-row-group">{{ r.group }}</span></span>
+    <span class="m-only mk-row-go" data-m="key" aria-hidden="true">→</span>
 </a>
 {% endfor %}
 {% endif %}

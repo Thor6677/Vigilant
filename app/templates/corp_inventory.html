@@ -39,7 +39,7 @@
     <div class="b-section-head">
         <span class="b-label">Import From Hangar</span>
     </div>
-    <div style="padding:0.5rem 0.75rem;border:1px solid var(--border);border-bottom:none;background:var(--surface);display:flex;align-items:center;gap:0.75rem;">
+    <div class="m-stack cinv-form" style="padding:0.5rem 0.75rem;border:1px solid var(--border);border-bottom:none;background:var(--surface);display:flex;align-items:center;gap:0.75rem;">
         <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);flex-shrink:0;">Structure</label>
         <select id="scan-location"
                 hx-get="/corporations/{{ corp_id }}/inventory/structures"
@@ -50,7 +50,7 @@
             <option value="">Loading structures...</option>
         </select>
     </div>
-    <div id="scan-results" style="border:1px solid var(--border);border-top:none;background:var(--surface);max-height:400px;overflow-y:auto;">
+    <div id="scan-results" class="m-unclamp" style="border:1px solid var(--border);border-top:none;background:var(--surface);max-height:400px;overflow-y:auto;">
         <div class="b-empty">Select a structure to scan its hangars.</div>
     </div>
     <span id="scan-loader" class="htmx-indicator" style="display:block;padding:0.75rem;text-align:center;font-size:10px;color:var(--muted);">Scanning hangar...</span>
@@ -62,7 +62,7 @@
         <span class="b-label">Add Item Manually</span>
     </div>
     <div style="padding:0.75rem;border:1px solid var(--border);background:var(--surface);">
-        <div style="display:flex;gap:0.75rem;flex-wrap:wrap;align-items:flex-end;">
+        <div class="m-stack cinv-form" style="display:flex;gap:0.75rem;flex-wrap:wrap;align-items:flex-end;">
             {# Item search #}
             <div style="flex:1;min-width:180px;">
                 <label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:2px;">Item</label>
@@ -75,7 +75,7 @@
                        style="width:100%;padding:0.35rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;">
                 <input type="hidden" id="add-type-id" value="">
                 <input type="hidden" id="add-type-name" value="">
-                <div id="search-results" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-top:none;display:none;background:var(--surface);position:relative;z-index:10;"></div>
+                <div id="search-results" class="corp-type-results" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-top:none;display:none;background:var(--surface);position:relative;z-index:10;"></div>
             </div>
             {# Location #}
             <div style="min-width:180px;">

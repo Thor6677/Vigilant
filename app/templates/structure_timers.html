@@ -11,14 +11,14 @@
 
 {# ── Create Timer ────────────────────────────────────────────────────────── #}
 <details class="b-section" id="create-section">
-    <summary class="b-panel-head" style="cursor:pointer;list-style:none;display:flex;align-items:center;gap:0.5rem;">
+    <summary class="b-panel-head st-sum" style="cursor:pointer;list-style:none;display:flex;align-items:center;gap:0.5rem;">
         <span style="color:var(--accent);font-size:12px;">+</span>
         <span class="b-label">Add Timer</span>
     </summary>
     <div class="b-panel" style="border-top:1px solid var(--border);">
-        <form method="POST" action="/structure-timers/create" style="padding:0.75rem;display:flex;flex-direction:column;gap:0.75rem;">
+        <form method="POST" action="/structure-timers/create" class="st-form" style="padding:0.75rem;display:flex;flex-direction:column;gap:0.75rem;">
 
-            <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+            <div class="m-stack" style="display:flex;gap:0.5rem;flex-wrap:wrap;">
                 <input type="text" name="structure_name" placeholder="Structure name" required
                        style="flex:2;min-width:150px;padding:0.3rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
                 <select name="structure_type" style="flex:1;min-width:100px;padding:0.3rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
@@ -45,7 +45,7 @@
                 </select>
             </div>
 
-            <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+            <div class="m-stack" style="display:flex;gap:0.5rem;flex-wrap:wrap;">
                 <div style="flex:1;min-width:100px;position:relative;">
                     <input type="text" name="system_name" id="system-search" placeholder="System" required autocomplete="off"
                            data-input="searchField" data-endpoint="systems" data-field="system"
@@ -66,9 +66,9 @@
                 </div>
             </div>
 
-            <div style="display:flex;gap:0.75rem;flex-wrap:wrap;align-items:center;">
+            <div class="m-stack" style="display:flex;gap:0.75rem;flex-wrap:wrap;align-items:center;">
                 <div style="display:flex;gap:0.5rem;align-items:center;">
-                    <span style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;">Side</span>
+                    <span class="st-flabel" style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;">Side</span>
                     <label style="font-size:10px;color:var(--danger);cursor:pointer;display:flex;align-items:center;gap:3px;">
                         <input type="radio" name="disposition" value="hostile" checked> Hostile
                     </label>
@@ -91,7 +91,7 @@
             </div>
 
             {# Timer input modes #}
-            <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+            <div class="m-stack" style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
                 <select id="timer-mode" name="timer_mode" data-change="toggleTimerMode"
                         style="padding:0.3rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
                     <option value="countdown">Countdown</option>
@@ -103,11 +103,11 @@
                        style="display:none;flex:1;min-width:180px;padding:0.3rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
             </div>
 
-            <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
+            <div class="m-stack" style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
                 <textarea name="notes" placeholder="Notes (optional)" rows="2"
                           style="flex:2;min-width:150px;padding:0.3rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;resize:vertical;"></textarea>
                 <div style="flex:1;min-width:120px;">
-                    <span style="font-size:9px;color:var(--muted);display:block;margin-bottom:2px;">Visibility</span>
+                    <span class="st-flabel" style="font-size:9px;color:var(--muted);display:block;margin-bottom:2px;">Visibility</span>
                     <select name="acl_group_id" style="width:100%;padding:0.3rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
                         <option value="">Everyone</option>
                         {% for g in acl_groups %}
@@ -117,7 +117,7 @@
                 </div>
             </div>
 
-            <button type="submit" class="b-btn" style="align-self:flex-start;padding:0.3rem 1rem;border:1px solid var(--accent);color:var(--accent);font-size:10px;">
+            <button type="submit" class="b-btn st-tap" style="align-self:flex-start;padding:0.3rem 1rem;border:1px solid var(--accent);color:var(--accent);font-size:10px;">
                 Add Timer
             </button>
         </form>
@@ -126,17 +126,17 @@
 
 {# ── ACL Groups Management ───────────────────────────────────────────────── #}
 <details class="b-section">
-    <summary class="b-panel-head" style="cursor:pointer;list-style:none;display:flex;align-items:center;gap:0.5rem;">
+    <summary class="b-panel-head st-sum" style="cursor:pointer;list-style:none;display:flex;align-items:center;gap:0.5rem;">
         <span style="color:var(--muted);font-size:12px;">&#9881;</span>
         <span class="b-label b-muted">Access Control Groups</span>
     </summary>
     <div class="b-panel" style="border-top:1px solid var(--border);">
         {# Create new group #}
         <div style="padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);display:flex;gap:0.5rem;align-items:center;">
-            <form method="POST" action="/structure-timers/acl/create" style="display:flex;gap:0.5rem;flex:1;align-items:center;">
+            <form method="POST" action="/structure-timers/acl/create" class="st-form m-stack" style="display:flex;gap:0.5rem;flex:1;align-items:center;">
                 <input type="text" name="name" placeholder="New group name…" required
                        style="flex:1;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
-                <button type="submit" class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">Create</button>
+                <button type="submit" class="b-btn st-tap" style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">Create</button>
             </form>
         </div>
 
@@ -147,7 +147,7 @@
                 <span style="font-size:11px;font-weight:600;color:var(--text);">{{ group.name }}</span>
                 <form method="POST" action="/structure-timers/acl/{{ group.id }}/delete"
                       data-confirm="Delete this ACL group? Timers using it will become visible to everyone.">
-                    <button class="b-btn" style="padding:0.1rem 0.3rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
+                    <button class="b-btn st-tap" style="padding:0.1rem 0.3rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
                 </form>
             </div>
 
@@ -162,15 +162,15 @@
                 <img src="https://images.evetech.net/characters/{{ entry.eve_id }}/portrait?size=32" style="width:16px;height:16px;border-radius:2px;" data-on-error="hide">
                 {% endif %}
                 <span style="flex:1;color:var(--text);">{{ entry.name or entry.eve_id }}</span>
-                <span style="font-size:8px;color:var(--muted);border:1px solid var(--border);padding:0 3px;border-radius:2px;">{{ entry.entry_type | capitalize }}</span>
+                <span class="st-acl-type" style="font-size:8px;color:var(--muted);border:1px solid var(--border);padding:0 3px;border-radius:2px;">{{ entry.entry_type | capitalize }}</span>
                 <form method="POST" action="/structure-timers/acl/{{ group.id }}/remove/{{ entry.id }}" style="display:inline;">
-                    <button class="b-btn" style="padding:0 0.2rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
+                    <button class="b-btn st-tap" style="padding:0 0.2rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
                 </form>
             </div>
             {% endfor %}
 
             {# Add entry #}
-            <div style="margin-top:0.35rem;display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;">
+            <div class="st-form m-stack" style="margin-top:0.35rem;display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;">
                 <select id="acl-type-{{ group.id }}" style="padding:0.2rem 0.3rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:9px;"
                         data-change="clearACLSelection" data-group-id="{{ group.id }}">
                     <option value="corporation">Corporation</option>
@@ -185,7 +185,7 @@
                 </div>
                 <input type="hidden" id="acl-id-{{ group.id }}" value="">
                 <input type="hidden" id="acl-name-{{ group.id }}" value="">
-                <button class="b-btn" data-click="addACLEntry" data-group-id="{{ group.id }}"
+                <button class="b-btn st-tap" data-click="addACLEntry" data-group-id="{{ group.id }}"
                         style="padding:0.2rem 0.4rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">Add</button>
             </div>
         </div>
@@ -198,13 +198,13 @@
 
 {# ── Filters ─────────────────────────────────────────────────────────────── #}
 {% if active_timers %}
-<div class="b-section" style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+<div class="b-section st-filters" style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
     <span style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;">Filter:</span>
-    <button class="range-btn is-active" data-click="filterTimers" data-filter="all">All</button>
-    <button class="range-btn" data-click="filterTimers" data-filter="hostile">Hostile</button>
-    <button class="range-btn" data-click="filterTimers" data-filter="friendly">Friendly</button>
-    <span style="color:var(--border);">|</span>
-    <button class="range-btn" data-click="filterTimers" data-filter="critical">Critical</button>
+    <button class="range-btn st-tap is-active" data-click="filterTimers" data-filter="all">All</button>
+    <button class="range-btn st-tap" data-click="filterTimers" data-filter="hostile">Hostile</button>
+    <button class="range-btn st-tap" data-click="filterTimers" data-filter="friendly">Friendly</button>
+    <span class="st-sep" style="color:var(--border);">|</span>
+    <button class="range-btn st-tap" data-click="filterTimers" data-filter="critical">Critical</button>
 </div>
 {% endif %}
 
@@ -214,12 +214,19 @@
     <div class="b-panel">
         <div class="b-panel-head" style="display:flex;justify-content:space-between;align-items:center;">
             <span class="b-label">Active Timers</span>
-            <button data-click="copyAllTimers" class="b-btn" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);">Copy for Discord</button>
+            <button data-click="copyAllTimers" class="b-btn st-tap" style="padding:2px 8px;font-size:10px;border:1px solid var(--border);">Copy for Discord</button>
         </div>
 
         {% for t in active_timers %}
         {% set type_labels = {'astrahus':'Astrahus','fortizar':'Fortizar','keepstar':'Keepstar','raitaru':'Raitaru','azbel':'Azbel','sotiyo':'Sotiyo','athanor':'Athanor','tatara':'Tatara','poco':'POCO','skyhook':'Skyhook','sov':'Sov','other':'Other','citadel':'Citadel','ec':'EC','refinery':'Refinery'} %}
-        <div class="b-table-row timer-row" data-disposition="{{ t.disposition }}" data-priority="{{ t.priority }}"
+        {% set phase_codes = {'shield':'S','armor':'A','hull':'H','anchoring':'AN','unanchoring':'UN'} %}
+        {% set can_edit = is_privileged or t.created_by == user_id %}
+        {# Phones (mobile design §4.3, D3 A / D4 A): an expand-on-tap row. The
+           three desktop blocks stay untagged, so phones hide them; the m-only
+           cells after them carry the phase code, the name, a second live
+           countdown (.timer-countdown, so the ticker fills it) and the open
+           row's labelled values, ending in Actions. #}
+        <div class="b-table-row timer-row m-row" data-click="toggleMRow" data-disposition="{{ t.disposition }}" data-priority="{{ t.priority }}"
              data-expires="{{ t.timer_expires.isoformat() }}"
              data-structure-type="{{ type_labels.get(t.structure_type, t.structure_type) }}"
              data-system="{{ t.system_name }}"
@@ -277,13 +284,50 @@
                 </form>
             </div>
             {% endif %}
+
+            <span class="m-only st-lead" data-m="lead" title="{{ t.timer_phase | capitalize }}"
+                  style="background:{{ phase_colors.get(t.timer_phase, 'var(--muted)') }};">{{ phase_codes.get(t.timer_phase, (t.timer_phase or '?')[:1] | upper) }}</span>
+            <span class="m-only st-name" data-m="key">{{ t.structure_name }}</span>
+            <span class="m-only st-cd timer-countdown" data-m="key" data-expires="{{ t.timer_expires.isoformat() }}"></span>
+            <span class="m-only" data-m-label="Name">{{ t.structure_name }}</span>
+            <span class="m-only" data-m-label="System">{{ t.system_name }}{% if t.region_name %} &middot; {{ t.region_name }}{% endif %}</span>
+            <span class="m-only" data-m-label="Type">{{ type_labels.get(t.structure_type, t.structure_type) }}</span>
+            <span class="m-only" data-m-label="Phase">{{ t.timer_phase | capitalize }}</span>
+            <span class="m-only" data-m-label="Priority"{% if t.priority == 'critical' %} style="color:var(--danger);"{% endif %}>{{ t.priority | capitalize }}</span>
+            <span class="m-only" data-m-label="EVE time">{{ t.timer_expires.strftime('%Y-%m-%d %H:%M') }}</span>
+            {# data-prefix="": the label already says Local. #}
+            <span class="m-only timer-local" data-m-label="Local" data-expires="{{ t.timer_expires.isoformat() }}" data-prefix=""></span>
+            <span class="m-only" data-m-label="Owner">{{ t.owner_name }}</span>
+            {% if t.notes %}
+            <span class="m-only" data-m-label="Notes">{{ t.notes }}</span>
+            {% endif %}
+            {% if t.source == 'esi' %}
+            <span class="m-only" data-m-label="Source">ESI (auto-detected)</span>
+            {% endif %}
+            <div class="m-only" data-m-label="Actions">
+                <div class="st-actions">
+                    {% if can_edit %}
+                    <button type="button" class="b-btn st-tap" data-click="editTimer" data-timer-id="{{ t.id }}"
+                            style="padding:0 0.6rem;border:1px solid var(--muted);color:var(--muted);">Edit</button>
+                    {% endif %}
+                    <a href="/tools/discordtime#t={{ t.timer_expires.timestamp() | int }}" class="b-btn st-tap"
+                       style="padding:0 0.6rem;border:1px solid var(--muted);color:var(--muted);text-decoration:none;"
+                       title="Generate Discord timestamp">Discord</a>
+                    {% if can_edit %}
+                    <form method="POST" action="/structure-timers/{{ t.id }}/delete" data-confirm="Delete this timer?">
+                        <button class="b-btn st-tap" aria-label="Delete timer"
+                                style="padding:0 0.6rem;border:1px solid var(--danger);color:var(--danger);">&times;</button>
+                    </form>
+                    {% endif %}
+                </div>
+            </div>
         </div>
 
         {# Edit form (hidden by default, only for authorized users) #}
         {% if is_privileged or t.created_by == user_id %}
         <div id="edit-{{ t.id }}" style="display:none;padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);background:var(--bg);">
-            <form method="POST" action="/structure-timers/{{ t.id }}/edit" style="display:flex;flex-direction:column;gap:0.5rem;">
-                <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+            <form method="POST" action="/structure-timers/{{ t.id }}/edit" class="st-form" style="display:flex;flex-direction:column;gap:0.5rem;">
+                <div class="m-stack" style="display:flex;gap:0.5rem;flex-wrap:wrap;">
                     <input type="text" name="structure_name" value="{{ t.structure_name }}"
                            style="flex:2;min-width:120px;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
                     <select name="structure_type" style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
@@ -292,7 +336,7 @@
                         {% endfor %}
                     </select>
                 </div>
-                <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+                <div class="m-stack" style="display:flex;gap:0.5rem;flex-wrap:wrap;">
                     <input type="text" name="system_name" value="{{ t.system_name }}"
                            style="flex:1;min-width:80px;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
                     <input type="text" name="region_name" value="{{ t.region_name or '' }}" placeholder="Region"
@@ -300,7 +344,7 @@
                     <input type="text" name="owner_name" value="{{ t.owner_name }}"
                            style="flex:1;min-width:80px;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
                 </div>
-                <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+                <div class="m-stack" style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
                     <label style="font-size:10px;color:var(--danger);cursor:pointer;display:flex;align-items:center;gap:3px;">
                         <input type="radio" name="disposition" value="hostile" {% if t.disposition == 'hostile' %}checked{% endif %}> Hostile
                     </label>
@@ -308,7 +352,7 @@
                         <input type="radio" name="disposition" value="friendly" {% if t.disposition == 'friendly' %}checked{% endif %}> Friendly
                     </label>
                     <select name="timer_phase" style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
-                        {% for val in ['shield','armor','hull'] %}
+                        {% for val in ['shield','armor','hull','anchoring','unanchoring'] %}
                         <option value="{{ val }}" {% if t.timer_phase == val %}selected{% endif %}>{{ val | capitalize }}</option>
                         {% endfor %}
                     </select>
@@ -318,17 +362,17 @@
                         {% endfor %}
                     </select>
                 </div>
-                <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+                <div class="m-stack" style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
                     <input type="hidden" name="timer_mode" value="absolute">
                     <input type="text" name="datetime_utc" value="{{ t.timer_expires.strftime('%Y-%m-%d %H:%M') }}" placeholder="YYYY-MM-DD HH:MM (UTC)"
                            style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
                     <span style="font-size:9px;color:var(--muted);">UTC</span>
                 </div>
-                <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+                <div class="m-stack" style="display:flex;gap:0.5rem;flex-wrap:wrap;">
                     <textarea name="notes" rows="2" placeholder="Notes"
                               style="flex:2;min-width:120px;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;resize:vertical;">{{ t.notes or '' }}</textarea>
                     <div style="flex:1;min-width:100px;">
-                        <span style="font-size:9px;color:var(--muted);display:block;margin-bottom:2px;">Visibility</span>
+                        <span class="st-flabel" style="font-size:9px;color:var(--muted);display:block;margin-bottom:2px;">Visibility</span>
                         <select name="acl_group_id" style="width:100%;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
                             <option value="">Everyone</option>
                             {% for g in acl_groups %}
@@ -338,8 +382,8 @@
                     </div>
                 </div>
                 <div style="display:flex;gap:0.5rem;">
-                    <button type="submit" class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">Save</button>
-                    <button type="button" class="b-btn" data-click="editTimer" data-timer-id="{{ t.id }}" style="padding:0.25rem 0.5rem;border:1px solid var(--border);font-size:9px;color:var(--muted);">Cancel</button>
+                    <button type="submit" class="b-btn st-tap" style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">Save</button>
+                    <button type="button" class="b-btn st-tap" data-click="editTimer" data-timer-id="{{ t.id }}" style="padding:0.25rem 0.5rem;border:1px solid var(--border);font-size:9px;color:var(--muted);">Cancel</button>
                 </div>
             </form>
         </div>
@@ -353,25 +397,36 @@
 
 {# ── Archived Timers ─────────────────────────────────────────────────────── #}
 {% if archived_timers %}
-<details class="b-section">
-    <summary class="b-panel-head" style="cursor:pointer;list-style:none;">
+{# Phones (D5 A): each row keys on the name and a short MM-DD date; the
+   desktop cells are tagged where they stand. Show all past 10: the wrap is
+   the <details>, not the rows' own parent (`.is-expanded > .m-row` would
+   open every row), and the button sits after the panel so the last row
+   stays its :last-child. #}
+<details class="b-section m-clamp-wrap">
+    <summary class="b-panel-head st-sum" style="cursor:pointer;list-style:none;">
         <span class="b-label b-muted">Archived Timers ({{ archived_timers | length }})</span>
     </summary>
-    <div class="b-panel" style="border-top:1px solid var(--border);">
+    <div class="b-panel m-clamp" style="border-top:1px solid var(--border);">
         {% for t in archived_timers %}
-        <div class="b-table-row" style="opacity:0.5;">
-            <span style="flex:2;font-size:10px;color:var(--text);">{{ t.structure_name }}</span>
-            <span style="flex:1;font-size:9px;color:var(--muted);">{{ t.system_name }}</span>
-            <span style="flex:0 0 50px;font-size:9px;color:var(--muted);">{{ t.timer_phase | capitalize }}</span>
-            <span style="flex:0 0 120px;font-size:9px;color:var(--muted);text-align:right;">
+        <div class="b-table-row m-row st-arch" data-click="toggleMRow" style="opacity:0.5;">
+            <span data-m="key" style="flex:2;font-size:10px;color:var(--text);">{{ t.structure_name }}</span>
+            <span class="m-only" data-m-label="Name">{{ t.structure_name }}</span>
+            <span data-m-label="System" style="flex:1;font-size:9px;color:var(--muted);">{{ t.system_name }}</span>
+            <span data-m-label="Phase" style="flex:0 0 50px;font-size:9px;color:var(--muted);">{{ t.timer_phase | capitalize }}</span>
+            <span data-m-label="Expired" style="flex:0 0 120px;font-size:9px;color:var(--muted);text-align:right;">
                 {{ t.timer_expires.strftime('%Y-%m-%d %H:%M') }} UTC
             </span>
-            <form method="POST" action="/structure-timers/{{ t.id }}/delete" style="flex:none;">
-                <button class="b-btn" style="padding:0.1rem 0.3rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
+            <span class="m-only" data-m="key" style="color:var(--muted);">{{ t.timer_expires.strftime('%m-%d') }}</span>
+            <form method="POST" action="/structure-timers/{{ t.id }}/delete" data-m-label="Delete" style="flex:none;"
+                  data-confirm="Delete this timer?">
+                <button class="b-btn st-tap" aria-label="Delete timer" style="padding:0.1rem 0.3rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
             </form>
         </div>
         {% endfor %}
     </div>
+    {% if archived_timers | length > 10 %}
+    <button type="button" class="m-only m-showall" data-click="toggleExpanded" data-toggle-target=".m-clamp-wrap">Show all {{ archived_timers | length }}</button>
+    {% endif %}
 </details>
 {% endif %}
 
@@ -518,7 +573,7 @@ function copyAllTimers(btn) {
     if (this && this.tagName === 'BUTTON') btn = this;
     var lines = [];
     document.querySelectorAll('.timer-row').forEach(function(row) {
-        if (row.style.display === 'none') return;
+        if (row.hidden) return;
         if (row.classList.contains('timer-expired')) return;
         var disp = row.dataset.disposition || 'unknown';
         disp = disp.charAt(0).toUpperCase() + disp.slice(1);
@@ -559,13 +614,16 @@ function filterTimers(filter, btn) {
     }
     document.querySelectorAll('.range-btn').forEach(function(b) { b.classList.remove('is-active'); });
     if (btn) btn.classList.add('is-active');
+    /* `hidden` rather than an inline display: on phones a timer row is an
+       m-row, whose display:grid !important beats an inline display:none.
+       site.css hides .timer-row[hidden] at every width. */
     document.querySelectorAll('.timer-row').forEach(function(row) {
-        if (filter === 'all') { row.style.display = ''; return; }
+        if (filter === 'all') { row.hidden = false; return; }
         if (filter === 'critical') {
-            row.style.display = row.dataset.priority === 'critical' ? '' : 'none';
+            row.hidden = row.dataset.priority !== 'critical';
             return;
         }
-        row.style.display = row.dataset.disposition === filter ? '' : 'none';
+        row.hidden = row.dataset.disposition !== filter;
     });
 }
 
@@ -604,11 +662,13 @@ function updateCountdowns() {
         }
     });
 
-    /* Show local time */
+    /* Show local time. The phone copy (data-prefix="") sits under a
+       "Local" label, so it drops the prefix. */
     document.querySelectorAll('.timer-local').forEach(function(el) {
         if (el.dataset.done) return;
         var expires = new Date(el.dataset.expires + 'Z');
-        el.textContent = 'Local: ' + expires.toLocaleString(undefined, {
+        var prefix = el.hasAttribute('data-prefix') ? el.dataset.prefix : 'Local: ';
+        el.textContent = prefix + expires.toLocaleString(undefined, {
             month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true
         });
         el.dataset.done = '1';

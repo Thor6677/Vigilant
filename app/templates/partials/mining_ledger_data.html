@@ -48,22 +48,30 @@
 <div class="b-grid-2 b-section">
 
     {# ── By Ore Type ───────────────────────────────────────────────────────── #}
+    {# Phones (mobile R3, as R2 did mining.html): each list below is an
+       expand-on-tap row, key 1 the name or date, key 2 the ISK value; the
+       rest opens as labelled lines. The ore icon stays inline in key 1
+       (ml-ore keeps it a flex line on phones). Daily Summary and Full
+       Detail show 10 rows plus "Show all N". An opened ore, system or
+       detail row starts with its full Name (an m-only copy, first labelled
+       cell); Daily Summary's key 1 is a date, so it has none. #}
     <div class="b-panel">
         <div class="b-panel-head">
             <span class="b-label">By Ore Type</span>
         </div>
         {% for ore in data.by_ore %}
         {% set pct = (ore.value / data.total_value * 100) if data.total_value > 0 else 0 %}
-        <div class="b-table-row">
-            <span style="flex:2;display:flex;align-items:center;gap:0.4rem;">
+        <div class="b-table-row m-row" data-click="toggleMRow">
+            <span data-m="key" class="ml-ore" style="flex:2;display:flex;align-items:center;gap:0.4rem;">
                 <img src="https://images.evetech.net/types/{{ ore.type_id }}/icon?size=32"
                      style="width:20px;height:20px;border:1px solid var(--border);flex-shrink:0;"
                      data-on-error="hide">
                 <span style="font-size:11px;color:var(--text);">{{ ore.name }}</span>
             </span>
-            <span style="flex:1;text-align:right;font-size:10px;color:var(--muted);">{{ "{:,.0f}".format(ore.quantity) }}</span>
-            <span style="flex:1;text-align:right;font-size:11px;color:var(--accent);">{{ format_isk(ore.value) }}</span>
-            <span style="flex:0 0 40px;text-align:right;font-size:9px;color:var(--muted);">{{ "%.0f"|format(pct) }}%</span>
+            <span class="m-only" data-m-label="Name">{{ ore.name }}</span>
+            <span data-m-label="Units" style="flex:1;text-align:right;font-size:10px;color:var(--muted);">{{ "{:,.0f}".format(ore.quantity) }}</span>
+            <span data-m="key" style="flex:1;text-align:right;font-size:11px;color:var(--accent);">{{ format_isk(ore.value) }}</span>
+            <span data-m-label="Share" style="flex:0 0 40px;text-align:right;font-size:9px;color:var(--muted);">{{ "%.0f"|format(pct) }}%</span>
         </div>
         {% endfor %}
     </div>
@@ -75,11 +83,12 @@
         </div>
         {% for sys in data.by_system %}
         {% set pct = (sys.value / data.total_value * 100) if data.total_value > 0 else 0 %}
-        <div class="b-table-row">
-            <span style="flex:2;font-size:11px;color:var(--text);">{{ sys.name }}</span>
-            <span style="flex:1;text-align:right;font-size:10px;color:var(--muted);">{{ "{:,.0f}".format(sys.quantity) }}</span>
-            <span style="flex:1;text-align:right;font-size:11px;color:var(--accent);">{{ format_isk(sys.value) }}</span>
-            <span style="flex:0 0 40px;text-align:right;font-size:9px;color:var(--muted);">{{ "%.0f"|format(pct) }}%</span>
+        <div class="b-table-row m-row" data-click="toggleMRow">
+            <span data-m="key" style="flex:2;font-size:11px;color:var(--text);">{{ sys.name }}</span>
+            <span class="m-only" data-m-label="Name">{{ sys.name }}</span>
+            <span data-m-label="Units" style="flex:1;text-align:right;font-size:10px;color:var(--muted);">{{ "{:,.0f}".format(sys.quantity) }}</span>
+            <span data-m="key" style="flex:1;text-align:right;font-size:11px;color:var(--accent);">{{ format_isk(sys.value) }}</span>
+            <span data-m-label="Share" style="flex:0 0 40px;text-align:right;font-size:9px;color:var(--muted);">{{ "%.0f"|format(pct) }}%</span>
         </div>
         {% endfor %}
     </div>
@@ -94,7 +103,7 @@
             <span class="b-muted-sm">All time</span>
         </div>
 
-        <div class="b-table-row" style="border-bottom:2px solid var(--border);">
+        <div class="b-table-row m-head" style="border-bottom:2px solid var(--border);">
             <span style="flex:0 0 100px;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Date</span>
             <span style="flex:1;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Units</span>
             <span style="flex:0 0 50px;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Types</span>
@@ -102,25 +111,33 @@
             <span style="flex:2;"></span>
         </div>
 
-        {% for day in data.by_date %}
-        {% set bar_pct = (day.value / data.by_date[0].value * 100) if data.by_date[0].value > 0 else 0 %}
-        <div class="b-table-row">
-            <span style="flex:0 0 100px;font-size:11px;color:var(--text);">{{ day.date }}</span>
-            <span style="flex:1;text-align:right;font-size:10px;color:var(--muted);">{{ "{:,.0f}".format(day.quantity) }}</span>
-            <span style="flex:0 0 50px;text-align:right;font-size:10px;color:var(--muted);">{{ day.types }}</span>
-            <span style="flex:1;text-align:right;font-size:11px;color:var(--accent);">{{ format_isk(day.value) }}</span>
-            <span style="flex:2;display:flex;align-items:center;padding-left:0.5rem;">
-                <div style="height:4px;background:var(--accent);width:{{ bar_pct | int }}%;min-width:1px;"></div>
-            </span>
+        <div class="m-clamp-wrap ml-clamp">
+            <div class="m-clamp">
+                {% for day in data.by_date %}
+                {% set bar_pct = (day.value / data.by_date[0].value * 100) if data.by_date[0].value > 0 else 0 %}
+                <div class="b-table-row m-row" data-click="toggleMRow">
+                    <span data-m="key" style="flex:0 0 100px;font-size:11px;color:var(--text);">{{ day.date }}</span>
+                    <span data-m-label="Units" style="flex:1;text-align:right;font-size:10px;color:var(--muted);">{{ "{:,.0f}".format(day.quantity) }}</span>
+                    <span data-m-label="Types" style="flex:0 0 50px;text-align:right;font-size:10px;color:var(--muted);">{{ day.types }}</span>
+                    <span data-m="key" style="flex:1;text-align:right;font-size:11px;color:var(--accent);">{{ format_isk(day.value) }}</span>
+                    {# The bar cell stays untagged, so phones hide it. #}
+                    <span style="flex:2;display:flex;align-items:center;padding-left:0.5rem;">
+                        <div style="height:4px;background:var(--accent);width:{{ bar_pct | int }}%;min-width:1px;"></div>
+                    </span>
+                </div>
+                {% endfor %}
+            </div>
+            {% if data.by_date|length > 10 %}
+            <button type="button" class="m-only m-showall" data-click="toggleExpanded" data-toggle-target=".m-clamp-wrap">Show all {{ data.by_date|length }}</button>
+            {% endif %}
         </div>
-        {% endfor %}
     </div>
 </div>
 
 {# ── Full Detail ───────────────────────────────────────────────────────────── #}
 <div class="b-section">
     <div class="b-panel">
-        <div class="b-panel-head" style="cursor:pointer;" data-click="togglePanel" data-toggle-panel="ml-detail-table">
+        <div class="b-panel-head ml-detail-head" style="cursor:pointer;" data-click="togglePanel" data-toggle-panel="ml-detail-table">
             <span class="b-label">Full Detail</span>
             <div style="display:flex;align-items:center;gap:0.5rem;">
                 <span class="b-muted-sm">{{ data.entries | length }} entries</span>
@@ -128,8 +145,10 @@
             </div>
         </div>
 
+        {# togglePanel shows and hides this body, so the clamp goes inside it:
+           never display:none on a row or a tagged cell. #}
         <div id="ml-detail-table" style="display:none;">
-            <div class="b-table-row" style="border-bottom:2px solid var(--border);">
+            <div class="b-table-row m-head" style="border-bottom:2px solid var(--border);">
                 <span style="flex:0 0 90px;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Date</span>
                 <span style="flex:2;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Ore</span>
                 <span style="flex:1;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">System</span>
@@ -137,20 +156,28 @@
                 <span style="flex:1;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Value</span>
             </div>
 
-            {% for e in data.entries %}
-            <div class="b-table-row">
-                <span style="flex:0 0 90px;font-size:10px;color:var(--muted);">{{ e.date }}</span>
-                <span style="flex:2;display:flex;align-items:center;gap:0.35rem;">
-                    <img src="https://images.evetech.net/types/{{ e.type_id }}/icon?size=32"
-                         style="width:16px;height:16px;border:1px solid var(--border);flex-shrink:0;"
-                         data-on-error="hide">
-                    <span style="font-size:11px;color:var(--text);">{{ e.ore_name }}</span>
-                </span>
-                <span style="flex:1;font-size:10px;color:var(--muted);">{{ e.system_name }}</span>
-                <span style="flex:1;text-align:right;font-size:11px;color:var(--text);">{{ "{:,.0f}".format(e.quantity) }}</span>
-                <span style="flex:1;text-align:right;font-size:11px;color:var(--accent);">{{ format_isk(e.value) }}</span>
+            <div class="m-clamp-wrap ml-clamp">
+                <div class="m-clamp">
+                    {% for e in data.entries %}
+                    <div class="b-table-row m-row" data-click="toggleMRow">
+                        <span class="m-only" data-m-label="Name">{{ e.ore_name }}</span>
+                        <span data-m-label="Date" style="flex:0 0 90px;font-size:10px;color:var(--muted);">{{ e.date }}</span>
+                        <span data-m="key" class="ml-ore" style="flex:2;display:flex;align-items:center;gap:0.35rem;">
+                            <img src="https://images.evetech.net/types/{{ e.type_id }}/icon?size=32"
+                                 style="width:16px;height:16px;border:1px solid var(--border);flex-shrink:0;"
+                                 data-on-error="hide">
+                            <span style="font-size:11px;color:var(--text);">{{ e.ore_name }}</span>
+                        </span>
+                        <span data-m-label="System" style="flex:1;font-size:10px;color:var(--muted);">{{ e.system_name }}</span>
+                        <span data-m-label="Quantity" style="flex:1;text-align:right;font-size:11px;color:var(--text);">{{ "{:,.0f}".format(e.quantity) }}</span>
+                        <span data-m="key" style="flex:1;text-align:right;font-size:11px;color:var(--accent);">{{ format_isk(e.value) }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% if data.entries|length > 10 %}
+                <button type="button" class="m-only m-showall" data-click="toggleExpanded" data-toggle-target=".m-clamp-wrap">Show all {{ data.entries|length }}</button>
+                {% endif %}
             </div>
-            {% endfor %}
         </div>
     </div>
 </div>

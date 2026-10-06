@@ -99,10 +99,12 @@ async def industry_search(request: Request, q: str = Query(""), db: AsyncSession
     if not valid:
         return HTMLResponse('<div class="b-empty">No blueprints found</div>')
 
+    # mfg-pick: a 40px tap target on phones (site.css R3 T1). A pick, so not
+    # an expand-on-tap m-row.
     html_parts = []
     for r in valid:
         html_parts.append(
-            f'<div class="b-table-row" style="cursor:pointer;" '
+            f'<div class="b-table-row mfg-pick" style="cursor:pointer;" '
             f'data-type-id="{r["type_id"]}" data-click="selectBlueprintFromEl">'
             f'<img src="https://images.evetech.net/types/{r["type_id"]}/icon?size=32" '
             f'style="width:24px;height:24px;border:1px solid var(--border);flex-shrink:0;" '
@@ -826,12 +828,14 @@ async def compression_skills(
             60380: "Complex", 60381: "Abyssal", 12189: "Mercoxit",
         }
         html = '<div style="display:flex;gap:0.75rem;flex-wrap:wrap;align-items:center;">'
-        html += f'<div style="display:flex;flex-direction:column;gap:3px;"><label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Reprocessing</label><input type="number" name="repro_level" value="{repro}" min="0" max="5" style="width:45px;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;text-align:center;"></div>'
-        html += f'<div style="display:flex;flex-direction:column;gap:3px;"><label style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Efficiency</label><input type="number" name="eff_level" value="{eff}" min="0" max="5" style="width:45px;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;text-align:center;"></div>'
+        html += f'<div style="display:flex;flex-direction:column;gap:3px;"><label class="comp-skill-label" style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Reprocessing</label><input type="number" name="repro_level" value="{repro}" min="0" max="5" style="width:45px;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;text-align:center;"></div>'
+        html += f'<div style="display:flex;flex-direction:column;gap:3px;"><label class="comp-skill-label" style="font-size:9px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">Efficiency</label><input type="number" name="eff_level" value="{eff}" min="0" max="5" style="width:45px;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:11px;text-align:center;"></div>'
         for sid, label in SKILL_LABELS.items():
             lv = skills_by_id.get(sid, 0)
-            html += f'<span style="font-size:10px;color:var(--text);border:1px solid var(--border);padding:2px 6px;">{label} <strong>{lv}</strong></span>'
-        html += f'<span style="font-size:9px;color:var(--success);align-self:flex-end;padding-bottom:4px;">Loaded</span>'
+            # comp-skill-chip: the 40px phone tap target (site.css, R3 T4).
+            html += f'<span class="comp-skill-chip" style="font-size:10px;color:var(--text);border:1px solid var(--border);padding:2px 6px;">{label} <strong>{lv}</strong></span>'
+        # comp-skill-label / comp-skill-loaded: 11px on phones (site.css, R3 T4).
+        html += f'<span class="comp-skill-loaded" style="font-size:9px;color:var(--success);align-self:flex-end;padding-bottom:4px;">Loaded</span>'
         html += '</div>'
 
         # Store ore-specific skill levels as JSON for the form

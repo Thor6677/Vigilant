@@ -17,7 +17,9 @@ Helpers, one line each:
   clamps(html)                   .m-clamp lists, .m-showall buttons, .m-unclamp and .m-clamp-wrap counts
   Styled                         HTMLParser collecting every start tag's name, classes and inline style
   VOID                           the void HTML elements (no end tag), for a test's own HTMLParser
-  css_section(task, css=None)    an R2 task's site.css section ("T1"…"T6", "P"), comments stripped
+  css_section(task, css=None, release="R2")
+                                 a task's site.css section, comments stripped: R2 "T1"…"T6" or "P",
+                                 R3 "T1"…"T7", R4 "T1"…"T4", R5 "T1"…"T5", R6 "T1"…"T7"
   phone_block(section)           a css_section's phone @media body (brace-matched) and what follows it
   selectors(prelude)             split a CSS selector list on its top-level commas (not inside :not())
   rule_bodies(css, selector)     joined bodies of every rule whose selector list contains `selector`
@@ -33,6 +35,11 @@ Helpers, one line each:
   * every data-m-label is non-empty
   * a non-link row is toggled by toggleMRow or by its own toggleExpanded;
     a link row (m-row--link) is never toggled by toggleMRow
+  * neither the row nor any tagged cell (data-m or data-m-label) is hidden
+    inline: no `hidden` attribute, no inline `display: none`. The phone
+    rules' display:… !important (grid on the row, block/flex on its cells)
+    beats both, so the element would show on phones anyway; hide a wrapper
+    instead (contract caveat, R1 Task 1 review)
 It returns the parsed rows so a test can make page-specific checks too."""
 import os
 import re
@@ -79,6 +86,20 @@ def _assert_img_size(where: str, img: dict) -> None:
             f"{where}: <img data-m=lead> {dim}={val!r} doesn't match its inline {dim}:{inline.group(1)}px")
 
 
+_INLINE_NONE = re.compile(r"(?:^|;)\s*display\s*:\s*none\s*(?:!\s*important\s*)?(?:;|$)", re.I)
+
+
+def _hidden_inline(attrs: dict) -> str | None:
+    """How `attrs` hide their element inline, or None: the `hidden`
+    attribute (any value, including HTMLParser's "" for a bare one) or an
+    inline display:none in any case or spacing, with or without !important."""
+    if "hidden" in attrs:
+        return "the hidden attribute"
+    if _INLINE_NONE.search(attrs.get("style", "")):
+        return "an inline display:none"
+    return None
+
+
 def mrows(html: str) -> list[dict]:
     c = _Collector()
     c.feed(html)
@@ -104,6 +125,17 @@ def assert_mrow(html: str, min_rows: int = 1) -> list[dict]:
                 f"{where}: a cell can't be both data-m and data-m-label")
             if "data-m-label" in k:
                 assert k["data-m-label"].strip(), f"{where}: empty data-m-label"
+        how = _hidden_inline(r["attrs"])
+        assert not how, (
+            f"{where}: hidden with {how}; the phone grid's display:grid !important shows "
+            "it anyway, so hide a wrapper instead")
+        for tag, k in zip(r["child_tags"], kids):
+            if "data-m" in k or "data-m-label" in k:
+                how = _hidden_inline(k)
+                cell = k.get("data-m") or f"data-m-label={k.get('data-m-label')!r}"
+                assert not how, (
+                    f"{where}: tagged cell <{tag} {cell}> is hidden with {how}; the phone rules' "
+                    "display !important show it anyway, so hide a wrapper instead")
         is_link = "m-row--link" in r["attrs"].get("class", "").split()
         click = r["attrs"].get("data-click", "")
         if is_link:
@@ -333,29 +365,33 @@ class Styled(HTMLParser):
 
 # ── site.css sections and rules ───────────────────────────────────────
 
-def css_section(task, css=None):
-    """The text of R2 task `task`'s section of site.css ("T1"…"T6", or "P"
-    for the polish pass): what lies between `/* ── R2 <task> · … ── */` and
-    `/* ── end R2 <task> ── */`, with comments stripped. Reads SITE_CSS
-    unless `css` is given. Fails (AssertionError) unless the header and end
-    marker each appear exactly once, header first."""
+def css_section(task, css=None, release="R2"):
+    """The text of task `task`'s section of site.css for `release`: what lies
+    between `/* ── <release> <task> · … ── */` and `/* ── end <release>
+    <task> ── */`, with comments stripped. R2's tasks are "T1"…"T6" and "P"
+    (the polish pass); R3's are "T1"…"T7", R4's "T1"…"T4", R5's "T1"…"T5"
+    and R6's "T1"…"T7". The release keeps same-named tasks (R2 T1, R3 T1, …)
+    apart. Reads SITE_CSS unless `css` is given. Fails (AssertionError,
+    naming the release) unless the header and end marker each appear exactly
+    once, header first."""
     if css is None:
         with open(SITE_CSS, encoding="utf-8") as fh:
             css = fh.read()
-    heads = list(re.finditer(rf"/\* ── R2 {re.escape(task)} · [^*]*? ── \*/", css))
-    end = f"/* ── end R2 {task} ── */"
-    assert len(heads) == 1, f"expected one R2 {task} section header in site.css, found {len(heads)}"
+    name = f"{release} {task}"
+    heads = list(re.finditer(rf"/\* ── {re.escape(name)} · [^*]*? ── \*/", css))
+    end = f"/* ── end {name} ── */"
+    assert len(heads) == 1, f"expected one {name} section header in site.css, found {len(heads)}"
     assert css.count(end) == 1, f"expected one {end!r} in site.css, found {css.count(end)}"
     start, stop = heads[0].end(), css.index(end)
-    assert start <= stop, f"R2 {task}'s end marker comes before its header"
+    assert start <= stop, f"{name}'s end marker comes before its header"
     return re.sub(r"/\*.*?\*/", "", css[start:stop], flags=re.S)
 
 
 def phone_block(section):
-    """Split an R2 section (css_section's text) into the body of its phone
-    @media block, found by matching braces, and whatever follows that block
-    up to the end marker: a desktop rule, if the task needed one. Fails
-    (AssertionError) unless the section opens with
+    """Split a section (css_section's text, from any release) into the body
+    of its phone @media block, found by matching braces, and whatever
+    follows that block up to the end marker: a desktop rule, if the task
+    needed one. Fails (AssertionError) unless the section opens with
     `@media (max-width: 640px) {` and that block is closed."""
     m = re.match(r"\s*@media \(max-width: 640px\) \{", section)
     assert m, "the section must open with its phone @media block"

@@ -47,7 +47,7 @@
     <div class="b-section">
         <div class="b-section-head" style="display:flex;align-items:center;justify-content:space-between;">
             <span class="b-label">Watched Systems</span>
-            <span class="b-label" style="color:var(--muted);font-size:9px;">{{ systems | length }} watched</span>
+            <span class="b-label w-count" style="color:var(--muted);font-size:9px;">{{ systems | length }} watched</span>
         </div>
 
         {% if asset_system_count > 0 %}
@@ -80,7 +80,7 @@
         {% endfor %}
         {% endif %}
 
-        <form class="w-form" method="POST" action="/intel/watch/system/add">
+        <form class="w-form m-stack" method="POST" action="/intel/watch/system/add">
             <input class="w-input" name="system" placeholder="System name or ID" required style="flex:2;min-width:140px;">
             <input class="w-input" name="label" placeholder="Label (optional)" style="flex:2;min-width:120px;">
             <button type="submit" class="b-btn" style="flex:none;">Add</button>
@@ -91,7 +91,7 @@
     <div class="b-section">
         <div class="b-section-head" style="display:flex;align-items:center;justify-content:space-between;">
             <span class="b-label">Watched Hunters</span>
-            <span class="b-label" style="color:var(--muted);font-size:9px;">{{ hunters | length }} watched</span>
+            <span class="b-label w-count" style="color:var(--muted);font-size:9px;">{{ hunters | length }} watched</span>
         </div>
 
         {% if not hunters %}
@@ -101,7 +101,7 @@
         <div class="w-row">
             <div style="flex:1;min-width:0;">
                 <div style="font-weight:600;">
-                    <span style="color:var(--muted);font-size:9px;text-transform:uppercase;">{{ h.kind }}</span>
+                    <span class="w-kind" style="color:var(--muted);font-size:9px;text-transform:uppercase;">{{ h.kind }}</span>
                     {{ h.label or h.entity_id }}
                 </div>
                 {% if h.notes %}<div style="color:var(--muted);font-size:10px;">{{ h.notes }}</div>{% endif %}
@@ -114,7 +114,7 @@
         {% endfor %}
         {% endif %}
 
-        <form class="w-form" method="POST" action="/intel/watch/hunter/add">
+        <form class="w-form m-stack" method="POST" action="/intel/watch/hunter/add">
             <select class="w-select" name="kind" style="flex:none;">
                 <option value="character">Character</option>
                 <option value="corporation">Corporation</option>
@@ -132,13 +132,23 @@
 <div class="b-section" style="margin-top:1rem;">
     <div class="b-section-head" style="display:flex;align-items:center;justify-content:space-between;">
         <span class="b-label">Recent Alerts · last 72h</span>
-        <span class="b-label" style="color:var(--muted);font-size:9px;">{{ alerts | length }} event(s)</span>
+        <span class="b-label w-count" style="color:var(--muted);font-size:9px;">{{ alerts | length }} event(s)</span>
     </div>
     {% if not alerts %}
     <div class="w-empty">No alerts yet. Fires will appear here as they happen.</div>
     {% else %}
     {% for a in alerts %}
-    <div class="w-row">
+    {% set kind = 'system' if a.kind == 'system_watch' else 'hunter' %}
+    {# Phones (D10 A): kind tag · system · HH:MM; the m-only cells carry
+       the row, and the desktop cells below are hidden there. #}
+    <div class="w-row m-row" data-click="toggleMRow">
+        <span class="m-only alert-kind-{{ kind }}" data-m="lead" style="font-size:9px;text-transform:uppercase;">{{ kind | upper }}</span>
+        <span class="m-only" data-m="key">{{ a.system_name }}</span>
+        <span class="m-only b-muted" data-m="key">{{ a.triggered_at.strftime('%H:%M') }}</span>
+        <span class="m-only" data-m-label="Name">{{ a.system_name }}</span>
+        <span class="m-only" data-m-label="Matched">{{ a.matched_label or '—' }}</span>
+        <span class="m-only" data-m-label="Time">{{ a.triggered_at.strftime('%Y-%m-%d %H:%M') }} UTC</span>
+        <span class="m-only" data-m-label="Kill"><a href="https://zkillboard.com/kill/{{ a.killmail_id }}/" target="_blank" rel="noopener" class="m-tap" style="color:var(--accent);text-decoration:none;">Open kill ↗</a></span>
         <div style="flex:1;min-width:0;">
             <div style="font-weight:600;">
                 <span class="alert-kind-{{ 'system' if a.kind == 'system_watch' else 'hunter' }}" style="font-size:9px;text-transform:uppercase;">

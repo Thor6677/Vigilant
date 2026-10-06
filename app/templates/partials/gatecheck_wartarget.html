@@ -31,17 +31,17 @@
 {% for s in systems %}
 <div class="b-panel" style="margin-bottom:0.5rem;">
     <details{% if loop.first %} open{% endif %}>
-        <summary style="display:flex;align-items:center;gap:0.75rem;padding:0.5rem 0.75rem;cursor:pointer;list-style:none;font-size:11px;">
+        <summary class="gc-wp" style="display:flex;align-items:center;gap:0.75rem;padding:0.5rem 0.75rem;cursor:pointer;list-style:none;font-size:11px;">
             <span style="color:{{ s.sec_color }};font-size:10px;min-width:30px;">{{ "%.1f"|format(s.security) }}</span>
-            <a href="https://zkillboard.com/system/{{ s.system_id }}/" target="_blank" rel="noopener"
+            <a href="https://zkillboard.com/system/{{ s.system_id }}/" target="_blank" rel="noopener" class="gc-wp-name"
                style="flex:1;color:var(--text);text-decoration:none;" data-mousedown="noop" data-stop>
                 {{ s.system_name }}
             </a>
-            <span style="color:var(--muted);font-size:10px;">{{ s.region }}</span>
+            <span class="gc-wp-l2 gc-wp-region" style="color:var(--muted);font-size:10px;">{{ s.region }}</span>
 
-            {% if s.has_dictors %}<span style="color:var(--danger);font-size:8px;padding:1px 4px;border:1px solid var(--danger);letter-spacing:0.06em;">DICTOR</span>{% endif %}
-            {% if s.has_hics %}<span style="color:var(--danger);font-size:8px;padding:1px 4px;border:1px solid var(--danger);letter-spacing:0.06em;">HIC</span>{% endif %}
-            {% if s.has_smartbombs %}<span style="color:#b44dff;font-size:8px;padding:1px 4px;border:1px solid #b44dff;letter-spacing:0.06em;">SMARTBOMB</span>{% endif %}
+            {% if s.has_dictors %}<span class="gc-wp-l2 gc-flag" style="color:var(--danger);font-size:8px;padding:1px 4px;border:1px solid var(--danger);letter-spacing:0.06em;">DICTOR</span>{% endif %}
+            {% if s.has_hics %}<span class="gc-wp-l2 gc-flag" style="color:var(--danger);font-size:8px;padding:1px 4px;border:1px solid var(--danger);letter-spacing:0.06em;">HIC</span>{% endif %}
+            {% if s.has_smartbombs %}<span class="gc-wp-l2 gc-flag" style="color:#b44dff;font-size:8px;padding:1px 4px;border:1px solid #b44dff;letter-spacing:0.06em;">SMARTBOMB</span>{% endif %}
 
             <span style="color:var(--danger);font-size:10px;min-width:50px;text-align:right;">
                 {{ s.kill_count }} km{{ 's' if s.kill_count != 1 }}

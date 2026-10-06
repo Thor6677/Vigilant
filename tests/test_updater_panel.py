@@ -14,6 +14,7 @@ from jinja2 import Environment, FileSystemLoader
 
 from app.ops import update_schedule
 from app.ops.updater import BUSY, IDLE, INTERRUPTED
+from tests._htmx_error import admin_page, attrs_of, iss007_script, run_error_handlers
 
 PANEL = Path("app/templates/partials/updater_panel.html")
 ACTIONS = Path("static/js/actions.js")
@@ -205,9 +206,12 @@ def test_restart_watcher_listens_for_both_failure_modes(actions):
 
 
 def test_base_error_handler_still_honours_the_opt_out():
-    """Pins the contract this panel depends on. If ISS-007's handler is ever
-    changed to read the target instead of the triggering element, this fails
-    here rather than silently in production."""
+    """Pins the contract this panel depends on. ISS-007's handler reads the
+    element that triggered the request (evt.detail.elt) first — the panel's
+    own poll — and falls back to the swap target only for a request fired on
+    <body>, as htmx.ajax() does (ISS-125). If it ever stops reading the
+    triggering element, this fails here rather than silently in production.
+    Its behaviour is pinned case by case in tests/test_htmx_error_pill.py."""
     base = BASE.read_text()
     assert "data-htmx-no-error" in base
     assert "evt.detail.elt" in base or "detail && evt.detail.elt" in base
@@ -535,11 +539,25 @@ def test_admin_content_container_is_also_opted_out():
 
     The panel tests above read the panel file in isolation and structurally
     cannot see this, which is why it gets its own assertion here.
+
+    The attribute alone proved nothing (ISS-125): the refresh is htmx.ajax(),
+    whose events arrive with elt = <body>, so ISS-007 never looked at the
+    container and replaced the whole page instead. So the real handler, cut
+    from the rendered page, is run against the rendered container exactly as
+    htmx.ajax() reports a failure: a 502 from the edge proxy and no response
+    at all.
     """
     src = ADMIN.read_text()
     container = src[src.index('<div id="admin-content"'):]
     container = container[:container.index(">") + 1]
     assert 'data-htmx-no-error="1"' in container
+
+    page = admin_page()
+    assert "htmx.ajax('GET', '/admin/section/' + currentSection, '#admin-content')" in page
+    dom = {"admin-content": {"attrs": attrs_of(page, "admin-content"), "parent": "body"}}
+    events = [{"type": "responseError", "elt": "body", "target": "admin-content", "status": 502},
+              {"type": "sendError", "elt": "body", "target": "admin-content", "status": 0}]
+    assert run_error_handlers(iss007_script(page), dom, events) == [{}, {}]
 
 
 def test_admin_content_still_auto_refreshes():

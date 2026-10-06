@@ -220,7 +220,7 @@ def test_header_is_not_an_m_row():
 def test_wallet_chart_legend_moves_below_on_phones_only():
     html = _render_list()
     script = html[html.index("Corp wallet history chart"):html.index("Drag-and-drop reorder")]
-    assert "matchMedia('(max-width: 640px)').matches" in script
+    assert "window.matchMedia('(max-width: 640px)')" in script
     assert re.search(r"legend\.position\s*=\s*'bottom'", script)
     # Desktop keeps Chart.js's default position: nothing sets 'top'.
     assert "'top'" not in script
@@ -235,8 +235,149 @@ def test_wallet_chart_x_ticks_thin_out_on_phones_only():
     assert re.search(r"if \(phone\) xTicks\.maxTicksLimit = 4;", script)
     assert re.search(r"var xTicks = \{[^;]*maxTicksLimit: 8,", script)
     assert re.search(r"x: \{ ticks: xTicks,", script)
-    assert re.search(r"var phone = window\.matchMedia && window\.matchMedia\('\(max-width: 640px\)'\)\.matches;", script)
+    assert "var phone = !!(phoneMq && phoneMq.matches);" in script
     assert re.search(r"if \(phone\) legend\.position = 'bottom';", script)
+
+
+# Behaviour: the chart script in node against a stub Chart and DOM. Two corp
+# panels are open; the phone query flips; one panel is swapped out; a range
+# button fetches a new window.
+_CHART_HARNESS = r"""
+const fs = require('fs');
+const vm = require('vm');
+const src = fs.readFileSync(process.argv[2], 'utf8');
+const startPhone = process.argv[3] === 'phone';
+const state = { phone: startPhone };
+const mqls = [];
+function matchMedia(q) {
+  const m = { media: q, ls: [],
+    get matches() { return state.phone && q === '(max-width: 640px)'; },
+    addEventListener(t, fn) { if (t === 'change') this.ls.push(fn); },
+    addListener(fn) { this.ls.push(fn); } };
+  mqls.push(m);
+  return m;
+}
+let made = [];
+const all = [];
+const live = {};
+function Chart(canvas, cfg) {
+  if (live[canvas.id]) throw new Error('Canvas is already in use');
+  live[canvas.id] = this; this.canvas = canvas; this.cfg = cfg; made.push(this); all.push(this);
+}
+Chart.prototype.destroy = function () { this.destroyed = true; delete live[this.canvas.id]; };
+function series(n) { return { labels: ['2026-10-01T00:00', '2026-10-02T00:00'], total: [n, n + 1],
+                              series: { '1000': [n, n], '1001': [1, 2] }, samples: 2 }; }
+function panel(corpId) {
+  const wrap = { dataset: { corpId: String(corpId) }, buttons: [],
+                 querySelectorAll: () => wrap.buttons, querySelector: () => canvas };
+  const canvas = { id: 'c' + corpId, isConnected: true, dataset: { chart: JSON.stringify(series(corpId)) },
+                   parentElement: { style: {} }, closest: () => wrap };
+  const btn = { dataset: { corpId: String(corpId), range: '1w' }, classList: { add() {}, remove() {} },
+                closest: () => wrap };
+  wrap.buttons.push(btn);
+  return { wrap, canvas, btn };
+}
+const A = panel(98000001), B = panel(98000002);
+const document = {
+  body: { addEventListener() {} },
+  querySelectorAll: sel => sel.indexOf('canvas.corp-wallet-chart') === 0 ? [A.canvas, B.canvas] : [],
+};
+const fetched = [];
+const fetch = url => { fetched.push(url);
+  return Promise.resolve({ ok: true, json: () => Promise.resolve(series(5)) }); };
+const window = { matchMedia };
+const sandbox = { window, document, console, Chart, fetch, JSON, Object, String, Math };
+vm.createContext(sandbox);
+vm.runInContext(src, sandbox);
+const snap = cs => cs.map(c => ({ canvas: c.canvas.id,
+  legendPosition: c.cfg.options.plugins.legend.position || null,
+  xTicksLimit: c.cfg.options.scales.x.ticks.maxTicksLimit,
+  total: c.cfg.data.datasets[0].data }));
+const fire = phone => {
+  const before = all.filter(c => !c.destroyed);
+  state.phone = phone; made = [];
+  mqls.forEach(m => m.ls.slice().forEach(fn => fn({ matches: m.matches, media: m.media })));
+  return { charts: snap(made), destroyed: before.filter(c => c.destroyed).map(c => c.canvas.id),
+           live: Object.keys(live).sort() };
+};
+(async () => {
+  const out = { listeners: mqls.reduce((n, m) => n + m.ls.length, 0), first: snap(made) };
+  made = [];
+  out.same = fire(startPhone);
+  out.flip = fire(!startPhone);
+  out.sameAfterFlip = fire(!startPhone);
+  out.back = fire(startPhone);
+  // A range button on panel A fetches a new window; the rebuild keeps the side.
+  made = [];
+  window.corpWalletRange.call(A.btn);
+  await new Promise(r => setImmediate(r));
+  out.range = { charts: snap(made), fetched };
+  // Panel B is swapped out: a crossing rebuilds A (from its new data) only.
+  B.canvas.isConnected = false;
+  out.flipAfterSwap = fire(!startPhone);
+  out.backAfterSwap = fire(startPhone);
+  process.stdout.write(JSON.stringify(out));
+})();
+"""
+
+
+def _chart_script():
+    html = _render_list()
+    start = html.index("/* ── Corp wallet history chart")
+    return html[start:html.index("/* ── Drag-and-drop reorder", start)]
+
+
+def _run_chart(tmp_path, side):
+    import json
+    import shutil
+    import subprocess
+    if not shutil.which("node"):
+        pytest.skip("node not installed")
+    harness = tmp_path / "harness.js"
+    harness.write_text(_CHART_HARNESS)
+    script = tmp_path / "page.js"
+    script.write_text(_chart_script())
+    run = subprocess.run(["node", str(harness), str(script), side], capture_output=True, text=True, timeout=30)
+    assert run.returncode == 0, run.stderr
+    return json.loads(run.stdout)
+
+
+def _opts(side):
+    return ("bottom", 4) if side == "phone" else (None, 8)
+
+
+@pytest.mark.parametrize("side", ["desktop", "phone"])
+def test_wallet_chart_rebuilds_once_per_breakpoint_crossing(tmp_path, side):
+    """Each open panel's chart is rebuilt from its last data with the other
+    side's options when the page crosses 640px; a change that stays on the
+    same side rebuilds nothing; one query listener serves every panel."""
+    other = "desktop" if side == "phone" else "phone"
+    out = _run_chart(tmp_path, side)
+    assert out["listeners"] == 1
+    lines = lambda charts: [(c["canvas"], c["legendPosition"], c["xTicksLimit"]) for c in charts]
+    both = ["c98000001", "c98000002"]
+    assert lines(out["first"]) == [(c, *_opts(side)) for c in both]
+    assert out["same"]["charts"] == [] and out["same"]["destroyed"] == []
+    assert lines(out["flip"]["charts"]) == [(c, *_opts(other)) for c in both]
+    assert out["flip"]["destroyed"] == both and out["flip"]["live"] == both
+    assert out["sameAfterFlip"]["charts"] == [] and out["sameAfterFlip"]["destroyed"] == []
+    assert lines(out["back"]["charts"]) == [(c, *_opts(side)) for c in both]
+    # The data is the panel's own, before and after a crossing.
+    assert [c["total"] for c in out["flip"]["charts"]] == [[98000001, 98000002], [98000002, 98000003]]
+
+
+@pytest.mark.parametrize("side", ["desktop", "phone"])
+def test_wallet_chart_rebuild_follows_a_range_change_and_skips_swapped_panels(tmp_path, side):
+    other = "desktop" if side == "phone" else "phone"
+    out = _run_chart(tmp_path, side)
+    assert out["range"]["fetched"] == ["/corporations/98000001/wallet-history?range=1w"]
+    assert [(c["canvas"], c["total"], c["legendPosition"]) for c in out["range"]["charts"]] == \
+        [("c98000001", [5, 6], _opts(side)[0])]
+    # Panel B's canvas left the page: only A is rebuilt, from the range's data.
+    flip = out["flipAfterSwap"]
+    assert [(c["canvas"], c["total"], c["legendPosition"], c["xTicksLimit"]) for c in flip["charts"]] == \
+        [("c98000001", [5, 6], *_opts(other))]
+    assert [c["canvas"] for c in out["backAfterSwap"]["charts"]] == ["c98000001"]
 
 
 # ── Corp detail (D10 A, D11 A, D12 A) ─────────────────────────────────
@@ -650,6 +791,23 @@ def test_css_our_characters_links_are_40px():
     assert _decl(link, "align-items") == "center"
 
 
+def test_our_characters_permissions_link_is_11px_on_phones():
+    """The permissions link carries an inline 9px; on phones it is 11px
+    through its hook (!important beats the inline size). Desktop keeps the
+    inline size (D21)."""
+    rows = _hooked(_render_detail(), "corp-char-row")
+    for r in rows:
+        perms_link = [k for k in r["kids"] if k[0] == "a" and "/account/permissions/" in k[2]["href"]]
+        assert len(perms_link) == 1
+        assert "corp-char-perm" in perms_link[0][1]
+        assert "font-size:9px" in perms_link[0][2]["style"].replace(" ", "")
+    assert _decl(rule_bodies(_phone_block(), ".corp-char-row > .corp-char-perm"), "font-size") == "11px !important"
+    # Only the phone block has a rule for the hook.
+    with open(SITE_CSS, encoding="utf-8") as fh:
+        rules = re.sub(r"/\*.*?\*/", "", fh.read(), flags=re.S)
+    assert rules.count("corp-char-perm") == _phone_block().count("corp-char-perm") == 1
+
+
 def test_css_wallet_caption_takes_its_own_line_under_the_buttons():
     css = _phone_block()
     head = rule_bodies(css, ".corp-wallet-head")
@@ -657,6 +815,14 @@ def test_css_wallet_caption_takes_its_own_line_under_the_buttons():
     cap = rule_bodies(css, ".corp-wallet-head > .corp-wallet-caption")
     assert _decl(cap, "order") == "1"
     assert _decl(cap, "flex-basis") == "100%"
+
+
+def test_css_wallet_range_buttons_match_the_other_range_buttons():
+    """44px tall from the global button rule (no height here), at least
+    40px wide with 12px labels, as Market's and Net Worth's."""
+    body = rule_bodies(_phone_block(), ".b-btn.corp-wallet-range")
+    assert _decl(body, "min-width") == "40px" and _decl(body, "font-size") == "12px !important"
+    assert "height" not in body
 
 
 def test_css_jobs_are_one_column_and_structure_key_one_truncates_the_name():

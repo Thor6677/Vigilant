@@ -41,9 +41,16 @@
     </div>
 </div>
 
-<div class="b-section">
+<div class="b-section lp-corp-sec" id="lp-corp-sec">
     <div class="b-section-head"><span class="b-label">Corporation</span></div>
-    <div style="padding:0.75rem;">
+    {#
+        Phones (mobile R4 T2, D6 A): once a corp is picked, the script below
+        folds #lp-corp-body away and this one-line button shows instead;
+        tapping it unfolds the tree. m-only, so it never shows above 640px,
+        and it shows only while folded, so it always reads as collapsed.
+    #}
+    <button type="button" id="lp-picked" class="m-only lp-picked" aria-controls="lp-corp-body" aria-expanded="false"><span class="lp-picked-label">Picked</span><span class="lp-picked-name" id="lp-picked-name"></span></button>
+    <div class="lp-corp-body" id="lp-corp-body" style="padding:0.75rem;">
         {#
             Hidden input preserves the exact mechanism the old flat
             `<select name="corporation_id">` used to load offers: an htmx
@@ -69,9 +76,11 @@
     </div>
 </div>
 
-<div class="b-section" style="margin-top:0.75rem;">
+<div class="b-section" id="lp-offers-sec" style="margin-top:0.75rem;">
     <div class="b-section-head" style="display:flex;align-items:center;justify-content:space-between;">
-        <span class="b-label">Offers</span>
+        {# The picked corp's name, phone-only (D6 A). No whitespace inside:
+           its separator is drawn only while the span is non-empty. #}
+        <span class="b-label">Offers<span class="m-only lp-offers-corp" id="lp-offers-corp"></span></span>
         <span id="lp-loading" class="htmx-indicator" style="font-size:10px;color:var(--muted);">Loading…</span>
     </div>
     <div id="lp-offers-panel">
@@ -90,6 +99,23 @@
 (function () {
     var tree = document.getElementById('lp-corp-tree');
     var filter = document.getElementById('lp-corp-filter');
+
+    // Phones only (mobile R4 T2, D6 A): a pick folds the tree to the
+    // one-line #lp-picked button, which unfolds it again, and the offers
+    // scroll into view once they have loaded. The Picked line and the corp
+    // name in the Offers heading are m-only, so above 640px nothing shows,
+    // folds or scrolls: desktop behaves as it always has.
+    var phone = window.matchMedia ? window.matchMedia('(max-width: 640px)') : null;
+    var corpSec = document.getElementById('lp-corp-sec');
+    var picked = document.getElementById('lp-picked');
+    var offersSec = document.getElementById('lp-offers-sec');
+    var scrollPending = false;
+    // The latest pick. Its offers alone name the corp in the heading and
+    // scroll: an earlier pick's request, queued ahead of it, can land first.
+    var pendingId = null;
+    var pendingName = '';
+
+    function isPhone() { return !!(phone && phone.matches); }
 
     function setArrow(facBtn, open) {
         var node = facBtn.firstChild; // leading text node "▸ Name "
@@ -119,7 +145,54 @@
             var inp = document.getElementById('lp-corp-id');
             inp.value = corpBtn.getAttribute('data-corp-id');
             inp.dispatchEvent(new Event('change'));
+            var name = corpBtn.textContent.trim();
+            pendingId = corpBtn.getAttribute('data-corp-id');
+            pendingName = name;
+            document.getElementById('lp-picked-name').textContent = name;
+            if (isPhone()) {
+                corpSec.classList.add('is-folded');
+                scrollPending = true;
+                // The tapped corp has just hidden with the tree: keep focus
+                // on the line that replaced it rather than dropping it.
+                picked.focus({ preventScroll: true });
+            }
         }
+    });
+
+    picked.addEventListener('click', function () {
+        corpSec.classList.remove('is-folded');
+        scrollPending = false;
+        // This button has just hidden itself: hand focus to the picked corp
+        // (without scrolling the page) rather than dropping it to the body.
+        var sel = tree.querySelector('.lpt-corp.is-selected');
+        if (sel && sel.getClientRects().length) sel.focus({ preventScroll: true });
+    });
+
+    // Which corp a settled offers request was for: htmx 1.9 hands over the
+    // request's parameters, and the XHR's final URL carries the same id.
+    function settledCorpId(e) {
+        var d = e.detail || {};
+        var params = d.requestConfig && d.requestConfig.parameters;
+        if (params && params.corporation_id != null) return String(params.corporation_id);
+        var m = /[?&]corporation_id=(\d+)/.exec((d.xhr && d.xhr.responseURL) || '');
+        return m ? m[1] : null;
+    }
+
+    // htmx fires afterSettle on the swap target once the offers are laid
+    // out; one that bubbles up from a swap inside the panel isn't ours.
+    // Only the latest pick's offers name the corp in the heading and
+    // scroll; an earlier pick's offers landing first clear the name, since
+    // they belong to neither the corp named before nor the one picked. One
+    // scroll per pick; none if the tree was unfolded first.
+    document.getElementById('lp-offers-panel').addEventListener('htmx:afterSettle', function (e) {
+        if (e.target !== this || pendingId === null) return;
+        var corpLbl = document.getElementById('lp-offers-corp');
+        if (settledCorpId(e) !== pendingId) { corpLbl.textContent = ''; return; }
+        corpLbl.textContent = pendingName;
+        if (!scrollPending) return;
+        scrollPending = false;
+        var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (isPhone()) offersSec.scrollIntoView({ block: 'start', behavior: still ? 'auto' : 'smooth' });
     });
 
     filter.addEventListener('input', function () {

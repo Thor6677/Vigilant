@@ -156,7 +156,8 @@ def test_editable_plan_remove_button_is_a_tap_target_keeping_its_x():
     for row in rows:
         cell = row_labelled(row)["Remove"]
         (button,) = cell["kids"]
-        assert "m-tap" in _classes(button)
+        assert "b-btn" in _classes(button)
+        assert "m-tap" not in _classes(button), "m-tap's 40px would shrink the 44px button"
         assert cell["text"] == "×"
 
 
@@ -213,7 +214,8 @@ def test_acl_rows_key_on_name_and_short_type():
         remove = labelled["Remove"]["attrs"]
         assert remove["data-confirm"] == f"Remove {name} from the ACL?"
         (button,) = labelled["Remove"]["kids"]
-        assert "m-tap" in _classes(button)
+        assert "b-btn" in _classes(button)
+        assert "m-tap" not in _classes(button), "m-tap's 40px would shrink the 44px button"
 
 
 def test_acl_header_is_m_head_and_add_form_stacks():
@@ -376,6 +378,29 @@ def test_detail_gap_picker_wraps_like_the_shared_one():
     assert "display:flex" in pick["style"]
 
 
+def test_shared_view_attribute_line_carries_its_phone_hook():
+    """Each row's attributes and rank ("Mem/Per ×2") are 9px inline; the
+    hook lets phones show them at 11px. The rank span inherits the size.
+    Desktop keeps the inline size (D21). Logged in and anonymous alike."""
+    for session in ({}, {"session": None}):
+        html = _render_shared(**session)
+        attrs = [a for t, a in _tags(html) if "skp-shared-attr" in _classes(a)]
+        assert len(attrs) == 3
+        for a in attrs:
+            assert _classes(a) == ["skp-shared-attr"]
+            assert "font-size:9px" in a["style"].replace(" ", "")
+        spans = re.findall(r'<span class="skp-shared-attr"[^>]*>(.*?)</span>\s*</span>', html, re.S)
+        assert len(spans) == 3 and all('class="skp-shared-rank"' in s for s in spans)
+
+
+def test_shared_view_analyze_is_the_picker_rows_button():
+    """Analyze is a .b-btn directly in the picker row, 9px inline."""
+    html = _render_shared()
+    (pick,) = re.findall(r'<div class="skp-gap-pick".*?</div>', html, re.S)
+    (btn,) = re.findall(r'<button class="b-btn" data-click="runGap"\s+style="([^"]*)"', pick)
+    assert "font-size:9px" in btn.replace(" ", "")
+
+
 # ── CSS (the R2 T6 section) ───────────────────────────────────────────
 
 def _decls(selector):
@@ -427,7 +452,8 @@ def test_css_share_link_rule_is_scoped_to_this_page():
 
 def test_sort_toolbar_buttons_are_tap_targets():
     """With the drag handle hidden on phones, Export and the three Sort
-    buttons are the only list controls: each is an m-tap (40px, 12px)."""
+    buttons are the only list controls: each keeps the 44px phone button
+    height (no m-tap, whose 40px would shrink it); the CSS widens them."""
     tags = _tags(_render_detail(can_edit=True))
     i = next(n for n, (t, a) in enumerate(tags) if "skp-sortbar" in _classes(a))
     buttons = []
@@ -438,19 +464,22 @@ def test_sort_toolbar_buttons_are_tap_targets():
             break
     assert buttons[0].get("data-click") == "exportPlan"
     for b in buttons:
-        assert "m-tap" in _classes(b), b
+        assert "m-tap" not in _classes(b), b
 
 
 def test_read_only_sort_toolbar_keeps_export_tappable():
     tags = _tags(_render_detail(can_edit=False))
     (export,) = [a for t, a in tags if a.get("data-click") == "exportPlan"]
-    assert "m-tap" in _classes(export)
+    assert "m-tap" not in _classes(export)
 
 
 def test_css_sort_toolbar_wraps_centred_at_12px():
     d = _decls(".skp-sortbar")
     assert "flex-wrap: wrap" in d and "align-items: center" in d
     assert "font-size: 12px !important" in d
+    b = _decls(".skp-sortbar button")
+    assert "min-width: 40px" in b and "font-size: 12px !important" in b
+    assert "height" not in b, "the global phone button rule gives 44px"
 
 
 def test_css_typeahead_rows_are_40px_12px_left_aligned():
@@ -475,11 +504,14 @@ def test_css_attributes_rank_is_legible_when_open():
     assert "color: var(--muted) !important" in _decls('.skill-row > [data-m-label="Attributes"] span span')
 
 
-def test_css_remove_buttons_stay_40px_in_an_open_row():
+def test_css_remove_buttons_are_44px_squares_in_an_open_row():
     """.b-btn carries flex:1, which stretched the × across the open row
-    (250px at 360) once its form became the open row's flex value."""
-    for sel in (".skill-row > [data-m-label] > .m-tap", ".skp-acl-row > [data-m-label] > .m-tap"):
-        assert "flex: none" in _decls(sel), sel
+    (250px at 360) once its form became the open row's flex value. The
+    global phone button rule gives the 44px height; this widens it."""
+    for sel in (".skill-row > [data-m-label] > .b-btn", ".skp-acl-row > [data-m-label] > .b-btn"):
+        d = _decls(sel)
+        assert "flex: none" in d and "min-width: 44px" in d, sel
+        assert "height" not in d, sel
 
 
 def test_css_gap_row_keys_share_one_size():
@@ -516,3 +548,30 @@ def test_css_section_is_phone_only():
     phone block, and only whitespace follows it up to the end marker."""
     rest = _after_phone_block(css_section("T6"))
     assert rest.strip() == "", f"the R2 T6 section has a rule outside its phone block: {rest.strip()[:80]!r}"
+
+
+_SMALL_TEXT = (".skp-meta > span", ".skp-actions .b-btn", ".skp-scope .b-btn", ".skp-scope > span",
+               ".skp-acl-count", ".skp-acl-add > .b-btn", ".skp-acl-hint", ".skp-share > span",
+               ".skp-share > .b-btn", ".skp-tools .b-btn", "#ship-link", ".skp-hint")
+
+
+def test_css_small_text_is_11px():
+    for sel in _SMALL_TEXT:
+        assert "font-size: 11px !important" in _decls(sel), sel
+
+
+def test_css_shared_view_attribute_line_and_analyze_are_11px():
+    """The shared view's attribute line and both pages' Analyze button: 11px
+    over their inline 9px (the detail page's Analyze already was, through
+    .skp-tools .b-btn; the shared page has no .skp-tools)."""
+    assert "font-size: 11px !important" in _decls(".skp-shared-attr")
+    assert "font-size: 11px !important" in _decls(".skp-gap-pick > .b-btn")
+    assert 'class="b-grid-2 skp-tools"' not in _render_shared()
+
+
+def test_small_text_hooks_are_in_the_markup():
+    html = _render_detail(can_admin=True, can_edit=True, visibility="custom", acl_entries=_ACL)
+    for cls in ("skp-meta", "skp-actions", "skp-acl-count", "skp-acl-hint", "skp-hint"):
+        assert re.search(rf'class="{cls}"', html), cls
+    assert 'class="m-stack skp-acl-add"' in html
+    assert 'class="b-grid-2 skp-tools"' in html

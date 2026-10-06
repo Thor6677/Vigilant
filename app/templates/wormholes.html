@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/_tab_nav.html" import tab_dropdown %}
 {% block title %}Wormhole Systems — VIGILANT{% endblock %}
 
 {% block breadcrumbs %}
@@ -38,23 +39,36 @@
     <h1 class="b-page-title">Wormhole Systems</h1>
 </div>
 
-<div class="wh-tabs">
+{# Phones: the strip becomes the "Section ▾" dropdown. #}
+<div class="wh-tabs m-tabs-desktop">
     <a href="/wormholes" class="wh-tab is-active">Systems</a>
     <a href="/wormholes/types" class="wh-tab">Wormhole Types</a>
     <a href="/wormholes/effects" class="wh-tab">System Effects</a>
 </div>
+{{ tab_dropdown([
+    {'key': 'systems', 'label': 'Systems', 'url': '/wormholes'},
+    {'key': 'types', 'label': 'Wormhole Types', 'url': '/wormholes/types'},
+    {'key': 'effects', 'label': 'System Effects', 'url': '/wormholes/effects'},
+], 'systems') }}
 
 {% if error %}
 <div class="b-banner is-danger" style="margin-bottom:1rem;">{{ error }}</div>
 {% endif %}
 
-<div class="b-panel" style="padding:0.75rem 1rem;margin-bottom:1rem;">
+{# Phones (D13 A): the toggle rows (.wf-fold) fold behind the m-only
+   Filters button, which names the active filters. Only phone CSS reads
+   .wf-fold and the panel's is-expanded. #}
+<div class="b-panel wf-panel" style="padding:0.75rem 1rem;margin-bottom:1rem;">
     <div class="wf-row">
         <span class="wf-label">Search:</span>
         <input type="search" id="wh-search" name="q" class="wf-search" placeholder="J114700...">
     </div>
 
-    <div class="wf-row">
+    <button type="button" class="m-only wf-fold-toggle" data-click="toggleFilterFold" aria-expanded="false">
+        <span class="wf-fold-label">Filters</span><span class="wf-fold-current" id="wf-fold-current">None</span>
+    </button>
+
+    <div class="wf-row wf-fold">
         <span class="wf-label">Show systems of class:</span>
         <div class="wf-toggles" id="filter-class">
             {% for cls, label in [("1","C1"),("2","C2"),("3","C3"),("4","C4"),("5","C5"),("6","C6"),("13","C13")] %}
@@ -68,14 +82,14 @@
         </div>
     </div>
 
-    <div class="wf-row">
+    <div class="wf-row wf-fold">
         <span class="wf-label">Modifiers:</span>
         <div class="wf-toggles" id="filter-modifiers">
             <button class="wf-btn" data-filter="shattered" data-val="1" style="color:{{ class_colors['13'] }};" data-click="toggleFilter" title="System is shattered (every planet is the Shattered type). 100 systems total. ANDs with the class filter above — e.g. C6 + Shattered returns the 5 shattered C6 systems.">Shattered</button>
         </div>
     </div>
 
-    <div class="wf-row">
+    <div class="wf-row wf-fold">
         <span class="wf-label">Require statics to:</span>
         <div class="wf-toggles" id="filter-static">
             {% for cls, label in [("1","C1"),("2","C2"),("3","C3"),("4","C4"),("5","C5"),("6","C6"),("7","HS"),("8","LS"),("9","NS")] %}
@@ -84,7 +98,7 @@
         </div>
     </div>
 
-    <div class="wf-row">
+    <div class="wf-row wf-fold">
         <span class="wf-label">Require planet types:</span>
         <div class="wf-toggles" id="filter-planets">
             {% for ptype in ["Barren","Gas","Ice","Lava","Oceanic","Plasma","Storm","Temperate"] %}
@@ -95,7 +109,7 @@
         </div>
     </div>
 
-    <div class="wf-row">
+    <div class="wf-row wf-fold">
         <span class="wf-label">Require effect:</span>
         <div class="wf-toggles" id="filter-effect">
             <button class="wf-btn is-on b-text" data-filter="effect" data-val="" data-click="setExclusive" data-group="effect">Unfiltered</button>
@@ -122,6 +136,28 @@ function getFilterValues(filterName) {
     return vals.join(',');
 }
 
+// Phones: the Filters button opens and closes the folded toggle rows.
+function toggleFilterFold() {
+    var panel = this.closest('.wf-panel');
+    if (!panel) return;
+    var open = panel.classList.toggle('is-expanded');
+    this.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+// The Filters button's summary: every active toggle in panel order, a
+// statics destination marked with an arrow ("C5 · →HS · Wolf Rayet").
+function updateFilterSummary() {
+    var out = document.getElementById('wf-fold-current');
+    if (!out) return;
+    var parts = [];
+    document.querySelectorAll('.wf-btn.is-on').forEach(function(b) {
+        if (!b.dataset.val) return;
+        var label = b.textContent.trim();
+        parts.push(b.dataset.filter === 'static_dest' ? '\u2192' + label : label);
+    });
+    out.textContent = parts.length ? parts.join(' \u00b7 ') : 'None';
+}
+
 function toggleFilter() {
     var btn = this;
     btn.classList.toggle('is-on');
@@ -132,6 +168,7 @@ function toggleFilter() {
         btn.style.borderColor = '';
         btn.style.textShadow = '';
     }
+    updateFilterSummary();
     doSearch();
 }
 
@@ -146,6 +183,7 @@ function setExclusive() {
     btn.classList.add('is-on');
     btn.style.borderColor = 'currentColor';
     btn.style.textShadow = '0 0 6px currentColor';
+    updateFilterSummary();
     doSearch();
 }
 
