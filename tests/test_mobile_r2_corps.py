@@ -791,6 +791,23 @@ def test_css_our_characters_links_are_40px():
     assert _decl(link, "align-items") == "center"
 
 
+def test_our_characters_permissions_link_is_11px_on_phones():
+    """The permissions link carries an inline 9px; on phones it is 11px
+    through its hook (!important beats the inline size). Desktop keeps the
+    inline size (D21)."""
+    rows = _hooked(_render_detail(), "corp-char-row")
+    for r in rows:
+        perms_link = [k for k in r["kids"] if k[0] == "a" and "/account/permissions/" in k[2]["href"]]
+        assert len(perms_link) == 1
+        assert "corp-char-perm" in perms_link[0][1]
+        assert "font-size:9px" in perms_link[0][2]["style"].replace(" ", "")
+    assert _decl(rule_bodies(_phone_block(), ".corp-char-row > .corp-char-perm"), "font-size") == "11px !important"
+    # Only the phone block has a rule for the hook.
+    with open(SITE_CSS, encoding="utf-8") as fh:
+        rules = re.sub(r"/\*.*?\*/", "", fh.read(), flags=re.S)
+    assert rules.count("corp-char-perm") == _phone_block().count("corp-char-perm") == 1
+
+
 def test_css_wallet_caption_takes_its_own_line_under_the_buttons():
     css = _phone_block()
     head = rule_bodies(css, ".corp-wallet-head")

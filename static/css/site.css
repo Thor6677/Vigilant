@@ -1124,6 +1124,8 @@
        which also sets the row's height. */
     .corp-char-row { padding-top: 0; padding-bottom: 0; }
     .corp-char-row > a { display: inline-flex; align-items: center; min-height: 40px; }
+    /* The permissions link at 11px over its inline 9px. */
+    .corp-char-row > .corp-char-perm { font-size: 11px !important; }
 
     /* Corp page links (D12 A): a two-column grid of 40px links. The 1px gap
        over the border colour draws the dividers; an odd last link spans
