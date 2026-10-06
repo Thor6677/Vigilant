@@ -433,6 +433,27 @@ def test_controls_stack_without_fixed_widths():
     assert "width: 100%" in rule_bodies(phone, ".bf-field > .bf-me"), "the page's 60px"
 
 
+def test_form_labels_and_the_note_are_11px():
+    """The field labels are 9px in the page's <style> (`.bf-field label`,
+    which loads after site.css), so the rule carries the form's ID to
+    outrank it. The child combinator keeps the decryptor chips (labels in
+    .bf-chip-row) at their own 12px. The "Up to N items" note is 9px
+    inline, so its rule needs !important."""
+    phone = _phone()[0]
+    assert "font-size: 11px" in rule_bodies(phone, "#bf-form .bf-field > label")
+    assert "font-size: 11px !important" in rule_bodies(phone, ".bf-note")
+    html = _page()
+    page_style = re.search(r"\.bf-field label \{([^}]*)\}", html)
+    assert page_style and "font-size: 9px" in page_style.group(1)
+    labels = [(a, anc) for t, a, anc in _tree(html)
+              if t == "label" and any(x.get("id") == "bf-form" for x in anc)]
+    direct = [a for a, anc in labels if "bf-field" in _cls(anc[-1])]
+    assert len(direct) == 10 and len(labels) == 10 + 1 + len(industry_mod.DECRYPTORS)
+    assert not any("bf-chip" in _cls(a) for a in direct)
+    note = re.search(r'</form>\s*<div class="bf-note" style="([^"]*)">\s*Up to \d+ items ranked', html)
+    assert note and "font-size:9px" in note.group(1).replace(" ", "")
+
+
 def test_result_keys_share_one_size_and_show_all_is_inset():
     phone = _phone()[0]
     assert "font-size: 12px !important" in rule_bodies(phone, '.bf-row > [data-m="key"]')
@@ -464,5 +485,5 @@ def test_section_has_no_desktop_rules():
         css = re.sub(r"/\*.*?\*/", "", fh.read(), flags=re.S)
     phone, desktop = _phone()
     assert not desktop.strip()
-    for cls in (".bf-row", ".bf-clamp", ".bf-chip", ".bft-", ".bf-tree", ".bf-controls", ".bf-field"):
+    for cls in (".bf-row", ".bf-clamp", ".bf-chip", ".bft-", ".bf-tree", ".bf-controls", ".bf-field", ".bf-note"):
         assert css.count(cls) == phone.count(cls) > 0, cls

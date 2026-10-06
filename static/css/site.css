@@ -1413,6 +1413,12 @@
     #bf-form > .bf-controls > .bf-field { flex: none !important; min-width: 0 !important; }
     .bf-field > .bf-select { min-width: 0; }
     .bf-field > .bf-me { width: 100%; }
+    /* Field labels at 11px over the page's 9px; the ID outranks the page's
+       `.bf-field label`, and the child combinator leaves the decryptor
+       chips (labels inside .bf-chip-row) at their 12px. The "Up to N
+       items" note under the form: 11px over its inline 9px. */
+    #bf-form .bf-field > label { font-size: 11px; }
+    .bf-note { font-size: 11px !important; }
 
     /* Decryptor chips: 40px tap targets. They are labels, so the global
        44px rule for buttons and fields doesn't reach them. */
