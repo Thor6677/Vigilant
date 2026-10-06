@@ -29,7 +29,7 @@
 
     <!-- Most Active -->
     {% if top_corps or top_alliances %}
-    <div style="font-size:9px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:0.4rem;">Most Active</div>
+    <div class="whk-title" style="font-size:9px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:0.4rem;">Most Active</div>
     <div class="whk-active" style="display:flex;flex-direction:column;gap:3px;margin-bottom:0.75rem;">
         {% for corp in top_corps %}
         <a href="https://zkillboard.com/corporation/{{ corp['id'] }}/" target="_blank" rel="noopener"
@@ -55,7 +55,7 @@
     {% endif %}
 
     <!-- Activity Heatmap -->
-    <div style="font-size:9px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:0.4rem;">Activity Heatmap</div>
+    <div class="whk-title" style="font-size:9px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:0.4rem;">Activity Heatmap</div>
     <div style="overflow-x:auto;">
         <table style="border-collapse:separate;border-spacing:2px;font-size:8px;">
             <thead>

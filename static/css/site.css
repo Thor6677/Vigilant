@@ -2319,6 +2319,8 @@
        Most Active rows become 40px. */
     .whk-range > button { min-width: 40px; font-size: 12px !important; }
     .whk-active > a { min-height: 40px; }
+    /* The "Most Active" and "Activity Heatmap" titles: 11px over inline 9px. */
+    .whk > .whk-title { font-size: 11px !important; }
     /* The panel's min-content width (the ~540px heatmap table, the recent
        kills' nowrap pilot lines) would widen the grid column it sits in
        (the system page's and the tracker's .ws-grid): the page would scroll
@@ -2402,6 +2404,12 @@
 
     /* Stat tiles 2×2; beats the inline repeat(4,1fr). */
     .b-pad-md > .ta-stats { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+
+    /* Text at 11px over the page's 9px: the stat tile labels, the heatmap's
+       Measure / Space / Region labels, the sample-coverage source line (its
+       <code> inherits) and the chart titles over each pair (inline 9px). */
+    .ta-stat > .ta-stat-label, .ta-hm-group > .ta-hm-label, .b-pad-md > .ta-source { font-size: 11px; }
+    .ta-pair .ta-chart-title { font-size: 11px !important; }
 
     /* The PvP and security-zone chart pairs stack. minmax(0,1fr), so a
        canvas can't push its column wider than the screen. Two classes beat
@@ -2770,6 +2778,8 @@
     #fit-compare > .fc-names > b, #fit-compare .fc-fit-head > .m-only { color: var(--accent); font-weight: 600; }
     #fit-compare .fc-fit-head > .m-only { font-size: 12px; }
     #fit-compare th, #fit-compare td { padding-left: 0.4rem; padding-right: 0.4rem; }
+    /* The Stat and Δ B−A header cells: 11px over the page's 9px. */
+    #fit-compare thead th { font-size: 11px; }
 }
 /* ── end R6 T5 ── */
 

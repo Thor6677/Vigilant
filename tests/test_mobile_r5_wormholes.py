@@ -389,6 +389,20 @@ def test_kills_partial_keeps_the_heatmap_box_and_hooks_its_small_controls():
     assert 'href="https://zkillboard.com/kill/111/"' in html
 
 
+def test_kills_partial_titles_carry_the_11px_hook():
+    """"Most Active" and "Activity Heatmap" (inline 9px) gain only the
+    whk-title class, as children of the .whk panel the phone rule names;
+    desktop keeps the 9px."""
+    html = _render_kills()
+    titles = [(a, p) for t, a, p in _tags(html) if "whk-title" in _cls(a)]
+    assert len(titles) == 2
+    for a, parent in titles:
+        assert _cls(a) == ["whk-title"]
+        assert a["style"].startswith("font-size:9px;")
+        assert "whk" in _cls(parent)
+    assert re.findall(r'class="whk-title"[^>]*>([^<]*)<', html) == ["Most Active", "Activity Heatmap"]
+
+
 # ── System page and type page: tap targets only ───────────────────────
 
 def _render_system():
@@ -539,6 +553,8 @@ def test_css_kill_activity_controls():
     # WH Tracker's .ws-grid), or the page scrolls sideways and the heatmap's
     # own box never does.
     assert _decl(body, ".whk", "contain") == "inline-size"
+    # Its two section titles: 11px over their inline 9px.
+    assert _decl(body, ".whk > .whk-title", "font-size") == "11px !important"
 
 
 def test_css_system_page_tap_targets_are_scoped_to_the_system_page():

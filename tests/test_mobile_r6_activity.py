@@ -289,6 +289,30 @@ def test_chart_pairs_carry_the_stacking_hook():
         "solo-fleet-chart-30d", "npc-player-chart-30d", "zone-kills-chart-30d", "zone-isk-chart-30d"}
 
 
+def test_chart_titles_carry_the_11px_hook():
+    """The title over each chart in the two pairs (inline 9px) gains only
+    the ta-chart-title class; desktop keeps the 9px."""
+    dom = _dom(_render())
+    titles = _by_class(dom, "ta-chart-title")
+    assert [t.text.strip() for t in titles] == [
+        "Solo vs fleet kills", "NPC vs player kills", "Kill count", "ISK destroyed"]
+    for t in titles:
+        assert t.tag == "div" and t.classes == ["ta-chart-title"]
+        assert t.attrs["style"].startswith("font-size:9px;")
+        assert "ta-pair" in t.parent.parent.classes and t.parent.children[0] is t
+
+
+def test_small_labels_keep_their_page_classes():
+    """The phone rule reaches the stat labels, the heatmap labels and the
+    source line through classes the page already had."""
+    dom = _dom(_render())
+    assert len([n for n in _by_class(dom, "ta-stat-label") if "ta-stat" in n.parent.classes]) == 4
+    labels = [n for n in _by_class(dom, "ta-hm-label") if "ta-hm-group" in n.parent.classes]
+    assert [n.text.strip() for n in labels] == ["Measure", "Space", "Region"]
+    (src,) = _by_class(dom, "ta-source")
+    assert "b-pad-md" in src.parent.classes
+
+
 def test_live_delta_buttons_keep_the_44px_floor():
     """The six delta buttons are .b-btn <button>s, so the global phone rule
     already makes them 44px tall. m-tap would force 40px !important and
@@ -549,6 +573,17 @@ def test_readout_is_styled_on_phones():
     assert d.get("min-height") == "5em"
 
 
+def test_small_text_reads_at_11px():
+    """Stat tile labels, Measure / Space / Region, the source line (its
+    <code> inherits) and the chart titles were 9px. Two classes beat the
+    page's own single-class rules, which load after site.css; the chart
+    titles' size is inline, hence !important."""
+    phone, _ = _phone()
+    for sel in (".ta-stat > .ta-stat-label", ".ta-hm-group > .ta-hm-label", ".b-pad-md > .ta-source"):
+        assert _decls(rule_bodies(phone, sel)).get("font-size") == "11px", sel
+    assert _decls(rule_bodies(phone, ".ta-pair .ta-chart-title")).get("font-size") == "11px !important"
+
+
 def test_compare_button_text_matches_the_page_on_phones():
     phone, _ = _phone()
     d = _decls(rule_bodies(phone, "#ta-compare-toggle"))
@@ -557,11 +592,12 @@ def test_compare_button_text_matches_the_page_on_phones():
 
 
 def test_new_hook_classes_have_no_rules_outside_the_phone_block():
-    """ta-pair, ta-hist-nav, ta-hm-readout and is-picked exist only for
-    phones; m-tap and m-tabs-desktop are the contract's phone-only classes.
-    None of them may gain a desktop rule anywhere in site.css."""
+    """ta-pair, ta-hist-nav, ta-hm-readout, ta-chart-title and is-picked
+    exist only for phones; m-tap and m-tabs-desktop are the contract's
+    phone-only classes. None of them may gain a desktop rule anywhere in
+    site.css."""
     with open(SITE_CSS, encoding="utf-8") as fh:
         css = re.sub(r"/\*.*?\*/", "", fh.read(), flags=re.S)
     phone, _ = _phone()
-    for cls in ("ta-pair", "ta-hist-nav", "ta-hm-readout", "is-picked"):
+    for cls in ("ta-pair", "ta-hist-nav", "ta-hm-readout", "ta-chart-title", "is-picked"):
         assert css.count(cls) == phone.count(cls) > 0, cls

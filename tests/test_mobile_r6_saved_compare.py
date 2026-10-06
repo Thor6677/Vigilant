@@ -492,3 +492,10 @@ def test_dialog_rows_are_40px_labels():
     # A fieldset is min-content wide by default: one long nowrap fit name
     # would widen its group past the dialog instead of ellipsising.
     assert re.search(r"min-width:\s*0\b", rule_bodies(css, "#charimport-dialog fieldset"))
+
+
+def test_compare_header_cells_read_at_11px():
+    """Stat and Δ B−A were the page's 9px; the id outranks its .fc-table
+    rule, which loads after site.css. (The A/B heads' m-only letters are
+    already 12px.)"""
+    assert norm(rule_bodies(_phone(), "#fit-compare thead th")) == "font-size: 11px;"
