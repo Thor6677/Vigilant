@@ -681,6 +681,19 @@ def _phone():
     return body, desktop
 
 
+def test_full_detail_head_is_a_40px_target():
+    """The Full Detail head opens and closes the table (togglePanel); at
+    36.7px it was under the 40px floor. Its hook takes a min-height; the
+    head is already a flex line with its items centred."""
+    css, _ = _phone()
+    assert rule_bodies(css, ".b-panel-head.ml-detail-head").strip() == "min-height: 40px;"
+    html, _ = _render_data()
+    heads = [a for _, a, _ in _tree(html) if a.get("data-toggle-panel") == "ml-detail-table"]
+    assert len(heads) == 1
+    assert _cls(heads[0]) == ["b-panel-head", "ml-detail-head"]
+    assert [a for _, a, _ in _tree(html) if "ml-detail-head" in _cls(a)] == heads
+
+
 def test_checkbox_lead_is_a_40px_tap_target():
     """The label is at least 40×40 and reaches into the row's padding, so the
     row stays one 40px line; the box itself grows from 14px to 20px (the

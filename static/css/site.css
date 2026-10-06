@@ -1605,6 +1605,9 @@
     /* A corp card's View Corp Ledger: 12px over its inline 9px, as the
        selection bar's buttons. */
     .ml-corp-view { font-size: 12px !important; }
+    /* Full Detail's head opens the table (togglePanel); 36.7px before. The
+       head is already a flex line with its items centred. */
+    .b-panel-head.ml-detail-head { min-height: 40px; }
 }
 /* ── end R3 T5 ── */
 
