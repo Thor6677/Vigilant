@@ -1480,6 +1480,18 @@
     .ij-filters .ij-picker-panel { left: 0; right: 0; min-width: 0; }
     .ij-picker-panel .ij-picker-row { min-height: 40px; font-size: 12px; }
     .ij-picker-panel .ij-picker-row input { min-height: 0; }
+
+    /* 9px text at 11px: the stat labels, the pickers' All / None and each
+       option's count. Each rule has one more class than the page's own,
+       whose <style> loads after this file. */
+    .ij-summary .ij-stat-label { font-size: 11px; }
+    .ij-picker-panel > .ij-picker-head > button { font-size: 11px; }
+    .ij-picker-panel .ij-picker-row .pcount { font-size: 11px; }
+
+    /* "+ Include completed" / "Including completed ×": links styled as
+       chips, 24.5px tall. As inline-flex boxes they are 40px targets with
+       the label centred. The filter chips are buttons, already 44px. */
+    a.ij-chip { display: inline-flex; align-items: center; min-height: 40px; }
 }
 /* ── end R3 T3 ── */
 

@@ -362,3 +362,36 @@ def test_picker_panel_fits_a_phone_with_40px_rows():
     row = _decls(rule_bodies(phone, ".ij-picker-panel .ij-picker-row"))
     assert row["min-height"] == "40px"
     assert _decls(rule_bodies(phone, ".ij-picker-panel .ij-picker-row input")) == {"min-height": "0"}
+
+
+def test_small_text_is_11px_over_the_page_style():
+    """The stat labels, the pickers' All / None buttons and each option's
+    count are 9px in the page's <style>, which loads after site.css; each
+    phone rule carries one more class than the page's, so it wins."""
+    phone = _phone()
+    page = source("industry_jobs.html")
+    for sel, page_sel in ((".ij-summary .ij-stat-label", ".ij-stat-label"),
+                          (".ij-picker-panel > .ij-picker-head > button", ".ij-picker-head button"),
+                          (".ij-picker-panel .ij-picker-row .pcount", ".ij-picker-row .pcount")):
+        assert _decls(rule_bodies(phone, sel)) == {"font-size": "11px"}, sel
+        assert re.search(r"(?m)^" + re.escape(page_sel) + r" \{[^}]*font-size:9px", page), page_sel
+    # The markup the rules name: stats inside the summary, both pickers'
+    # heads directly inside their panels, buttons directly inside the heads.
+    html = _render()
+    assert re.search(r'<div class="ij-summary">\s*<div class="ij-stat"><span class="ij-stat-label">', html)
+    heads = re.findall(r'<div class="ij-picker-panel">\s*<div class="ij-picker-head">\s*'
+                       r'<button type="button" data-picker-all="\w+">All</button>\s*'
+                       r'<button type="button" data-picker-none="\w+">None</button>', html)
+    assert len(heads) == 2
+    assert html.count('<span class="pcount">') == 3
+
+
+def test_include_completed_link_is_a_40px_target():
+    """"+ Include completed" and "Including completed ×" are links styled as
+    chips, 24.5px tall at 360px. As inline-flex boxes they take a 40px
+    height with the label centred. The filter chips are buttons, which the
+    global phone rule already makes 44px tall."""
+    assert _decls(rule_bodies(_phone(), "a.ij-chip")) == {
+        "display": "inline-flex", "align-items": "center", "min-height": "40px"}
+    links = re.findall(r'<a href="([^"]*)" class="ij-chip[^"]*"', source("industry_jobs.html"))
+    assert links == ["?", "?include_completed=1"]
