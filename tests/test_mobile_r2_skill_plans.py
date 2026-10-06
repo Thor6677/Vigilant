@@ -378,6 +378,29 @@ def test_detail_gap_picker_wraps_like_the_shared_one():
     assert "display:flex" in pick["style"]
 
 
+def test_shared_view_attribute_line_carries_its_phone_hook():
+    """Each row's attributes and rank ("Mem/Per ×2") are 9px inline; the
+    hook lets phones show them at 11px. The rank span inherits the size.
+    Desktop keeps the inline size (D21). Logged in and anonymous alike."""
+    for session in ({}, {"session": None}):
+        html = _render_shared(**session)
+        attrs = [a for t, a in _tags(html) if "skp-shared-attr" in _classes(a)]
+        assert len(attrs) == 3
+        for a in attrs:
+            assert _classes(a) == ["skp-shared-attr"]
+            assert "font-size:9px" in a["style"].replace(" ", "")
+        spans = re.findall(r'<span class="skp-shared-attr"[^>]*>(.*?)</span>\s*</span>', html, re.S)
+        assert len(spans) == 3 and all('class="skp-shared-rank"' in s for s in spans)
+
+
+def test_shared_view_analyze_is_the_picker_rows_button():
+    """Analyze is a .b-btn directly in the picker row, 9px inline."""
+    html = _render_shared()
+    (pick,) = re.findall(r'<div class="skp-gap-pick".*?</div>', html, re.S)
+    (btn,) = re.findall(r'<button class="b-btn" data-click="runGap"\s+style="([^"]*)"', pick)
+    assert "font-size:9px" in btn.replace(" ", "")
+
+
 # ── CSS (the R2 T6 section) ───────────────────────────────────────────
 
 def _decls(selector):
@@ -535,6 +558,15 @@ _SMALL_TEXT = (".skp-meta > span", ".skp-actions .b-btn", ".skp-scope .b-btn", "
 def test_css_small_text_is_11px():
     for sel in _SMALL_TEXT:
         assert "font-size: 11px !important" in _decls(sel), sel
+
+
+def test_css_shared_view_attribute_line_and_analyze_are_11px():
+    """The shared view's attribute line and both pages' Analyze button: 11px
+    over their inline 9px (the detail page's Analyze already was, through
+    .skp-tools .b-btn; the shared page has no .skp-tools)."""
+    assert "font-size: 11px !important" in _decls(".skp-shared-attr")
+    assert "font-size: 11px !important" in _decls(".skp-gap-pick > .b-btn")
+    assert 'class="b-grid-2 skp-tools"' not in _render_shared()
 
 
 def test_small_text_hooks_are_in_the_markup():

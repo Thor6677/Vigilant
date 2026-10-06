@@ -1206,6 +1206,12 @@
        percentage width adds nothing to its column's min-content). */
     .skp-gap-pick { flex-wrap: wrap; }
     .skp-gap-pick > select { flex: 1 1 100% !important; min-width: 0; width: 100%; }
+    /* Analyze at 11px over its inline 9px. The detail page's already was
+       (.skp-tools .b-btn below); the shared page has no .skp-tools. */
+    .skp-gap-pick > .b-btn { font-size: 11px !important; }
+    /* The shared view's attributes and rank ("Mem/Per ×2"): 11px over the
+       inline 9px; the rank inherits it. */
+    .skp-shared-attr { font-size: 11px !important; }
 
     /* Share link: its own full-width line (the inline flex:1 left it 117px
        wide beside the label and Copy), ending in an ellipsis since it is
