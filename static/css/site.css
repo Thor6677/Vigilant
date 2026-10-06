@@ -707,12 +707,19 @@
     table.m-table, table.m-table > tbody { display: block; width: 100%; }
     table.m-table > thead { display: none !important; }
     table.m-table > tbody > tr:not(.m-row), table.m-table > tbody > tr:not(.m-row) > td { display: block; }
+    /* min-height: every row is a tap target, so none is shorter than 40px
+       (mobile design §4.6), border included (border-box). A one-line row
+       measures 37–39px from its padding and line height alone. The single
+       row track stretches to fill the extra height and align-items centres
+       the line in it, so the line stays in the middle. Not !important: a
+       page section that wants a taller floor (44px) still sets its own. */
     .m-row {
         display: grid !important;
         grid-template-columns: auto minmax(0, 1fr) auto 14px !important;
         column-gap: 0 !important; row-gap: 0.3rem !important;
         align-items: center !important;
         padding: 0.6rem 0.75rem !important;
+        min-height: 40px;
         cursor: pointer;
     }
     .m-row.m-row--link { cursor: pointer; }
