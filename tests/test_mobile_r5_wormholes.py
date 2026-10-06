@@ -15,9 +15,14 @@
 Contexts follow the shapes app/routes/wormholes.py builds; every system,
 pilot, corporation and alliance name is invented."""
 import functools
+import json
 import re
+import shutil
+import subprocess
 from datetime import datetime, timezone
 from html.parser import HTMLParser
+
+import pytest
 
 from app.routes import wormholes as wh_mod
 from tests._mobile import (VOID, assert_mrow, cells_rows, css_section, norm, phone_block,
@@ -259,6 +264,57 @@ def test_types_script_fades_while_there_is_more_and_scrolls_to_the_detail():
     assert "htmx:afterSwap" in script and "scrollIntoView" in script
     assert "(max-width: 640px)" in script, "only phones scroll to the detail"
     _assert_section_dropdown(html, "Wormhole Types")
+
+
+_SCROLL_HARNESS = r"""
+const vm = require('vm');
+const src = require('fs').readFileSync(process.argv[2], 'utf8');
+const out = [];
+for (const [phone, still] of [[true, false], [true, true], [false, false], [false, true]]) {
+  const listeners = {};
+  const detail = {
+    addEventListener(type, fn) { listeners[type] = fn; },
+    scrollIntoView(opts) { out.push({ phone, still, opts }); },
+  };
+  const window = {
+    matchMedia(q) {
+      if (q === '(max-width: 640px)') return { matches: phone };
+      if (q === '(prefers-reduced-motion: reduce)') return { matches: still };
+      throw new Error('unexpected media query ' + q);
+    },
+    addEventListener() {},
+  };
+  const document = {
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+    getElementById(id) { if (id !== 'wh-type-detail') throw new Error(id); return detail; },
+  };
+  vm.runInNewContext(src, { window, document });
+  listeners['htmx:afterSwap'].call(detail, { target: {} });       // a nested swap: ignored
+  listeners['htmx:afterSwap'].call(detail, { target: detail });
+}
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+def test_types_detail_scroll_honours_reduced_motion(tmp_path):
+    """Phones scroll the loaded detail into view: smoothly, or with a jump
+    when the visitor asks for reduced motion (as the fitting tool's
+    scrollToFitStats does). Desktop never scrolls."""
+    if not shutil.which("node"):
+        pytest.skip("node not installed")
+    html = _render_types()
+    (script,) = [s for s in re.findall(r"<script[^>]*>(.*?)</script>", html, flags=re.S)
+                 if "querySelector('.wm-scroll')" in s]
+    (tmp_path / "page.js").write_text(script)
+    (tmp_path / "harness.js").write_text(_SCROLL_HARNESS)
+    res = subprocess.run(["node", str(tmp_path / "harness.js"), str(tmp_path / "page.js")],
+                         capture_output=True, text=True, timeout=30)
+    assert res.returncode == 0, res.stderr
+    assert json.loads(res.stdout) == [
+        {"phone": True, "still": False, "opts": {"block": "start", "behavior": "smooth"}},
+        {"phone": True, "still": True, "opts": {"block": "start", "behavior": "auto"}},
+    ]
 
 
 # ── Effect tables: swipe, Modifier pinned (D14 A) ─────────────────────

@@ -120,11 +120,12 @@ document.querySelectorAll('.wm-table td').forEach(function(td) {
 })();
 
 // Phones: a tapped code's detail loads below the matrix, off screen, so
-// bring it into view.
+// bring it into view; a jump rather than a glide when reduced motion is on.
 document.getElementById('wh-type-detail').addEventListener('htmx:afterSwap', function(e) {
     if (e.target !== this) return;
     if (window.matchMedia && window.matchMedia('(max-width: 640px)').matches) {
-        this.scrollIntoView({block: 'start', behavior: 'smooth'});
+        var still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        this.scrollIntoView({block: 'start', behavior: still ? 'auto' : 'smooth'});
     }
 });
 </script>
