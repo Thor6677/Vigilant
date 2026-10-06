@@ -1,12 +1,16 @@
 {# Also embedded by the WH Tracker, and served without a session check: no
    actions.js bindings (data-click etc.) here. Phones: .whk-range and
    .whk-active are hooks for 40px controls; the heatmap keeps its own
-   sideways scroll (D15 A), and .whk keeps the panel to its column. #}
+   sideways scroll (D15 A), and .whk keeps the panel to its column.
+   The range buttons swap this panel itself (closest .whk, outerHTML), so
+   they work in either host: only the system page has #wh-kills (ISS-124).
+   Their own hx-indicator stops them inheriting the system page's
+   #kills-loading, which the first load removes. #}
 <div class="b-panel whk b-pad-md">
     <!-- Time range selector -->
     <div class="whk-range" style="display:flex;align-items:center;gap:0.25rem;margin-bottom:0.75rem;">
         {% for d in [30, 60, 90] %}
-        <button {% if d != days %}hx-get="/wormholes/system/{{ system_name }}/kills?days={{ d }}" hx-target="#wh-kills" hx-swap="innerHTML"{% endif %}
+        <button {% if d != days %}hx-get="/wormholes/system/{{ system_name }}/kills?days={{ d }}" hx-target="closest .whk" hx-swap="outerHTML" hx-indicator="this"{% endif %}
                 style="padding:4px 10px;font-size:9px;letter-spacing:0.1em;font-family:inherit;border:1px solid {% if d == days %}var(--accent){% else %}var(--border){% endif %};background:{% if d == days %}rgba(200,169,81,0.1){% else %}transparent{% endif %};color:{% if d == days %}var(--accent){% else %}var(--muted){% endif %};border-radius:3px;cursor:pointer;">
             {{ d }}D
         </button>
