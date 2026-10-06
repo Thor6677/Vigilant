@@ -2510,6 +2510,15 @@
     /* The | between the side and Critical filters ends up alone at the end
        of a wrapped line; the buttons' gap separates them on phones. */
     .st-sep { display: none; }
+
+    /* Section heads (Add Timer, Access Control Groups, Archived Timers):
+       <summary>s 38.4px and 36.7px tall, raised to the 40px floor. Each is
+       a .b-panel-head, already flex with align-items:center, so its text
+       stays centred; display and list-style are left alone. */
+    .st-sum { min-height: 40px; }
+    /* The Side and Visibility field labels (inline 9px) and the ACL entry
+       type badge (inline 8px) read at 11px. */
+    .st-flabel, .st-acl-type { font-size: 11px !important; }
 }
 /* Every width: the filter hides rows with `hidden`. On phones this (0,2,0)
    beats .m-row's display:grid !important (0,1,0). On desktop Tailwind's

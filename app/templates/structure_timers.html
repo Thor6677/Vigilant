@@ -11,7 +11,7 @@
 
 {# ── Create Timer ────────────────────────────────────────────────────────── #}
 <details class="b-section" id="create-section">
-    <summary class="b-panel-head" style="cursor:pointer;list-style:none;display:flex;align-items:center;gap:0.5rem;">
+    <summary class="b-panel-head st-sum" style="cursor:pointer;list-style:none;display:flex;align-items:center;gap:0.5rem;">
         <span style="color:var(--accent);font-size:12px;">+</span>
         <span class="b-label">Add Timer</span>
     </summary>
@@ -68,7 +68,7 @@
 
             <div class="m-stack" style="display:flex;gap:0.75rem;flex-wrap:wrap;align-items:center;">
                 <div style="display:flex;gap:0.5rem;align-items:center;">
-                    <span style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;">Side</span>
+                    <span class="st-flabel" style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em;">Side</span>
                     <label style="font-size:10px;color:var(--danger);cursor:pointer;display:flex;align-items:center;gap:3px;">
                         <input type="radio" name="disposition" value="hostile" checked> Hostile
                     </label>
@@ -107,7 +107,7 @@
                 <textarea name="notes" placeholder="Notes (optional)" rows="2"
                           style="flex:2;min-width:150px;padding:0.3rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;resize:vertical;"></textarea>
                 <div style="flex:1;min-width:120px;">
-                    <span style="font-size:9px;color:var(--muted);display:block;margin-bottom:2px;">Visibility</span>
+                    <span class="st-flabel" style="font-size:9px;color:var(--muted);display:block;margin-bottom:2px;">Visibility</span>
                     <select name="acl_group_id" style="width:100%;padding:0.3rem 0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
                         <option value="">Everyone</option>
                         {% for g in acl_groups %}
@@ -126,7 +126,7 @@
 
 {# ── ACL Groups Management ───────────────────────────────────────────────── #}
 <details class="b-section">
-    <summary class="b-panel-head" style="cursor:pointer;list-style:none;display:flex;align-items:center;gap:0.5rem;">
+    <summary class="b-panel-head st-sum" style="cursor:pointer;list-style:none;display:flex;align-items:center;gap:0.5rem;">
         <span style="color:var(--muted);font-size:12px;">&#9881;</span>
         <span class="b-label b-muted">Access Control Groups</span>
     </summary>
@@ -162,7 +162,7 @@
                 <img src="https://images.evetech.net/characters/{{ entry.eve_id }}/portrait?size=32" style="width:16px;height:16px;border-radius:2px;" data-on-error="hide">
                 {% endif %}
                 <span style="flex:1;color:var(--text);">{{ entry.name or entry.eve_id }}</span>
-                <span style="font-size:8px;color:var(--muted);border:1px solid var(--border);padding:0 3px;border-radius:2px;">{{ entry.entry_type | capitalize }}</span>
+                <span class="st-acl-type" style="font-size:8px;color:var(--muted);border:1px solid var(--border);padding:0 3px;border-radius:2px;">{{ entry.entry_type | capitalize }}</span>
                 <form method="POST" action="/structure-timers/acl/{{ group.id }}/remove/{{ entry.id }}" style="display:inline;">
                     <button class="b-btn st-tap" style="padding:0 0.2rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
                 </form>
@@ -372,7 +372,7 @@
                     <textarea name="notes" rows="2" placeholder="Notes"
                               style="flex:2;min-width:120px;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;resize:vertical;">{{ t.notes or '' }}</textarea>
                     <div style="flex:1;min-width:100px;">
-                        <span style="font-size:9px;color:var(--muted);display:block;margin-bottom:2px;">Visibility</span>
+                        <span class="st-flabel" style="font-size:9px;color:var(--muted);display:block;margin-bottom:2px;">Visibility</span>
                         <select name="acl_group_id" style="width:100%;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
                             <option value="">Everyone</option>
                             {% for g in acl_groups %}
@@ -403,7 +403,7 @@
    open every row), and the button sits after the panel so the last row
    stays its :last-child. #}
 <details class="b-section m-clamp-wrap">
-    <summary class="b-panel-head" style="cursor:pointer;list-style:none;">
+    <summary class="b-panel-head st-sum" style="cursor:pointer;list-style:none;">
         <span class="b-label b-muted">Archived Timers ({{ archived_timers | length }})</span>
     </summary>
     <div class="b-panel m-clamp" style="border-top:1px solid var(--border);">

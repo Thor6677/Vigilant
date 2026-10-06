@@ -18,6 +18,9 @@ user decisions D3 A, D4 A, D5 A).
   The small buttons become tap targets through the page's own `st-tap`, not
   the shared `m-tap`: m-tap forces 40px !important, which would shrink a
   button below the 44px every button and .b-btn already gets on phones.
+- The three section heads (Add Timer, Access Control Groups, Archived
+  Timers) are <summary>s raised to the 40px floor; the Side / Visibility
+  field labels and the ACL entry type badge read at 11px.
 
 Desktop must render exactly as before (D21): every phone-only cell is
 m-only, the desktop blocks keep their markup, and every new hook class has
@@ -807,3 +810,40 @@ def test_archived_delete_has_a_name_and_the_filter_separator_hides_on_phones():
     assert '<span class="st-sep"' in src
     body, _ = phone_block(_section("T2"))
     assert "display: none" in rule_bodies(body, ".st-sep")
+
+
+# ── section heads and small labels (final fix round) ──────────────────
+
+
+def test_section_heads_carry_the_40px_hook_and_keep_their_markup():
+    """Add Timer, Access Control Groups and Archived Timers: each <summary>
+    gains only the st-sum class; its inline style (list-style:none, the
+    flex line) is what it was."""
+    heads = re.findall(r'<summary class="([^"]*)" style="([^"]*)">\s*(.*?)</summary>', _render(), flags=re.S)
+    assert [re.sub(r"<[^>]+>|\s+", " ", t).split()[-1] for _, _, t in heads] == ["Timer", "Groups", "(12)"]
+    for cls, style, _ in heads:
+        assert cls.split() == ["b-panel-head", "st-sum"]
+        assert style.startswith("cursor:pointer;list-style:none;")
+
+
+def test_css_section_heads_reach_40px_without_touching_display():
+    """.b-panel-head is already flex with align-items:center, so a
+    min-height alone keeps the text centred; the rule leaves display and
+    list-style alone."""
+    assert norm(rule_bodies(_phone(), ".st-sum")) == "min-height: 40px;"
+
+
+def test_field_labels_and_acl_badge_carry_their_hooks():
+    html = _render()
+    side = re.findall(r'<span class="st-flabel" style="([^"]*)">Side</span>', html)
+    vis = re.findall(r'<span class="st-flabel" style="([^"]*)">Visibility</span>', html)
+    assert len(side) == 1 and len(vis) == 3, "Add Timer, plus the two Edit forms the viewer owns"
+    assert all("font-size:9px;" in st for st in side + vis), "desktop keeps 9px"
+    badge = re.findall(r'<span class="st-acl-type" style="([^"]*)">Corporation</span>', html)
+    assert len(badge) == 1 and badge[0].startswith("font-size:8px;"), "desktop keeps 8px"
+    assert html.count('class="st-flabel"') == 4 and html.count('class="st-acl-type"') == 1
+
+
+def test_css_field_labels_and_acl_badge_read_at_11px():
+    for sel in (".st-flabel", ".st-acl-type"):
+        assert norm(rule_bodies(_phone(), sel)) == "font-size: 11px !important;", sel
