@@ -127,9 +127,12 @@
 
   <p id="kf-loading" style="color:var(--muted);font-size:11px;">Loading…</p>
   <button type="button" id="kf-new-pill" style="display:none;">↑ <span id="kf-new-pill-count">0</span> new</button>
+  {# kf-reload: the page's filter change and Back to live reload through it.
+     htmx 1.9 runs a `load` trigger once and never listens for a `load`
+     event, so htmx.trigger(feed, 'load') did nothing (ISS-122). #}
   <div id="kf-feed"
        hx-get="/intel/kills/feed"
-       hx-trigger="load, every 15s"
+       hx-trigger="load, every 15s, kf-reload"
        hx-swap="afterbegin"></div>
   <div id="kf-show-more-wrap" style="display:none;text-align:center;padding:8px;">
     <button class="kf-chip" id="kf-show-more-btn" type="button">Show more (<span id="kf-show-more-count">0</span> hidden) &darr;</button>
@@ -292,13 +295,13 @@
       if (feed) {
         // Filter params reach the request via htmx:configRequest below
         // (see comment there) — mutating hx-get here is a no-op for the
-        // polling timer and for htmx.trigger(elt, 'load').
+        // polling timer and for the kf-reload trigger.
         feed.innerHTML = '<p id="kf-loading" style="color:var(--muted);font-size:11px;">Loading…</p>';
         // Reset the cursor: a fresh filter wants the full top-100, not just
         // kills newer than what the previous filter had seen.
         kfSinceCursor = null;
         KF_VISIBLE_CAP = 100;
-        if (window.htmx) htmx.trigger(feed, 'load');
+        if (window.htmx) htmx.trigger(feed, 'kf-reload');
       }
     }
 
@@ -441,7 +444,7 @@
         // just whatever has come in since we entered older-mode.
         kfSinceCursor = null;
         KF_VISIBLE_CAP = 100;
-        if (window.htmx) htmx.trigger(f, 'load');
+        if (window.htmx) htmx.trigger(f, 'kf-reload');
       }
     }
 
@@ -554,7 +557,7 @@
     // ── Cursor + filter params injected via configRequest ──────────────
     // htmx 1.9.x captures the hx-get path in a closure at processVerbs time
     // (DOMContentLoaded), so later setAttribute('hx-get', ...) calls do NOT
-    // propagate to the polling timer or to htmx.trigger(elt, 'load'). The
+    // propagate to the polling timer or to the kf-reload trigger. The
     // `since` cursor avoided that by going through configRequest; filter
     // params (space/wh_class/shattered/ship_id/attacker_*/victim_*) need the
     // same treatment, otherwise chip toggles never reach the server and the
