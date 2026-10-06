@@ -314,6 +314,19 @@ def test_skill_chips_carry_a_class_hook(monkeypatch):
     assert 'value="5"' in html and 'value="4"' in html
 
 
+def test_skill_labels_and_loaded_carry_class_hooks(monkeypatch):
+    """The Reprocessing and Efficiency labels and the "Loaded" note are 9px
+    inline; their hooks let phones show them at 11px. The inline sizes stay
+    for desktop (D21)."""
+    html = _skills_html(monkeypatch)
+    labels = re.findall(r'<label class="comp-skill-label" style="([^"]*)">(\w+)</label>', html)
+    assert [t for _, t in labels] == ["Reprocessing", "Efficiency"]
+    assert all("font-size:9px" in st for st, _ in labels)
+    assert html.count("<label") == 2
+    loaded = re.findall(r'<span class="comp-skill-loaded" style="([^"]*)">Loaded</span>', html)
+    assert len(loaded) == 1 and "font-size:9px" in loaded[0]
+
+
 def test_compression_page_keeps_its_skill_ids():
     src = source("compression.html")
     for hook in ('id="skill-repro"', 'id="skill-eff"', 'id="ore-skills-input"',
@@ -495,6 +508,16 @@ def test_trip_breakdown_wraps_but_is_not_tap_to_open():
     assert "+ bayDetail +" in block
 
 
+def test_ship_capacity_bay_labels_carry_a_class_hook():
+    """renderEntryCapacity builds each bay chip as a string: the bay label
+    (8px inline) carries a hook that phones size at 11px."""
+    src = source("hauling.html")
+    start = src.index("function renderEntryCapacity(")
+    block = src[start:src.index("\n}\n", start)]
+    spans = re.findall(r"<span class=\"haul-bay-label\" style=\"([^\"]*)\">' \+ label \+ '</span>", block)
+    assert len(spans) == 1 and "font-size:8px" in spans[0]
+
+
 def test_hauling_tabs_stay_as_they_are():
     html = _hauling_page()
     for tab in ("manual", "paste"):
@@ -525,6 +548,14 @@ def test_css_skill_chips_stay_compact():
     d = _decls(_phone(), ".comp-skill-chip")
     assert "font-size: 12px !important" in d
     assert "min-height" not in d and "min-width" not in d and "display" not in d
+
+
+def test_css_skill_labels_loaded_and_bay_labels_are_11px():
+    """The compression skill labels, "Loaded" and the hauling bay labels:
+    11px on phones; !important beats their inline 9px / 8px."""
+    css = _phone()
+    for sel in (".comp-skill-label", ".comp-skill-loaded", ".haul-bay-label"):
+        assert "font-size: 11px !important" in _decls(css, sel), sel
 
 
 def test_css_ore_key_one_lines_up_with_key_two():

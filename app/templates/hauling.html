@@ -276,7 +276,7 @@ function renderEntryCapacity(entry, cap) {
         var label = BAY_LABELS[bay] || bay;
         var div = document.createElement('span');
         div.style.cssText = 'display:inline-flex;align-items:center;gap:0.35rem;padding:0.2rem 0.5rem;background:var(--surface);border:1px solid var(--border);border-radius:3px;font-size:10px;';
-        div.innerHTML = '<span style="color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-size:8px;">' + label + '</span>' +
+        div.innerHTML = '<span class="haul-bay-label" style="color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;font-size:8px;">' + label + '</span>' +
             '<span style="color:var(--accent);font-weight:600;">' + formatNumber(val) + '</span>';
         inner.appendChild(div);
     }

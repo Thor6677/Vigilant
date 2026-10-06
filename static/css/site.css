@@ -1502,6 +1502,9 @@
        height; only the label grows to 12px for legibility. !important beats
        their inline 10px. */
     .comp-skill-chip { font-size: 12px !important; }
+    /* Beside them, the Reprocessing and Efficiency labels and "Loaded":
+       11px over their inline 9px. */
+    .comp-skill-label, .comp-skill-loaded { font-size: 11px !important; }
     /* Compression results head: Copy for Multibuy and Send to Hauling wrap
        as whole buttons instead of squeezing. .b-btn is flex:1 (basis 0%),
        which shares the line out equally and breaks a label inside its
@@ -1530,6 +1533,9 @@
        inline 11px glyph. */
     .haul-entry-fields > .haul-entry-remove { align-items: flex-start; }
     .haul-entry-remove > button { min-width: 44px; font-size: 14px !important; }
+    /* The bay labels in each ship's capacity chips (built in hauling.html's
+       renderEntryCapacity): 11px over their inline 8px. */
+    .haul-bay-label { font-size: 11px !important; }
 
     /* Hauling trip breakdown (built as a string in hauling.html's
        recalcTrips): the ship and its m³/trip share line 1, m³/trip at its
