@@ -336,6 +336,40 @@ def test_detail_attackers_clamp_with_show_all_past_ten():
     assert right.find_all(tag="h4") and not clamp.find_all(tag="h4")
 
 
+def _row_fetch(name):
+    """bindRowClicks' fetch handler on the feed or search page: from the
+    fetch to its .catch."""
+    body = source(name).split("function bindRowClicks()", 1)[1]
+    return body.split("fetch('/intel/kills/' + kid + '/detail')", 1)[1].split(".catch(", 1)[0]
+
+
+_INIT_ARIA = "if (window.initToggleExpandedAria) window.initToggleExpandedAria({});"
+
+
+@pytest.mark.parametrize("name", ["intel_kills.html", "intel_kills_search.html"], ids=["feed", "search"])
+def test_row_detail_show_all_gets_aria_expanded_on_insert(name):
+    """The detail panel arrives by fetch, not htmx, so actions.js's
+    afterSettle never sees its "Show all N"; until a first tap it had no
+    aria-expanded. Each insert now runs initToggleExpandedAria on the new
+    panel, inside the check that it is a detail panel, after the insert."""
+    body = _row_fetch(name)
+    call = _INIT_ARIA.format("panel")
+    assert body.count("initToggleExpandedAria") == 2 and body.count(call) == 1
+    insert = body.index("row.insertAdjacentHTML('afterend', html);")
+    guard = body.index("if (panel && panel.classList && panel.classList.contains('kf-detail')) {")
+    assert insert < guard < body.index(call) < body.index("requestAnimationFrame(")
+
+
+def test_top_card_detail_show_all_gets_aria_expanded_on_insert():
+    """The top cards' detail goes into the slot by innerHTML; the slot is
+    initialised right after, at every width (not inside the phone-only
+    scroll)."""
+    body = _top_card_fetch()
+    call = _INIT_ARIA.format("slot")
+    assert body.count("initToggleExpandedAria") == 2 and body.count(call) == 1
+    assert body.index("slot.innerHTML = html;") < body.index(call) < body.index("window.matchMedia")
+
+
 @pytest.mark.parametrize("n", [0, 3, 10])
 def test_detail_has_no_show_all_at_ten_or_fewer(n):
     c = clamps(_detail(n))

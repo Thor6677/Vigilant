@@ -611,6 +611,9 @@
               row.insertAdjacentHTML('afterend', html);
               var panel = row.nextElementSibling;
               if (panel && panel.classList && panel.classList.contains('kf-detail')) {
+                // The panel arrives outside htmx, so actions.js's afterSettle
+                // never gives its "Show all N" an aria-expanded; do it here.
+                if (window.initToggleExpandedAria) window.initToggleExpandedAria(panel);
                 void panel.offsetHeight;
                 requestAnimationFrame(function() { panel.classList.add('shown'); });
               }

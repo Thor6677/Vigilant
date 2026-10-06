@@ -537,6 +537,9 @@
               row.insertAdjacentHTML('afterend', html);
               var panel = row.nextElementSibling;
               if (panel && panel.classList && panel.classList.contains('kf-detail')) {
+                // The panel arrives outside htmx, so actions.js's afterSettle
+                // never gives its "Show all N" an aria-expanded; do it here.
+                if (window.initToggleExpandedAria) window.initToggleExpandedAria(panel);
                 // Force reflow so the transition fires from the collapsed state.
                 void panel.offsetHeight;
                 requestAnimationFrame(function() { panel.classList.add('shown'); });
@@ -804,6 +807,8 @@
             .then(function(html) {
               if (pendingSlotClear) { clearTimeout(pendingSlotClear); pendingSlotClear = null; }
               slot.innerHTML = html;
+              // As in the feed: the panel's "Show all N" needs its aria-expanded.
+              if (window.initToggleExpandedAria) window.initToggleExpandedAria(slot);
               var panel = slot.querySelector('.kf-detail');
               if (panel) {
                 void panel.offsetHeight;
