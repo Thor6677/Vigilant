@@ -1787,6 +1787,15 @@ async def trending_page(request: Request):
 
 # ── Alliance detail page (sov summary, 7d changes) ────────────────────────
 
+def _utc_iso(dt: datetime) -> str:
+    """ISO 8601 with an explicit UTC offset. The DateTime columns hold naive
+    UTC, and a browser reads a zoneless date-time as the viewer's local time.
+    ISS-129."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).isoformat()
+
+
 @router.get("/api/map/alliance/{alliance_id}")
 async def alliance_detail(alliance_id: int, request: Request):
     """Aggregated alliance snapshot derived from the sov map cache + 7d change log.
@@ -1884,7 +1893,7 @@ async def alliance_detail(alliance_id: int, request: Request):
         "recent_changes": [
             {
                 "system_id": r.system_id,
-                "changed_at": r.changed_at.isoformat(),
+                "changed_at": _utc_iso(r.changed_at),
                 "old_alliance_id": r.old_alliance_id,
                 "new_alliance_id": r.new_alliance_id,
                 "direction": "gain" if r.new_alliance_id == alliance_id else "loss",
