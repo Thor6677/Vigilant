@@ -1850,6 +1850,9 @@
        right alignment, which outranks this. */
     .pnl-table tr.m-row { border-bottom: 1px solid var(--border); }
     .pnl-table tr.m-row > td { padding: 0; border-bottom: none; text-align: left; }
+    /* Both keys at 12px, as Market's, LP's and Corp Inventory's rows (the
+       table is 11px). */
+    .pnl-table tr.m-row > [data-m="key"] { font-size: 12px; }
 
     /* Net Worth range buttons and Snapshot now: 12px text, and the global
        phone rule's 44px height (no height set here, so it applies). The

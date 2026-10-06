@@ -34,7 +34,7 @@ from app.routes import networth as nw_mod
 from app.routes import pnl as pnl_mod
 from tests._mobile import (VOID, assert_mrow, assert_single_value_child, cells_rows,
                            clamps, css_section, norm, phone_block, render_page, row_keys,
-                           row_labelled, rule_bodies)
+                           row_labelled, rule_bodies, source)
 
 _section = functools.partial(css_section, release="R4")
 PHONE_MQ = "matchMedia('(max-width: 640px)')"
@@ -659,6 +659,16 @@ def test_t3_css_draws_one_rule_per_pnl_row():
     cell = rule_bodies(css, ".pnl-table tr.m-row > td")
     for prop, value in (("padding", "0"), ("border-bottom", "none"), ("text-align", "left")):
         assert _decl(cell, prop, value), (prop, value)
+
+
+def test_t3_css_pnl_keys_are_12px():
+    """Both keys at 12px, as R4 T1, T2 and T4's rows: the table is 11px,
+    and key 1's 16px phone line box sat it off key 2. (0,3,1) outranks
+    the page's `.pnl-table td`, whose <style> loads after site.css."""
+    body = rule_bodies(_phone(), '.pnl-table tr.m-row > [data-m="key"]')
+    assert body.strip() == "font-size: 12px;"
+    keys = re.findall(r'<td[^>]*\bdata-m="key"[^>]*>', source("pnl.html"))
+    assert len(keys) == 2
 
 
 def test_t3_css_keeps_range_and_snapshot_buttons_at_the_44px_floor():
