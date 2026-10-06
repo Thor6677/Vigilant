@@ -816,6 +816,15 @@
     #dash-table tr.m-row a.dash-tlink { display: inline-flex; align-items: center; justify-content: center; }
 }
 
+/* Dashboard Compact view rows (mobile design §5.3). Not m-rows: each is a
+   link, <a class="dash-compact-row">, styled in dashboard.html, whose 34px
+   min-height left a one-line row at 37.8px on phones. 40px, as for m-rows.
+   The `a` outranks the template's own .dash-compact-row rule, which loads
+   after this file; its grid already centres the cells (align-items). */
+@media (max-width: 640px) {
+    a.dash-compact-row { min-height: 40px; }
+}
+
 /* Dashboard section toolbar buttons (▾ / ✕). Their desktop size used to be
    inline; it lives here now so the phone tap-target rule (m-tap) doesn't
    have to fight it. Two classes, to outrank .b-btn's own padding and size. */

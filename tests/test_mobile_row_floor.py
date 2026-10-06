@@ -210,3 +210,42 @@ def test_no_markup_gives_an_m_row_an_inline_height():
                 rows += 1
                 assert not _STYLE_HEIGHT.search(tag), f"{os.path.relpath(f, _ROOT)}: {tag[:160]}"
     assert rows >= 30, rows
+
+
+# ── Dashboard Compact rows ─────────────────────────────────────────────
+# Not m-rows (each is an <a class="dash-compact-row"> link, styled in
+# dashboard.html with a 34px min-height that measured 37.8px on phones),
+# so the R1 layer gives them the same 40px floor in a rule of their own.
+
+def _r1_phone_bodies(selector: str) -> list[str]:
+    raw = _raw()
+    r1 = _strip(raw[:raw.index(_R2_FIRST)])
+    return [body for block in _media_bodies(r1, PHONE)
+            for sels, body in _rules(block) if selector in sels]
+
+
+def test_dashboard_compact_rows_have_a_40px_phone_floor():
+    bodies = _r1_phone_bodies("a.dash-compact-row")
+    assert len(bodies) == 1, bodies
+    assert _decl(bodies[0], "min-height") == "40px"
+
+
+def test_the_compact_floor_is_phone_only():
+    """The 641-1000px tiers and desktop keep the template's 34px."""
+    assert "dash-compact-row" not in _outside_phone(_strip(_raw()))
+
+
+def test_the_compact_floor_outranks_the_template_rule():
+    """dashboard.html's own rule loads after site.css, so the floor wins by
+    specificity alone: the template's selector must stay a bare class and
+    the row an <a>."""
+    with open(os.path.join(_ROOT, "app", "templates", "dashboard.html"), encoding="utf-8") as fh:
+        page = fh.read()
+    styles = _strip("\n".join(re.findall(r"<style\b[^>]*>(.*?)</style>", page, flags=re.S)))
+    sels = [s for m in re.finditer(r"([^{}]+)\{[^{}]*min-height[^{}]*\}", styles)
+            for s in selectors(m.group(1)) if "dash-compact-row" in s]
+    assert sels == [".dash-compact-row"], sels
+    with open(os.path.join(_ROOT, "app", "templates", "partials", "dashboard_compact_row.html"),
+              encoding="utf-8") as fh:
+        row = fh.read()
+    assert re.search(r'<a\b[^>]*class="dash-compact-row"', row)
