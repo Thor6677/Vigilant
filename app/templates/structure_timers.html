@@ -352,7 +352,7 @@
                         <input type="radio" name="disposition" value="friendly" {% if t.disposition == 'friendly' %}checked{% endif %}> Friendly
                     </label>
                     <select name="timer_phase" style="padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
-                        {% for val in ['shield','armor','hull'] %}
+                        {% for val in ['shield','armor','hull','anchoring','unanchoring'] %}
                         <option value="{{ val }}" {% if t.timer_phase == val %}selected{% endif %}>{{ val | capitalize }}</option>
                         {% endfor %}
                     </select>
