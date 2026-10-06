@@ -62,7 +62,7 @@
         <div id="panel-manual" class="b-pad-md">
             <div style="display:flex;flex-direction:column;gap:3px;margin-bottom:0.75rem;">
                 <label class="b-eyebrow">Total Volume to Haul (m³)</label>
-                <input type="text" id="vol-total" value="0" data-input="recalcTrips"
+                <input type="text" id="vol-total" value="0" data-input="recalcAll"
                        style="padding:0.5rem;background:var(--bg);border:1px solid var(--accent);color:var(--text);font-family:inherit;font-size:14px;text-align:right;max-width:250px;">
             </div>
         </div>
@@ -295,6 +295,9 @@ function renderEntryCapacity(entry, cap) {
 }
 
 /* ── Recalculate everything ───────────────────────────────────────────────── */
+/* Also the Manual m³ field's data-input handler. actions.js calls it with
+   the input event, which it ignores; recalcTrips needs the fleet figures
+   worked out here, so the field must not name it directly (ISS-131). */
 function recalcAll() {
     var entries = document.querySelectorAll('.ship-entry');
     var fleetCapacity = 0;
