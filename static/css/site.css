@@ -739,8 +739,9 @@
         display: flex !important; justify-content: flex-end; flex-wrap: wrap; gap: 0.25rem 0.4rem;
         font-size: 12px !important; text-align: right; white-space: normal; word-break: break-word;
     }
+    /* flex: 0 1 auto + min-width: 0: a label wider than its cell wraps instead of overflowing left under justify-content:flex-end; a short label never shrinks. */
     .m-row > [data-m-label]::before {
-        content: attr(data-m-label); flex: none; text-align: left; margin-right: auto; padding-right: 0.6rem;
+        content: attr(data-m-label); flex: 0 1 auto; min-width: 0; text-align: left; margin-right: auto; padding-right: 0.6rem;
         color: var(--muted); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
     }
 
@@ -869,9 +870,313 @@
        double against the card's own sides and bottom. */
     .asset-list .m-showall { width: calc(100% - 1.5rem); margin: 0.4rem 0.75rem 0.6rem; }
 
-    /* Wallet journal type badge (key 1): centred on the amount (as an
-       overflow:hidden inline-block its baseline is its bottom edge, so it
-       sat high), and as wide as the key cell rather than the desktop 120px;
-       a long type still ellipsises inside the badge. */
-    .m-row > [data-m="key"] > .journal-type { vertical-align: middle; max-width: 100% !important; }
+    /* Wallet journal type badge (key 1): as wide as the key cell rather than
+       the desktop 120px; a long type still ellipsises inside the badge. Its
+       line-up with the amount is R2 P's (the badge is a block there). */
+    .m-row > [data-m="key"] > .journal-type { max-width: 100% !important; }
+}
+
+/* ── R2 T1 · character overview ── */
+@media (max-width: 640px) {
+    /* Can Fly → Can fly now (D1): link rows with no data-click. The fit link
+       (key 1) stretches over the whole row, so a tap anywhere opens the fit.
+       The link's overflow:hidden doesn't clip it: its containing block is
+       the row, an ancestor of the link. */
+    .cf-fly.m-row--link { position: relative; }
+    .cf-fly.m-row--link > a[data-m="key"]::after { content: ""; position: absolute; inset: 0; }
+    /* A long folder name (key 2) can't squeeze the fit name to nothing. vw,
+       because a % max-width on the auto key-2 track resolves cyclically. */
+    .cf-fly.m-row--link > [data-m="key"] ~ [data-m="key"] {
+        max-width: 40vw !important; overflow: hidden; text-overflow: ellipsis;
+    }
+
+    /* Corporation History: when the phone logo fails too, data-on-error hides
+       it; the lead keeps its 18px slot so key 1 stays in line with its
+       neighbours. min-width beats `.m-row > * { min-width: 0 !important }`. */
+    .ov-corp.m-row > [data-m="lead"] { min-width: 18px !important; min-height: 18px; }
+
+    /* 40px tap targets: the Can Fly, Recently Completed and Corporation
+       History toggles. line-height centres the text and keeps the summary a
+       list item, so its native disclosure marker stays. */
+    summary.ov-toggle { min-height: 40px; line-height: 40px; }
+    /* Asset-location and jump-clone headers (already flex, align-items
+       centre); the class is only used on the character overview. */
+    .asset-location-header { min-height: 40px; }
+
+    /* Combat Profile ISK row (D6): one column of label/value lines. The
+       tile's value comes first in the markup, so row-reverse puts the label
+       on the left; the value keeps its own colour and size. !important only
+       where an inline style has to lose. */
+    .ks-isk { flex-direction: column; text-align: left !important; }
+    .ks-isk > .ks-isk-tile {
+        display: flex; flex-direction: row-reverse; justify-content: space-between; align-items: baseline; gap: 0.75rem;
+        flex: none !important; min-width: 0 !important; padding: 0.5rem 0.75rem !important;
+        border-right: none !important; border-bottom: 1px solid var(--border);
+    }
+    .ks-isk > .ks-isk-tile:last-child { border-bottom: none; }
+    .ks-isk > .ks-isk-tile > * { margin-top: 0 !important; }
+    /* Ship Usage Stream: its legend moves below the plot on phones and would
+       take half of the desktop 200px box, so the box grows. !important beats
+       the inline height. */
+    .ks-stream { height: 280px !important; }
+}
+/* ── end R2 T1 ── */
+
+/* ── R2 T2 · skills ── */
+@media (max-width: 640px) {
+    /* Queue Summary and Remap Summary (D6 A): the 3-tile row becomes one
+       label · value line per tile. Tiles carry an inline flex:1 and right
+       border. Lines are separated by a bottom border, with none under the
+       last: it would double against the "saves …" line's top border or the
+       remap box's own border. The label leads whatever its DOM position (the
+       queue's tiles put the value first). The value keeps its inline colour
+       and weight, and wraps inside itself rather than past the edge. */
+    .skills-tiles { flex-direction: column; }
+    .skills-tiles > .skills-tile {
+        display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem;
+        flex: none !important; border-right: none !important; border-bottom: 1px solid var(--border);
+    }
+    .skills-tiles > .skills-tile:last-child { border-bottom: none; }
+    .skills-tile > .skills-tile-label { order: -1; flex: none; margin: 0 !important; text-align: left; }
+    .skills-tile > .skills-tile-value { min-width: 0; overflow-wrap: anywhere; text-align: right; }
+
+    /* Key 1 of the queue and remap rows (D4 B, D5 A): the skill name
+       ellipsises and its level stays whole, so a long "… Specialization"
+       still shows which level it is. Beats R1's display:block !important on
+       key cells. */
+    .m-row > [data-m="key"].skills-key { display: flex !important; align-items: center; gap: 0.4rem; }
+    .m-row > [data-m="key"].skills-key > :first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .m-row > [data-m="key"].skills-key > :last-child { flex: none; }
+
+    /* "Show all N" inside the Skill Queue panel: inset, so its border doesn't
+       double against the panel's sides and bottom (as .asset-list's does). */
+    .skills-queue .m-showall { width: calc(100% - 1.5rem); margin: 0.4rem 0.75rem 0.6rem; }
+
+    /* The skill's rank in an open queue row's Attributes value. Desktop draws
+       it in var(--border), which is near-invisible (about 1.1:1); the open
+       row is the only place a phone shows it, so it takes the muted colour.
+       !important beats the inline desktop colour. */
+    .skills-queue .skills-rank { color: var(--muted) !important; }
+}
+/* ── end R2 T2 ── */
+
+/* ── R2 T3 · fittings/stats/filters ── */
+@media (max-width: 640px) {
+    /* Fittings header: "Save all to my fits" first, then its status on a
+       full-width line below it, then the failure list saveAllToMyFits
+       appends to this same row. The DOM keeps the status first; `order`
+       moves it. The group stretches across the stacked page header, so that
+       line doesn't resize as text arrives. The button keeps its own width
+       (.b-btn is flex:1). row-gap 0 beats the inline gap, so the empty status
+       adds no space; it stays displayed because it is an aria-live region. */
+    .fit-saveall { flex-wrap: wrap; align-self: stretch; row-gap: 0 !important; }
+    .fit-saveall > .b-btn { flex: none; }
+    .fit-saveall > .fit-saveall-status { order: 1; flex-basis: 100%; }
+    .fit-saveall > .fit-saveall-status:not(:empty) { margin-top: 0.35rem; }
+    .fit-saveall > ul { order: 2; flex-basis: 100%; min-width: 0; overflow-wrap: anywhere; }
+
+    /* Fit head (tap to open): a 44px target with a 12px arrow. R1 wraps
+       every .b-panel-head on phones, which would push the arrow onto its own
+       line under a long fit name. This head stays on one line and the arrow
+       keeps its place on the right. The title side shrinks: the module count
+       drops below the name, and the name wraps, breaking anywhere if it has
+       no spaces (its min-content would otherwise run past the arrow). */
+    .b-panel-head.fit-head { min-height: 44px; flex-wrap: nowrap; gap: 0.5rem; }
+    .fit-head > .fit-title { min-width: 0; flex-wrap: wrap; }
+    .fit-head > .fit-title > :first-child { min-width: 0; overflow-wrap: anywhere; }
+    .fit-head .fit-arrow { flex: none; font-size: 12px; }
+
+    /* Stats: the zKillboard chip is an m-tap target. As an inline-flex box
+       its ::after arrow is a flex item and loses the space in its content. */
+    .ent-zkb { gap: 0.3em; }
+
+    /* Blueprint filter row (ISS-111): two buttons per line, each on one
+       line. The separator becomes an empty spacer row between the filter
+       and group-by buttons. Inline display, gap and font-size need the
+       !important. The active button's accent border is inline and stays. */
+    .bp-filters { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px !important; }
+    .bp-filters > .b-btn {
+        display: flex; align-items: center; justify-content: center;
+        min-height: 40px; font-size: 12px !important; white-space: nowrap;
+    }
+    .bp-filters > .bp-filter-sep { grid-column: 1 / -1; height: 0; overflow: hidden; }
+}
+/* ── end R2 T3 ── */
+
+/* ── R2 T4 · mining ── */
+@media (max-width: 640px) {
+    /* Ore name (key 1 on By Ore Type and Full Detail) with its icon inline.
+       A key cell is display:block, which would sit the icon on the text
+       baseline and drop the desktop gap; keep the cell a flex line so the
+       icon keeps its size (its inline flex-shrink:0) and only the name
+       ellipsises. */
+    .m-row > [data-m="key"].mining-ore { display: flex !important; align-items: center; }
+    .m-row > .mining-ore > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* "Show all" inside a panel: inset, so its border doesn't double
+       against the panel's own sides and bottom. */
+    .mining-clamp > .m-showall { width: calc(100% - 1.5rem); margin: 0.4rem 0.75rem 0.6rem; }
+}
+/* ── end R2 T4 ── */
+
+/* ── R2 T5 · corporations ── */
+@media (max-width: 640px) {
+    /* Corp header (D9 B): one line. With the scope line hidden and the side
+       block's gap shrunk, the name (.b-card-name, which already ellipsises)
+       gets the width. Child combinators only: the detail body has its own
+       <details><summary>. !important: the page's <style> loads after this
+       file, and the side block's gap is inline. */
+    .corp-accordion > summary .corp-scopes { display: none !important; }
+    .corp-accordion > summary > .corp-sum-side { gap: 0.5rem !important; }
+
+    /* Our Characters: the name and permissions links are 40px tap targets,
+       which also sets the row's height. */
+    .corp-char-row { padding-top: 0; padding-bottom: 0; }
+    .corp-char-row > a { display: inline-flex; align-items: center; min-height: 40px; }
+
+    /* Corp page links (D12 A): a two-column grid of 40px links. The 1px gap
+       over the border colour draws the dividers; an odd last link spans
+       both columns. !important beats the inline flex line. */
+    .corp-subnav {
+        display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1px !important; padding: 0 !important; background: var(--border) !important;
+    }
+    .corp-subnav > a {
+        display: flex; align-items: center; justify-content: center; gap: 0.35rem;
+        min-height: 40px; padding: 0 0.5rem; background: var(--surface);
+        font-size: 12px !important; text-align: center;
+    }
+    .corp-subnav > a:last-child:nth-child(odd) { grid-column: 1 / -1; }
+
+    /* Wallet chart header: the caption drops to its own line under the
+       range buttons. */
+    .corp-wallet-head { flex-wrap: wrap; }
+    .corp-wallet-head > .corp-wallet-caption { order: 1; flex-basis: 100%; }
+
+    /* Industry jobs (D11 A): the tile grid becomes one column, so its 1px
+       gaps read as dividers between rows. Key 1 (product) is 12px, as other
+       phone rows' names, so both keys share one line box. */
+    .corp-jobs { grid-template-columns: minmax(0, 1fr) !important; }
+    .corp-jobs > .m-row > .corp-job-product { font-size: 12px; }
+
+    /* Structures (D10 A): key 1 is the name plus, off the normal state, a
+       badge. Only the name ellipsises, so the badge is never cut off.
+       Beats R1's display:block on key cells. The badge's line-height keeps
+       key 1 no taller than its 12px name. */
+    .m-row > .corp-struct-key[data-m="key"] { display: flex !important; align-items: center; gap: 0.4rem; font-size: 12px; }
+    .corp-struct-key > .corp-struct-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .corp-struct-key > .b-badge { flex: none; line-height: 1.3; }
+    .corp-struct-svcs { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 3px; }
+}
+/* ── end R2 T5 ── */
+
+/* ── R2 T6 · skill plans ── */
+@media (max-width: 640px) {
+    /* ACL rows (D14 A): the row's inline 10px is too small for the keys. */
+    .skp-acl-row > [data-m="key"] { font-size: 12px; }
+
+    /* Attributes (plan rows): the rank multiplier is drawn in the border
+       colour, which all but vanishes on an open row; the open row is the
+       only place a phone shows it, so give it the cell's muted colour. */
+    .skill-row > [data-m-label="Attributes"] span span { color: var(--muted) !important; }
+    /* The shared view's rows aren't m-rows (a public page), so its rank is
+       always on show; on phones it takes the muted colour too. */
+    .skp-shared-rank { color: var(--muted) !important; }
+
+    /* Remove (plan and ACL rows): .b-btn's flex:1 would stretch the 40px ×
+       across the whole open row. */
+    .skill-row > [data-m-label] > .m-tap,
+    .skp-acl-row > [data-m-label] > .m-tap { flex: none; }
+
+    /* Gap rows (D15 A): both keys at 12px. Their desktop spans carry 10–11px
+       inline, and key 1 also takes the 16px phone body size as its line
+       height, so without this the two keys sit at different heights. */
+    .skp-gap-row > [data-m="key"],
+    .skp-gap-row > [data-m="key"] > * { font-size: 12px !important; }
+
+    /* Gap check summary, its totals and the Large-only / Small-only line
+       wrap between phrases instead of overflowing or breaking inside one.
+       row-gap is !important: the inline `gap: 1rem` would space the wrapped
+       lines a full rem apart. */
+    .skp-gap-sum { flex-wrap: wrap; gap: 0.35rem 0.75rem; }
+    .skp-gap-totals, .skp-gap-alt { flex-wrap: wrap; row-gap: 0.2rem !important; }
+
+    /* "Check your character" (gap check on the detail and shared pages): the
+       select takes its own line and Analyze wraps below it. A 16px select is
+       as wide as its longest character name; min-width:0 lets it shrink, and
+       width:100% stops it widening the page column (a form control with a
+       percentage width adds nothing to its column's min-content). */
+    .skp-gap-pick { flex-wrap: wrap; }
+    .skp-gap-pick > select { flex: 1 1 100% !important; min-width: 0; width: 100%; }
+
+    /* Share link: its own full-width line (the inline flex:1 left it 117px
+       wide beside the label and Copy), ending in an ellipsis since it is
+       still longer than a phone is wide; Copy copies all of it. Scoped:
+       other pages reuse the #share-url id. */
+    .skp-share > #share-url {
+        flex: 1 1 100% !important; min-width: 0;
+        white-space: nowrap; text-overflow: ellipsis;
+    }
+
+    /* Skills toolbar (Export, Sort: Name / Optimal / Level): its buttons are
+       m-tap; the toolbar wraps and centres "Sort:" on them, at 12px rather
+       than the inline 9px. */
+    .skp-sortbar { flex-wrap: wrap; align-items: center; font-size: 12px !important; }
+
+    /* Add Skill / Add from Ship typeahead: 40px rows at 12px. The dropdown
+       is absolutely positioned inside a panel that clips (overflow:hidden,
+       and the phone safety net's overflow-x:auto), so it would be cut off
+       at the panel's bottom edge; on phones it sits in the flow instead and
+       pushes the controls below it down. */
+    .skp-results { position: static !important; }
+    .skp-ta-row {
+        display: flex; align-items: center; min-height: 40px;
+        font-size: 12px !important; text-align: left;
+    }
+}
+/* ── end R2 T6 ── */
+
+/* ── R2 P · polish B ── */
+@media (max-width: 640px) {
+    /* Wallet journal rows (journal.html and the overview's Recent
+       Transactions). Key 1 holds only a 9px type badge, but as an inline box
+       the badge sat in a line box of the cell's inherited 16px / 26.4px. The
+       cell stood 8px taller than key 2 (11px) and, centred in the row,
+       started 4px higher. On the overview the badge also sat on that 16px
+       baseline, 2px low. As a shrink-wrapped block the badge leaves the cell
+       no line box of its own, so the cell is the badge's height and both
+       keys centre on one line. A long type ellipsises inside its border.
+       !important beats the journal badge's inline display and 120px cap. */
+    .m-row > [data-m="key"] > .journal-type,
+    .m-row > [data-m="key"] > .ref-type {
+        display: block !important; width: fit-content; max-width: 100% !important;
+        overflow: hidden; text-overflow: ellipsis;
+    }
+
+    /* Dashboard Combat Profile, Ship Usage Stream: as on the character
+       overview (R2 T1), the legend sits below the plot on phones and would
+       take half of the desktop 200px box. !important beats the inline
+       height. */
+    .dash-cp-stream { height: 280px !important; }
+
+    /* Dashboard phone toolbar, Table view: the Sort group (the select plus
+       the 40px reverse button) takes 1.5 shares of the row to View's 1, so
+       the longest column name ("Corporation") fits in the closed select at
+       360px. View's longest option is 8 characters. !important beats the
+       inline flex shorthand. */
+    .dash-phone-toolbar > .dash-phone-tsort { flex-grow: 1.5 !important; }
+
+    /* Fittings, a fit's actions row: a status message ("Save failed — try
+       again.") takes its own full-width line under the buttons instead of
+       squeezing them, as the Save all group does (R2 T3). row-gap 0 beats
+       the inline gap, so the empty status, an aria-live region that stays
+       displayed, adds no height. */
+    .fit-actions { flex-wrap: wrap; row-gap: 0 !important; }
+    .fit-actions > .save-one-status { flex-basis: 100%; }
+    .fit-actions > .save-one-status:not(:empty) { margin-top: 0.35rem; }
+}
+/* ── end R2 P ── */
+
+/* ── m-hide wins ties: keep this the last phone rule in the file ── */
+@media (max-width: 640px) {
+    .m-hide, .m-tabs-desktop { display: none !important; }
 }

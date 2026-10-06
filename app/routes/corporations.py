@@ -87,8 +87,27 @@ def _fuel_remaining(fuel_expires_str: str | None) -> str | None:
         return None
 
 
+def _fuel_level(fuel_remaining: str | None) -> str:
+    """How urgent a _fuel_remaining() value is: "danger" once it has run
+    out, "warn" with under two days left ("Nh", or "1d Nh"), otherwise "".
+    Anything else, None included, is "". Under a day reads "Nh", with no day
+    part: the template used to test startswith('0d'), which never matched,
+    so the most urgent case showed in the plain colour (ISS-113)."""
+    if fuel_remaining == "EXPIRED":
+        return "danger"
+    if not fuel_remaining:
+        return ""
+    if fuel_remaining.endswith("h") and fuel_remaining[:-1].isdigit():
+        return "warn"
+    days, sep, hours = fuel_remaining.partition("d ")
+    if sep and days.isdigit() and hours.endswith("h") and hours[:-1].isdigit():
+        return "warn" if int(days) < 2 else ""
+    return ""
+
+
 templates.env.filters["format_isk"] = _format_isk
 templates.env.filters["fuel_remaining"] = _fuel_remaining
+templates.env.filters["fuel_level"] = _fuel_level
 templates.env.globals["STRUCTURE_STATE_CLASS"] = STRUCTURE_STATE_CLASS
 
 

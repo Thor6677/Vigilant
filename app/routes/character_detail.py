@@ -1507,7 +1507,10 @@ async def _enrich_missing_with_training(db: AsyncSession, fits: list[dict]) -> N
     not one per skill) and `time_str` (approx., default attributes — see
     _CANFLY_DEFAULT_ATTR). Also sets `fit["missing_training_minutes"]`, the
     sum across all of that fit's missing entries — T-077's sort key for
-    "fewest/shortest missing training first" (see character_can_fly()).
+    "fewest/shortest missing training first" (see character_can_fly()) —
+    and `fit["missing_training_str"]`, that sum formatted, which phones show
+    as the card's second key (mobile R2). The early return below leaves
+    both unset, so the template reads the string with f.get().
     """
     all_skill_ids: set[int] = set()
     for f in fits:
@@ -1539,6 +1542,7 @@ async def _enrich_missing_with_training(db: AsyncSession, fits: list[dict]) -> N
             m["time_str"] = _format_train_duration(minutes)
             total_minutes += minutes
         f["missing_training_minutes"] = total_minutes
+        f["missing_training_str"] = _format_train_duration(total_minutes)
 
 
 @router.get("/character/{character_id}/can-fly", response_class=HTMLResponse)

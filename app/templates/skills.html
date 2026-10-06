@@ -67,18 +67,19 @@
         <div class="b-panel-head">
             <span class="b-label">Queue Summary</span>
         </div>
-        <div style="display:flex;text-align:center;">
-            <div style="flex:1;padding:0.75rem;border-right:1px solid var(--border);">
-                <div style="font-size:16px;font-weight:300;color:var(--text);">{{ queue_items | length }}</div>
-                <div style="font-size:9px;letter-spacing:0.14em;text-transform:uppercase;color:var(--muted);margin-top:3px;">Skills</div>
+        {# Phones (D6 A): each tile becomes a label · value line (R2 T2 in site.css). #}
+        <div class="skills-tiles" style="display:flex;text-align:center;">
+            <div class="skills-tile" style="flex:1;padding:0.75rem;border-right:1px solid var(--border);">
+                <div class="skills-tile-value" style="font-size:16px;font-weight:300;color:var(--text);">{{ queue_items | length }}</div>
+                <div class="skills-tile-label" style="font-size:9px;letter-spacing:0.14em;text-transform:uppercase;color:var(--muted);margin-top:3px;">Skills</div>
             </div>
-            <div style="flex:1;padding:0.75rem;border-right:1px solid var(--border);">
-                <div style="font-size:16px;font-weight:300;color:var(--text);">{{ current_time_str }}</div>
-                <div style="font-size:9px;letter-spacing:0.14em;text-transform:uppercase;color:var(--muted);margin-top:3px;">Current</div>
+            <div class="skills-tile" style="flex:1;padding:0.75rem;border-right:1px solid var(--border);">
+                <div class="skills-tile-value" style="font-size:16px;font-weight:300;color:var(--text);">{{ current_time_str }}</div>
+                <div class="skills-tile-label" style="font-size:9px;letter-spacing:0.14em;text-transform:uppercase;color:var(--muted);margin-top:3px;">Current</div>
             </div>
-            <div style="flex:1;padding:0.75rem;">
-                <div style="font-size:16px;font-weight:300;color:var(--success);">{{ optimal_time_str }}</div>
-                <div style="font-size:9px;letter-spacing:0.14em;text-transform:uppercase;color:var(--muted);margin-top:3px;">Optimal</div>
+            <div class="skills-tile" style="flex:1;padding:0.75rem;">
+                <div class="skills-tile-value" style="font-size:16px;font-weight:300;color:var(--success);">{{ optimal_time_str }}</div>
+                <div class="skills-tile-label" style="font-size:9px;letter-spacing:0.14em;text-transform:uppercase;color:var(--muted);margin-top:3px;">Optimal</div>
             </div>
         </div>
         {% if time_saved > 1 %}
@@ -122,7 +123,7 @@
             <span class="b-label">What-If Remap</span>
             <span id="remap-points" class="b-muted-sm">Points: 99/99</span>
         </div>
-        <div style="padding:0.75rem;display:flex;flex-wrap:wrap;gap:1.25rem;align-items:flex-end;">
+        <div class="m-stack" style="padding:0.75rem;display:flex;flex-wrap:wrap;gap:1.25rem;align-items:flex-end;">
             {% for i in range(5) %}
             <div style="display:flex;flex-direction:column;gap:3px;flex:1;min-width:100px;">
                 <label style="font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">
@@ -160,27 +161,45 @@
             <span class="b-muted-sm">{{ current_time_str }} total</span>
         </div>
 
-        <div class="b-table-row" style="border-bottom:2px solid var(--border);">
+        <div class="b-table-row m-head" style="border-bottom:2px solid var(--border);">
             <span style="flex:3;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Skill</span>
             <span style="flex:1;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Attributes</span>
             <span style="flex:0 0 60px;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">SP</span>
             <span style="flex:0 0 90px;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Time</span>
         </div>
 
-        {% for q in queue_items %}
-        <div class="b-table-row">
-            <span style="flex:3;display:flex;align-items:center;gap:0.4rem;">
-                <span style="font-size:11px;color:var(--text);">{{ q.name }}</span>
-                <span style="font-size:10px;color:var(--accent);">{{ ['', 'I', 'II', 'III', 'IV', 'V'][q.level] }}</span>
-            </span>
-            <span style="flex:1;font-size:9px;color:var(--muted);">
-                {{ q.primary_name[:3] }}/{{ q.secondary_name[:3] }}
-                <span style="color:var(--border);">×{{ q.rank }}</span>
-            </span>
-            <span style="flex:0 0 60px;text-align:right;font-size:10px;color:var(--muted);">{{ "{:,}".format(q.sp_needed) }}</span>
-            <span style="flex:0 0 90px;text-align:right;font-size:11px;color:var(--text);">{{ q.time_str }}</span>
+        {# Phones (D4 B): key 1 = skill + level (the name ellipsises, the
+           level stays: skills-key in site.css), key 2 = time; open, the
+           full Name (an m-only copy) comes first. The queue holds
+           up to 150 skills, so phones show 10 plus "Show all N". The rows sit
+           directly in .m-clamp (Show all expands the wrap, which must not
+           open them) and the button follows it, so the last row stays its
+           list's last child. #}
+        {% if queue_items %}
+        <div class="m-clamp-wrap skills-queue">
+            <div class="m-clamp">
+                {% for q in queue_items %}
+                {%- set roman = ['', 'I', 'II', 'III', 'IV', 'V'][q.level] %}
+                <div class="b-table-row m-row" data-click="toggleMRow">
+                    <span data-m="key" class="skills-key" style="flex:3;display:flex;align-items:center;gap:0.4rem;">
+                        <span style="font-size:11px;color:var(--text);">{{ q.name }}</span>
+                        <span style="font-size:10px;color:var(--accent);">{{ roman }}</span>
+                    </span>
+                    <span class="m-only" data-m-label="Name">{{ q.name }} {{ roman }}</span>
+                    <span data-m-label="Attributes" style="flex:1;font-size:9px;color:var(--muted);">
+                        <span>{{ q.primary_name[:3] }}/{{ q.secondary_name[:3] }}
+                        <span class="skills-rank" style="color:var(--border);">×{{ q.rank }}</span></span>
+                    </span>
+                    <span data-m-label="SP" style="flex:0 0 60px;text-align:right;font-size:10px;color:var(--muted);">{{ "{:,}".format(q.sp_needed) }}</span>
+                    <span data-m="key" style="flex:0 0 90px;text-align:right;font-size:11px;color:var(--text);">{{ q.time_str }}</span>
+                </div>
+                {% endfor %}
+            </div>
+            {% if queue_items|length > 10 %}
+            <button type="button" class="m-only m-showall" data-click="toggleExpanded" data-toggle-target=".m-clamp-wrap">Show all {{ queue_items|length }}</button>
+            {% endif %}
         </div>
-        {% endfor %}
+        {% endif %}
 
         {% if not queue_items %}
         <div class="b-empty">No active skills in queue</div>

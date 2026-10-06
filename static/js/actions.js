@@ -273,9 +273,32 @@
     // Chart.js must be loaded by the PAGE — for the same nonce reason, a
     // library tag inside a fragment is refused too. Both parents already
     // load it.
+
+    // Phones (mobile R2): a bottom legend gets at most half the chart's
+    // height, and ten 29-character ship names sit one per row there, so only
+    // seven of ten showed. Cut to 20 characters, two fit per row. Only the
+    // legend text changes: each item keeps its datasetIndex (a tap still
+    // hides the right series), and tooltips read the dataset's full label.
+    // Chart.js's own generator is looked up when the legend is built.
+    var _LEGEND_MAX_CHARS = 20;
+    // Only for chart types whose legend uses the default generator (line, bar), not doughnut/pie (Chart.overrides).
+    function _shortLegendLabels(chart) {
+        var items = Chart.defaults.plugins.legend.labels.generateLabels(chart);
+        items.forEach(function (item) {
+            if (item.text && item.text.length > _LEGEND_MAX_CHARS) {
+                item.text = item.text.slice(0, _LEGEND_MAX_CHARS - 1).trimEnd() + '\u2026';
+            }
+        });
+        return items;
+    }
+
     function _combatChart(canvas, kind, d) {
         var palette = ['#c8a951','#5eb1ff','#4ade80','#ee5555','#a855f7',
                        '#fb923c','#22d3ee','#facc15','#f472b6','#94a3b8'];
+        // Phones (≤640px, mobile R2): the doughnut's and the stream chart's
+        // legends go below the chart; beside it they squeeze the plot to a
+        // sliver. Read at render, like the rest of the options.
+        var legendSide = (window.matchMedia && window.matchMedia('(max-width: 640px)').matches) ? 'bottom' : 'right';
         if (kind === 'radar') {
             return new Chart(canvas, {
                 type: 'radar',
@@ -326,7 +349,7 @@
                 options: {
                     responsive: true, maintainAspectRatio: false, cutout: '50%',
                     plugins: {
-                        legend: { position: 'right', labels: { color: '#bfbfbf', font: { size: 10 }, boxWidth: 10 } },
+                        legend: { position: legendSide, labels: { color: '#bfbfbf', font: { size: 10 }, boxWidth: 10 } },
                         tooltip: { callbacks: { label: function (ctx) {
                             var total = data.reduce(function (a, b) { return a + b; }, 0);
                             var pct = total ? (ctx.raw / total * 100).toFixed(0) : 0;
@@ -379,6 +402,8 @@
             var weeks = d.weeks || 0;
             var wLabels = [];
             for (var i = 0; i < weeks; i++) wLabels.push('W' + (i - weeks + 1));
+            var streamLegendLabels = { color: '#bfbfbf', font: { size: 9 }, boxWidth: 8 };
+            if (legendSide === 'bottom') streamLegendLabels.generateLabels = _shortLegendLabels;
             return new Chart(canvas, {
                 type: 'line',
                 data: { labels: wLabels, datasets: datasets },
@@ -389,7 +414,7 @@
                         x: { ticks: { color: '#888', font: { size: 9 }, maxTicksLimit: 10 }, grid: { display: false } },
                         y: { stacked: true, ticks: { color: '#888', font: { size: 9 } }, grid: { color: 'rgba(255,255,255,0.05)' } }
                     },
-                    plugins: { legend: { labels: { color: '#bfbfbf', font: { size: 9 }, boxWidth: 8 }, position: 'right' } }
+                    plugins: { legend: { labels: streamLegendLabels, position: legendSide } }
                 }
             });
         }
@@ -412,6 +437,17 @@
             _combatChart(canvas, canvas.dataset.chartKind, payload);
         });
     };
+
+    // The legend side is read when a chart is built, so crossing the phone
+    // breakpoint (a rotation, a resized window) redraws every combat chart
+    // on the page; renderCombatCharts destroys the old instances first. One
+    // listener per page, however many times this file runs.
+    if (window.matchMedia && !window._combatLegendMq) {
+        window._combatLegendMq = window.matchMedia('(max-width: 640px)');
+        var _relayCombatLegends = function () { window.renderCombatCharts(document); };
+        if (window._combatLegendMq.addEventListener) window._combatLegendMq.addEventListener('change', _relayCombatLegends);
+        else if (window._combatLegendMq.addListener) window._combatLegendMq.addListener(_relayCombatLegends);
+    }
 
     // ── Activity history panel (#history-panel) ─────────────────────────
     //
@@ -929,18 +965,21 @@
     if (window._timerBannerInterval) clearInterval(window._timerBannerInterval);
     window._timerBannerInterval = setInterval(window.styleTimerBanners, 1000);
 
-    /* ── Mobile expand-on-tap rows (mobile design §4.3) ──────────────────
-     *
-     * A row tagged class="m-row" data-click="toggleMRow" collapses to its
-     * data-m="key" cells on phones (CSS in site.css); a tap toggles
-     * `is-open`, which reveals its data-m-label cells. Rows that already
-     * expand via toggleExpanded keep that handler, and the CSS treats their
-     * `is-expanded` the same way, so one tap opens both.
-     *
-     * The dispatcher calls fn.call(row, e). A child with its own data-click
-     * (a button) is matched first by closest('[data-click]'), so this never
-     * runs for it. Plain links and form fields are filtered out here so they
-     * keep their own behaviour. */
+})();
+
+/* ── Mobile expand-on-tap rows (mobile design §4.3) ──────────────────
+ *
+ * A row tagged class="m-row" data-click="toggleMRow" collapses to its
+ * data-m="key" cells on phones (CSS in site.css); a tap toggles
+ * `is-open`, which reveals its data-m-label cells. Rows that already
+ * expand via toggleExpanded keep that handler, and the CSS treats their
+ * `is-expanded` the same way, so one tap opens both.
+ *
+ * The dispatcher calls fn.call(row, e). A child with its own data-click
+ * (a button) is matched first by closest('[data-click]'), so this never
+ * runs for it. Plain links and form fields are filtered out here so they
+ * keep their own behaviour. */
+(function () {
     var M_PHONE = window.matchMedia ? window.matchMedia('(max-width: 640px)') : null;
     var M_INTERACTIVE = 'a, button, input, select, textarea, label, summary';
 

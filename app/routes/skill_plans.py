@@ -1215,7 +1215,7 @@ async def search_skills_api(request: Request, db: AsyncSession = Depends(get_db)
     for r in results:
         safe_name = escape(r["type_name"], quote=True)
         html.append(
-            f'<div class="b-hover-border" style="padding:0.25rem 0.5rem;font-size:10px;color:var(--text);'
+            f'<div class="b-hover-border skp-ta-row" style="padding:0.25rem 0.5rem;font-size:10px;color:var(--text);'
             f'cursor:pointer;border-bottom:1px solid var(--border);" '
             f'data-id="{r["type_id"]}" data-name="{safe_name}" '
             f'data-click="selectSkill">'
@@ -1252,7 +1252,7 @@ async def search_ships_api(request: Request, db: AsyncSession = Depends(get_db))
     for r in rows:
         safe_name = escape(r.type_name, quote=True)
         html.append(
-            f'<div class="b-hover-border" style="padding:0.25rem 0.5rem;font-size:10px;color:var(--text);'
+            f'<div class="b-hover-border skp-ta-row" style="padding:0.25rem 0.5rem;font-size:10px;color:var(--text);'
             f'cursor:pointer;border-bottom:1px solid var(--border);" '
             f'data-id="{r.type_id}" data-name="{safe_name}" '
             f'data-click="selectShip">'

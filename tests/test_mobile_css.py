@@ -2,10 +2,15 @@
 
 These read the stylesheet as text. They pin the rules every phone layout in
 the app depends on, so a later edit can't silently drop one."""
-import os
 import re
 
-_SITE_CSS = os.path.join(os.path.dirname(__file__), "..", "static", "css", "site.css")
+import pytest
+
+from tests._mobile import SITE_CSS as _SITE_CSS
+from tests._mobile import css_section, phone_block
+from tests._mobile import rule_bodies as _pb_rule_bodies
+from tests._mobile import selectors as _pb_selectors
+
 PHONE = "max-width: 640px"
 
 
@@ -91,10 +96,37 @@ def test_open_states_exclude_link_rows():
     assert ".is-expanded > .m-row:not(.m-row--link) > [data-m-label]" in phone
 
 
+_M_HIDE = [".m-hide", ".m-tabs-desktop"]
+_DISPLAY_IMPORTANT = re.compile(r"(?<![-\w])display\s*:[^;]*!important")
+
+
+def _phone_rules() -> list[tuple[list[str], str]]:
+    """(selectors, body) for every rule in the phone @media blocks, in file
+    order. Selector lists are split by _pb_selectors (tests._mobile's
+    selectors()), which keeps the commas inside :not(a, b) together."""
+    return [(_pb_selectors(m.group(1)), m.group(2))
+            for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", _phone())]
+
+
 def test_m_hide_is_last_phone_utility():
-    phone = _phone()
-    i = phone.rindex(".m-hide")
-    assert i > phone.index(".m-tap") and i > phone.index(".m-pair")
+    """m-hide wins every tie: no phone rule after the final `.m-hide,
+    .m-tabs-desktop` block sets `display: … !important`, so on the same
+    element it beats .m-tap, .m-pair, .m-stack and anything an R2 page
+    section adds. The final block re-declares the original rule at the end
+    of the file for exactly that.
+
+    Specificity still matters: this settles ties only. m-hide on a tagged
+    m-row cell loses to `.m-row > [data-m="key"]` / `[data-m="lead"]`
+    (two selectors against one), per the contract: never hide a tagged cell,
+    hide a wrapper instead."""
+    rules = _phone_rules()
+    hides = [i for i, (sels, _) in enumerate(rules) if sels == _M_HIDE]
+    assert len(hides) >= 2, "expected the original m-hide rule and its final re-declaration"
+    for i in hides:
+        assert re.search(r"display:\s*none\s*!important", rules[i][1])
+    setters = [i for i, (_, body) in enumerate(rules) if _DISPLAY_IMPORTANT.search(body)]
+    assert setters[-1] == hides[-1], (
+        f"{', '.join(rules[setters[-1]][0])} sets display !important after the final m-hide block")
 
 
 def test_utilities_exist():
@@ -229,28 +261,6 @@ _PB_OPEN_STATES = (".m-row.is-open:not(.m-row--link)",
 _PB_NOT_CONTROLS = ":not(input, select, textarea)"
 
 
-def _pb_selectors(prelude: str) -> list[str]:
-    """Split a selector list on its top-level commas (not those in :not())."""
-    out, depth, cur = [], 0, ""
-    for ch in prelude:
-        depth += (ch == "(") - (ch == ")")
-        if ch == "," and depth == 0:
-            out.append(cur.strip())
-            cur = ""
-        else:
-            cur += ch
-    return out + [cur.strip()]
-
-
-def _pb_rule_bodies(css: str, selector: str) -> str:
-    """Joined bodies of every rule whose selector list contains `selector`."""
-    out = []
-    for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", css):
-        if selector in _pb_selectors(m.group(1)):
-            out.append(m.group(2))
-    return "\n".join(out)
-
-
 def test_polish_b_open_row_labelled_values_wrap_in_full():
     """User decision 2026-10-03: an open row shows each labelled value in
     full. The cell and everything in it wrap (long unbroken strings break)
@@ -311,10 +321,12 @@ def test_polish_b_show_all_is_inset_inside_asset_lists():
     assert re.search(r"margin:\s*0\.4rem 0\.75rem 0\.6rem", body)
 
 
-def test_polish_b_journal_type_badge_is_centred_and_uncapped_on_phones():
+def test_polish_b_journal_type_badge_is_uncapped_on_phones():
+    """R2 P makes the badge a block on phones (that lines it up with the
+    amount), so a vertical-align here would be dead."""
     body = _pb_rule_bodies(_phone(), '.m-row > [data-m="key"] > .journal-type')
-    assert re.search(r"vertical-align:\s*middle", body)
     assert re.search(r"max-width:\s*100%\s*!important", body)
+    assert "vertical-align" not in body
 
 
 def test_polish_b_classes_have_no_desktop_rules():
@@ -324,3 +336,78 @@ def test_polish_b_classes_have_no_desktop_rules():
     phone = _phone()
     for cls in (".m-tap", ".journal-type"):
         assert css.count(cls) == phone.count(cls), cls
+
+
+# ── R2 foundation ─────────────────────────────────────────────────────
+# Six R2 page tasks run in parallel worktrees and are cherry-picked back.
+# Each edits only its own seeded section of site.css, which is what keeps
+# those cherry-picks conflict-free. The polish pass's section, P, follows T6.
+
+_R2_SECTIONS = (("T1", "character overview"), ("T2", "skills"),
+                ("T3", "fittings/stats/filters"), ("T4", "mining"),
+                ("T5", "corporations"), ("T6", "skill plans"), ("P", "polish B"))
+_M_HIDE_FINAL = "/* ── m-hide wins ties: keep this the last phone rule in the file ── */"
+
+
+def _raw_css() -> str:
+    with open(_SITE_CSS, encoding="utf-8") as fh:
+        return fh.read()
+
+
+def test_r2_sections_are_seeded_in_order_before_the_final_m_hide():
+    """Each section's header and end marker appear once, in T1…T6, P order.
+    Between them sits exactly one phone @media block, first; a desktop rule,
+    if a task truly needs one, goes after that block's `}` and before the
+    end marker. Braces balance inside each section, and every section comes
+    before the final m-hide block.
+
+    Nothing may follow the final m-hide block: only whitespace and comments.
+    A rule after it, phone-scoped or not (a bare rule, `(max-width:640px)`
+    without the space, `(max-width: 480px)`, `! important`), could undo
+    the tie-break that test_m_hide_is_last_phone_utility can't see."""
+    raw = _raw_css()
+    marks = []
+    for task, page in _R2_SECTIONS:
+        head, end = f"/* ── R2 {task} · {page} ── */", f"/* ── end R2 {task} ── */"
+        assert raw.count(head) == 1, head
+        assert raw.count(end) == 1, end
+        marks.append((raw.index(head), raw.index(end), head, end))
+    flat = [p for start, stop, _, _ in marks for p in (start, stop)]
+    assert flat == sorted(flat), "R2 sections are out of order or overlap"
+    assert raw.count(_M_HIDE_FINAL) == 1
+    assert flat[-1] < raw.index(_M_HIDE_FINAL), "R2 sections must come before the final m-hide block"
+
+    for (task, _), mark in zip(_R2_SECTIONS, marks):
+        head = mark[2]
+        body = css_section(task, raw)
+        preludes = re.findall(r"@media([^{]*)\{", body)
+        assert [p for p in preludes if PHONE in p] == [f" ({PHONE}) "], head
+        try:
+            phone_block(body)   # opens with its phone block, and that block closes
+        except AssertionError as e:
+            raise AssertionError(f"{head}: {e}") from e
+        depth = 0
+        for ch in body:
+            depth += (ch == "{") - (ch == "}")
+            assert depth >= 0, f"{head}: a `}}` closes something outside the section"
+        assert depth == 0, f"{head}: unbalanced braces"
+
+    final = re.sub(r"/\*.*?\*/", "", raw[raw.index(_M_HIDE_FINAL):], flags=re.S)
+    assert re.fullmatch(rf"\s*@media \({PHONE}\) \{{\s*\.m-hide, \.m-tabs-desktop \{{ display: none !important; \}}\s*\}}\s*",
+                        final), "the final m-hide block must follow the R2 sections and end the file"
+
+
+def test_css_section_returns_a_tasks_section_without_comments():
+    for task, _ in _R2_SECTIONS:
+        body = css_section(task)
+        assert body.lstrip().startswith(f"@media ({PHONE}) {{"), task
+        assert "/*" not in body, task
+    sample = ("/* ── R2 T9 · sample ── */\n@media (max-width: 640px) {\n"
+              "    /* why */\n    .a { color: red; }\n}\n/* ── end R2 T9 ── */\n")
+    assert css_section("T9", sample) == "\n@media (max-width: 640px) {\n    \n    .a { color: red; }\n}\n"
+
+
+@pytest.mark.parametrize("task", ["T7", "T0", "T", "t1"])
+def test_css_section_rejects_an_unknown_task(task):
+    with pytest.raises(AssertionError, match=f"R2 {task} section header"):
+        css_section(task)

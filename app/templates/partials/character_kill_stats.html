@@ -36,16 +36,18 @@
     {% else %}
 
     {# ── ISK summary row ─────────────────────────────────────────── #}
-    <div style="display:flex;flex-wrap:wrap;text-align:center;border:1px solid var(--border);margin-bottom:0.75rem;">
-        <div style="flex:1;min-width:120px;padding:0.75rem;border-right:1px solid var(--border);">
+    {# Phones (mobile R2, D6): one column of label/value lines, styled by
+       .ks-isk / .ks-isk-tile in site.css's R2 T1 section. #}
+    <div class="ks-isk" style="display:flex;flex-wrap:wrap;text-align:center;border:1px solid var(--border);margin-bottom:0.75rem;">
+        <div class="ks-isk-tile" style="flex:1;min-width:120px;padding:0.75rem;border-right:1px solid var(--border);">
             <div style="font-size:18px;font-weight:300;color:var(--success);">{{ fmt_isk(summary['isk_destroyed']) }}</div>
             <div style="font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--muted);margin-top:3px;">ISK Destroyed</div>
         </div>
-        <div style="flex:1;min-width:120px;padding:0.75rem;border-right:1px solid var(--border);">
+        <div class="ks-isk-tile" style="flex:1;min-width:120px;padding:0.75rem;border-right:1px solid var(--border);">
             <div style="font-size:18px;font-weight:300;color:var(--danger);">{{ fmt_isk(summary['isk_lost']) }}</div>
             <div style="font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--muted);margin-top:3px;">ISK Lost</div>
         </div>
-        <div style="flex:1;min-width:120px;padding:0.75rem;">
+        <div class="ks-isk-tile" style="flex:1;min-width:120px;padding:0.75rem;">
             {% set tot_isk = summary['isk_destroyed'] + summary['isk_lost'] %}
             {% if tot_isk > 0 %}
             <div style="font-size:18px;font-weight:300;color:var(--text);">{{ (summary['isk_destroyed'] / tot_isk * 100) | round(0) | int }}%</div>
@@ -250,7 +252,9 @@
     </div>
 
     {# ── Radar + Loss Autopsy + Profitability (Chart.js) ────────── #}
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:0.75rem;margin-bottom:0.75rem;">
+    {# min(280px,100%): a phone narrower than a 280px track gets one full-width
+       column instead of overflowing; wider screens lay out as before. #}
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(280px,100%),1fr));gap:0.75rem;margin-bottom:0.75rem;">
 
         <div class="b-panel b-pad-md">
             <div class="b-panel-head" style="margin-bottom:0.5rem;"><span class="b-label">Combat Profile</span></div>
@@ -299,7 +303,9 @@
             <span class="b-label">Ship Usage Stream · 180d</span>
             <span class="b-label" style="color:var(--muted);font-size:9px;">weekly · top 10 ships</span>
         </div>
-        <div style="position:relative;height:200px;">
+        {# Phones: the legend sits below the plot, so the box is taller
+           there (.ks-stream in site.css R2 T1). #}
+        <div class="ks-stream" style="position:relative;height:200px;">
             <canvas id="stream-{{ character_id }}" data-chart-kind="stream"
                     data-chart="{{ {'datasets': ts_datasets, 'weeks': ts_weeks}|tojson|forceescape }}"></canvas>
         </div>
