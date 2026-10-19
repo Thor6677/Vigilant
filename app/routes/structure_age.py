@@ -4,6 +4,7 @@ history + triff.tools calibration data, plus admin-approved user points.
 Past the newest point it extrapolates at the recent ID rate
 (app/intel/structure_age_check.py)."""
 
+import logging
 import re
 from datetime import datetime, timedelta, timezone
 
@@ -11,10 +12,14 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import StructureAgeCalibration, get_db
+from app.db.models import StructureAgeCalibration, StructureAgeSubmission, get_db
 from app.intel import structure_age_check as sac
+from app.routes.admin import _log_audit
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["tools"])
 templates = Jinja2Templates(directory="app/templates")
@@ -184,8 +189,32 @@ async def _build_ctx(request: Request, db: AsyncSession, paste: str) -> dict:
                     "low_str": est["low"].strftime("%d %b %Y"),
                     "high_str": est["high"].strftime("%d %b %Y"),
                 }
+                if request.session.get("user_id"):
+                    ctx["submit"] = await _submit_state(db, sid)
 
     return ctx
+
+
+def _form_state(structure_id: int, anchor_date: str = "", certainty: str = "day",
+                error: str | None = None) -> dict:
+    return {"state": "form", "structure_id": structure_id, "anchor_date": anchor_date,
+            "certainty": certainty, "error": error,
+            "options": list(sac.CERTAINTY_LABELS.items())}
+
+
+async def _submit_state(db: AsyncSession, structure_id: int) -> dict:
+    """What the "Know when it was anchored?" box shows for this ID."""
+    row = await db.get(StructureAgeCalibration, structure_id)
+    if row is not None:
+        return {"state": "confirmed", "user_point": row.source == "user"}
+    if await sac.pending_for(db, structure_id):
+        return {"state": "pending"}
+    return _form_state(structure_id)
+
+
+def _box(request: Request, submit: dict):
+    return templates.TemplateResponse(
+        request, "partials/structure_age_submit.html", {"submit": submit})
 
 
 @router.get("/tools/structure-age", response_class=HTMLResponse)
@@ -203,3 +232,64 @@ async def structure_age_partial(request: Request, paste: str = "",
     """Result card only — embedded via htmx on the wormhole system page."""
     return templates.TemplateResponse(
         request, "structure_age_result.html", await _build_ctx(request, db, paste))
+
+
+@router.post("/tools/structure-age/submit", response_class=HTMLResponse)
+async def structure_age_submit(request: Request, db: AsyncSession = Depends(get_db)):
+    """Record a logged-in user's claimed anchor date as a pending submission.
+
+    Refusals answer 200 with the box re-rendered: htmx doesn't swap a 4xx
+    body, and base.html's ISS-007 handler would turn it into an error pill.
+    Only "no session" is a 401, like the other login-only tool POSTs. A
+    refused attempt writes nothing — not even an audit row — so retrying
+    can't flood anything (spec §7 S10)."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("", status_code=401)
+
+    form = await request.form()
+    sid = sac.parse_structure_id(str(form.get("structure_id") or ""))
+    raw_date = str(form.get("anchor_date") or "").strip()[:32]
+    certainty = str(form.get("certainty") or "")
+    if sid is None:
+        return _box(request, {"state": "error",
+                              "error": "That structure ID isn't valid — paste the showinfo link again."})
+    keep = certainty if certainty in sac.CERTAINTY_DAYS else "day"
+    anchor = sac.parse_anchor_date(raw_date)
+    if anchor is None:
+        return _box(request, _form_state(sid, raw_date, keep, "Enter the date as YYYY-MM-DD (UTC)."))
+    if certainty not in sac.CERTAINTY_DAYS:
+        return _box(request, _form_state(sid, raw_date, keep, "Pick how sure you are."))
+
+    verdict = await sac.check_submission(db, sid, anchor, user_id)
+    if not verdict.ok:
+        log.info("structure_age submit refused: user=%s id=%s date=%s: %s",
+                 user_id, sid, anchor, verdict.reason)
+        if verdict.code in ("confirmed", "pending"):
+            return _box(request, await _submit_state(db, sid))
+        return _box(request, _form_state(sid, raw_date, certainty, verdict.reason))
+
+    db.add(StructureAgeSubmission(
+        structure_id=sid, anchor_date=anchor, certainty=certainty, status="pending",
+        expected_date=verdict.window.expected, submitted_by=user_id,
+        submitted_at=datetime.now(timezone.utc).replace(tzinfo=None)))
+    try:
+        await db.flush()
+    except IntegrityError:
+        # Another submission for this ID landed between the check and here.
+        await db.rollback()
+        return _box(request, {"state": "pending"})
+    # The cap was counted before the insert, so two submits racing from one
+    # user could both pass it. The INSERT took SQLite's single write lock,
+    # so this recount sees every committed row and holds the cap.
+    mine = await db.scalar(select(func.count()).select_from(StructureAgeSubmission).where(
+        StructureAgeSubmission.submitted_by == user_id,
+        StructureAgeSubmission.status == "pending"))
+    if mine > sac.MAX_PENDING_PER_USER:
+        await db.rollback()
+        return _box(request, _form_state(sid, raw_date, certainty, sac.LIMIT_MSG))
+    # _log_audit commits — the submission and its audit row land together.
+    await _log_audit(db, "structure_age_submit", user_id,
+                     detail=f"{sid} anchored {anchor.isoformat()} ({certainty})",
+                     ip=request.client.host if request.client else None)
+    return _box(request, {"state": "sent"})
