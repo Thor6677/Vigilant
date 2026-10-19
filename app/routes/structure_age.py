@@ -24,7 +24,7 @@ def _parse_showinfo(text: str) -> dict:
     """Extract structure_id, jcode, and corp_name from an in-game showinfo paste."""
     text = text.strip()
     m = re.search(r'//([0-9]{10,})>', text) or re.search(r'\b([0-9]{10,})\b', text)
-    digits = m.group(1).lstrip("0") or "0" if m else None
+    digits = (m.group(1).lstrip("0") or "0") if m else None
     # Past 19 digits it's beyond INT64 whatever the digits are, and int()
     # refuses strings over 4300 digits — so those aren't converted at all.
     if digits is None:
@@ -43,6 +43,17 @@ def _parse_showinfo(text: str) -> dict:
     corp_name = m.group(1).strip() if m else None
 
     return {"structure_id": structure_id, "jcode": jcode, "corp_name": corp_name}
+
+
+def _capped(est: dict) -> dict:
+    """No latest date after today. A recent user point's window ("roughly
+    that month" is ±15 days), or an ID interpolated next to one, can reach
+    past it; days_wide then follows the span actually shown."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if est["high"] <= now:
+        return est
+    return {**est, "high": now,
+            "days_wide": round((now - est["low"]).total_seconds() / 86400, 1)}
 
 
 async def _estimate(db: AsyncSession, structure_id: int) -> dict:
@@ -70,17 +81,16 @@ async def _estimate(db: AsyncSession, structure_id: int) -> dict:
     if lower is None and upper is None:
         return {"error": "Calibration table is empty — run the scraper first."}
 
-    # Exact hit. A recent user point's window can reach past today ("roughly
-    # that month" is ±15 days); the latest possible date is still today.
+    # Exact hit
     if lower and lower.structure_id == structure_id:
-        return {
+        return _capped({
             "method": "exact",
             "mid": lower.anchor_mid,
             "low": lower.anchor_low,
-            "high": min(lower.anchor_high, datetime.now(timezone.utc).replace(tzinfo=None)),
+            "high": lower.anchor_high,
             "days_wide": lower.days_wide,
             "source": lower.source,
-        }
+        })
 
     # Beyond range
     if lower is None:
@@ -123,13 +133,13 @@ async def _estimate(db: AsyncSession, structure_id: int) -> dict:
     low = mid - timedelta(seconds=window_secs / 2)
     high = mid + timedelta(seconds=window_secs / 2)
 
-    return {
+    return _capped({
         "method": "interpolate",
         "mid": mid,
         "low": low,
         "high": high,
         "days_wide": round(days_wide, 1),
-    }
+    })
 
 
 def _age_str(anchor_mid: datetime) -> str:

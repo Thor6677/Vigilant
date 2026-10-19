@@ -313,6 +313,25 @@ def test_impossible_dates_and_ids_are_refused():
     assert _check(NEWEST_ID + 200 * RATE, t - timedelta(days=1), on=t).code == "frontier"
 
 
+async def _late_2016(db):
+    """25 triff points from 1.021e12, one a day from 17 Nov 2016 — the real
+    table's oldest corner."""
+    for i in range(25):
+        db.add(StructureAgeCalibration(**{**sac.calibration_values(
+            1_021_010_094_060 + i * RATE, date(2016, 11, 17) + timedelta(days=i), "day",
+            datetime(2026, 6, 6)), "source": "triff"}))
+    await db.commit()
+
+
+def test_an_id_that_extrapolates_to_before_the_citadel_release_isnt_upwell():
+    """Below the oldest point the window is moved back at today's rate. Far
+    enough below, even its latest date is before the Citadel release — the
+    window would read backwards — so the ID isn't an Upwell structure."""
+    v = _check(1_010_000_000_000, date(2016, 6, 1), setup=_late_2016)
+    assert v.code == "invalid" and v.reason == sac.NOT_UPWELL_MSG
+    assert _check(1_020_500_000_000, date(2016, 10, 1), setup=_late_2016).ok
+
+
 def test_ids_with_a_point_or_a_pending_claim_are_refused():
     assert _check(point_id(50), point_date(50)).code == "confirmed"
 

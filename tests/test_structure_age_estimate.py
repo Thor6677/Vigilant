@@ -2,6 +2,7 @@
 user-submitted tag, the window label and the live point count. Runs against
 the synthetic table in tests/_structure_age.py. Ids and names are invented."""
 import re
+import time as _time
 from datetime import datetime, time, timedelta, timezone
 
 import pytest
@@ -55,7 +56,17 @@ def test_an_exact_hit_carries_its_source():
     assert _estimate(point_id(50))["source"] == "triff"
 
 
-def test_interpolation_between_points_is_unchanged():
+@pytest.fixture
+def far_from_utc(monkeypatch):
+    """Naive UTC read as local time only shows on a non-UTC host; CI is UTC."""
+    monkeypatch.setenv("TZ", "Pacific/Auckland")
+    _time.tzset()
+    yield
+    monkeypatch.undo()
+    _time.tzset()
+
+
+def test_interpolation_between_points_is_unchanged(far_from_utc):
     est = _estimate(point_id(100) + RATE // 2)
     assert est["method"] == "interpolate"
     assert est["mid"] == datetime.combine(point_date(100), time()) + timedelta(hours=12)
@@ -69,6 +80,10 @@ def test_an_exact_user_point_never_shows_a_latest_date_after_today():
         await db.commit()
     est = _estimate(NEWEST_ID + RATE, setup=recent_month_point)
     assert est["method"] == "exact" and est["high"].date() <= today()
+    assert est["days_wide"] < 30                 # the span actually shown
+    # An ID interpolated just below that point is capped the same way.
+    est = _estimate(NEWEST_ID + RATE - 1, setup=recent_month_point)
+    assert est["method"] == "interpolate" and est["high"].date() <= today()
 
 
 def test_age_reads_naturally_for_recent_dates():

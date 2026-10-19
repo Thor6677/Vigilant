@@ -157,8 +157,10 @@ def window_for(structure_id: int, neighbours, rate: float, today: date, *,
     anchor_mid) calibration neighbours. The allowance is TOLERANCE_DAYS plus
     TAIL_SPREAD per day of IDs to the neighbours, capped at today and floored
     at the Citadel release. None when a tail ID (nothing above it) lands more
-    than FUTURE_SLACK_DAYS after today. Callers apply UPWELL_FLOOR_ID; an ID
-    far below the table can give low > high."""
+    than FUTURE_SLACK_DAYS after today. An ID far below the table, moved
+    back at today's (higher than 2016's) rate, can come out with low > high:
+    even its latest plausible date is before the Citadel release.
+    check_submission treats that as not an Upwell structure."""
     expected_ord, gap = _expected(structure_id, neighbours, rate)
     if tail and _past_frontier(expected_ord, today):
         return None
@@ -289,6 +291,8 @@ async def check_submission(db: AsyncSession, structure_id: int, anchor_date: dat
         return Verdict(False, "There's no calibration data to check this against yet.", "empty")
     if window is None:
         return Verdict(False, FRONTIER_MSG, "frontier")
+    if window.low > window.high:
+        return Verdict(False, NOT_UPWELL_MSG, "invalid")
     if not window.contains(anchor_date):
         return Verdict(False, f"For this ID the plausible anchor date is "
                               f"{fmt_day(window.low)} – {fmt_day(window.high)}.",
