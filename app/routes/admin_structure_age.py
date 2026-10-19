@@ -9,7 +9,7 @@ their own submissions included (decided 2026-10-18; audited).
 """
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Path, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import delete, func, select, update
@@ -28,6 +28,9 @@ Cal = StructureAgeCalibration
 Sub = StructureAgeSubmission
 LIST_LIMIT = 200
 ALREADY_HAS_POINT = "ID already has a calibration point"
+ALREADY_REVIEWED = "That submission was already reviewed."
+# A submission id from the URL; never bind a bigger int to SQLite.
+SUB_ID = Path(ge=1, le=sac.INT64_MAX)
 
 
 def _now() -> datetime:
@@ -39,8 +42,19 @@ def _ip(request: Request) -> str | None:
 
 
 def _transition(sub_id: int, expected: str, **values):
+    """The one way a submission changes status: only from `expected`, so a
+    double click or two reviewers at once can't apply it twice. RETURNING
+    hands back the claim for the audit line and the approval, so nothing is
+    read off an ORM object a rollback might expire. Keep it the first write
+    in its transaction: with the driver's deferred BEGIN, a read inside the
+    transaction before it would risk SQLITE_BUSY_SNAPSHOT instead of a wait."""
     return (update(Sub).where(Sub.id == sub_id, Sub.status == expected).values(**values)
+            .returning(Sub.structure_id, Sub.anchor_date, Sub.certainty)
             .execution_options(synchronize_session=False))
+
+
+def _claim(sid: int, anchor, certainty: str) -> str:
+    return f"{sid} anchored {anchor.isoformat()} ({certainty})"
 
 
 async def _user_labels(db: AsyncSession, user_ids) -> dict[int, str]:
@@ -113,67 +127,74 @@ async def admin_structure_age(request: Request, db: AsyncSession = Depends(get_d
 
 
 @router.post("/structure-age/{sub_id}/approve", response_class=HTMLResponse)
-async def admin_structure_age_approve(sub_id: int, request: Request,
+async def admin_structure_age_approve(request: Request, sub_id: int = SUB_ID,
                                       db: AsyncSession = Depends(get_db),
                                       admin: User = Depends(require_admin)):
     now = _now()
-    admin_id = admin.id        # the rollback below would expire `admin` too
-    res = await db.execute(_transition(sub_id, "pending", status="approved",
-                                       reviewed_by=admin_id, reviewed_at=now))
-    if res.rowcount != 1:
+    admin_id = admin.id        # a rollback below would expire `admin`
+    claim = (await db.execute(_transition(sub_id, "pending", status="approved",
+                                          reviewed_by=admin_id, reviewed_at=now))).first()
+    if claim is None:
         await db.rollback()
-        return await _render(request, db, "That submission was already reviewed.", False)
-    sub = await db.get(Sub, sub_id)
-    # Copied out now: the rollback below would expire `sub`.
-    sid, anchor, certainty = sub.structure_id, sub.anchor_date, sub.certainty
+        return await _render(request, db, ALREADY_REVIEWED, flash_ok=False)
+    sid, anchor, certainty = claim
     ins = (sqlite_insert(Cal).values(**sac.calibration_values(sid, anchor, certainty, now))
            .on_conflict_do_nothing(index_elements=["structure_id"]))
     if (await db.execute(ins)).rowcount != 1:
         # A calibration point for this ID appeared after the submission.
         await db.rollback()
-        await db.execute(_transition(sub_id, "pending", status="rejected", reviewed_by=admin_id,
-                                     reviewed_at=now, reject_reason=ALREADY_HAS_POINT))
+        rejected = (await db.execute(_transition(
+            sub_id, "pending", status="rejected", reviewed_by=admin_id, reviewed_at=now,
+            reject_reason=ALREADY_HAS_POINT))).first()
+        if rejected is None:
+            # Another reviewer acted in the gap the rollback left.
+            await db.rollback()
+            return await _render(request, db, ALREADY_REVIEWED, flash_ok=False)
         await _log_audit(db, "structure_age_reject", admin_id,
-                         detail=f"#{sub_id} {sid}: {ALREADY_HAS_POINT}", ip=_ip(request))
+                         detail=f"#{sub_id} {_claim(*claim)}: {ALREADY_HAS_POINT} (automatic)",
+                         ip=_ip(request))
         return await _render(request, db, f"{sid}: {ALREADY_HAS_POINT} — submission rejected.",
-                             False)
+                             flash_ok=False)
     await _log_audit(db, "structure_age_approve", admin_id,
-                     detail=f"#{sub_id} {sid} anchored {anchor.isoformat()} ({certainty})",
-                     ip=_ip(request))
+                     detail=f"#{sub_id} {_claim(*claim)}", ip=_ip(request))
     return await _render(request, db, f"Approved {sid}.")
 
 
 @router.post("/structure-age/{sub_id}/reject", response_class=HTMLResponse)
-async def admin_structure_age_reject(sub_id: int, request: Request,
+async def admin_structure_age_reject(request: Request, sub_id: int = SUB_ID,
                                      db: AsyncSession = Depends(get_db),
                                      admin: User = Depends(require_admin)):
     form = await request.form()
     reason = str(form.get("reject_reason") or "").strip()[:200] or None
-    res = await db.execute(_transition(sub_id, "pending", status="rejected", reviewed_by=admin.id,
-                                       reviewed_at=_now(), reject_reason=reason))
-    if res.rowcount != 1:
+    admin_id = admin.id
+    claim = (await db.execute(_transition(sub_id, "pending", status="rejected",
+                                          reviewed_by=admin_id, reviewed_at=_now(),
+                                          reject_reason=reason))).first()
+    if claim is None:
         await db.rollback()
-        return await _render(request, db, "That submission was already reviewed.", False)
-    await _log_audit(db, "structure_age_reject", admin.id,
-                     detail=f"#{sub_id}" + (f": {reason}" if reason else ""), ip=_ip(request))
-    return await _render(request, db, "Rejected.")
+        return await _render(request, db, ALREADY_REVIEWED, flash_ok=False)
+    await _log_audit(db, "structure_age_reject", admin_id,
+                     detail=f"#{sub_id} {_claim(*claim)}" + (f": {reason}" if reason else ""),
+                     ip=_ip(request))
+    return await _render(request, db, f"Rejected {claim[0]}.")
 
 
 @router.post("/structure-age/{sub_id}/remove", response_class=HTMLResponse)
-async def admin_structure_age_remove(sub_id: int, request: Request,
+async def admin_structure_age_remove(request: Request, sub_id: int = SUB_ID,
                                      db: AsyncSession = Depends(get_db),
                                      admin: User = Depends(require_admin)):
-    sub = await db.get(Sub, sub_id)
-    if sub is None or sub.status != "approved":
-        return await _render(request, db, "Only an approved point can be removed.", False)
-    sid = sub.structure_id
-    res = await db.execute(_transition(sub_id, "approved", status="removed",
-                                       reviewed_by=admin.id, reviewed_at=_now()))
-    if res.rowcount != 1:
+    admin_id = admin.id
+    claim = (await db.execute(_transition(sub_id, "approved", status="removed",
+                                          reviewed_by=admin_id, reviewed_at=_now()))).first()
+    if claim is None:
         await db.rollback()
-        return await _render(request, db, "That point was already removed.", False)
+        return await _render(request, db, "Only an approved point can be removed.",
+                             flash_ok=False)
+    sid = claim[0]
     # source='user' only: Remove can never delete a triff point (spec §7 S7).
-    await db.execute(delete(Cal).where(Cal.structure_id == sid, Cal.source == "user"))
-    await _log_audit(db, "structure_age_remove", admin.id, detail=f"#{sub_id} {sid}",
-                     ip=_ip(request))
-    return await _render(request, db, f"Removed {sid}.")
+    gone = (await db.execute(delete(Cal).where(Cal.structure_id == sid,
+                                               Cal.source == "user"))).rowcount
+    note = "" if gone else " — no user point for it was in the table"
+    await _log_audit(db, "structure_age_remove", admin_id,
+                     detail=f"#{sub_id} {_claim(*claim)}{note}", ip=_ip(request))
+    return await _render(request, db, f"Removed {sid}{note}.")

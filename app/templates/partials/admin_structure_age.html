@@ -22,19 +22,22 @@
     {% set s = row['sub'] %}
     <div class="b-row" style="flex-wrap:wrap;gap:0.4rem 1rem;align-items:center;">
         <span class="b-row-label" style="font-family:monospace;">{{ s.structure_id }}</span>
-        <span class="b-row-val">
+        {# white-space:normal: .b-row-val is nowrap+ellipsis on desktop, which
+           would cut off the baseline and the submitter at mid widths. #}
+        <span class="b-row-val" style="white-space:normal;text-align:left;flex:1 1 100%;">
             {{ s.anchor_date.strftime('%d %b %Y') }} · {{ certainty_labels[s.certainty] }}
-            {% if row['check'] %} · expected {{ row['check']['expected'] }} ({{ '%+d'|format(row['check']['days']) }} d){% if not row['check']['in_window'] %} <span style="color:var(--danger);">outside the window now</span>{% endif %}{% endif %}
-            {% if row['baseline'] %} · triff baseline {{ '%+d'|format(row['baseline']['days']) }} d{% else %} · triff baseline n/a{% endif %}
+            {% if row['check'] %} · expected {{ row['check']['expected'] }} ({{ '%+d'|format(row['check']['days']) }} d){% if not row['check']['in_window'] %} <span style="color:var(--danger);">outside the window now</span>{% endif %}{% else %} · expected n/a{% endif %}
+            {% if row['baseline'] %} · <span{% if not row['baseline']['in_window'] %} style="color:var(--danger);"{% endif %}>triff baseline {{ '%+d'|format(row['baseline']['days']) }} d</span>{% else %} · triff baseline n/a{% endif %}
             · by {{ row['by'] }} · {{ s.submitted_at.strftime('%Y-%m-%d %H:%M') }}
         </span>
-        <button type="button" class="b-btn" hx-post="/admin/structure-age/{{ s.id }}/approve"
+        <button type="button" class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;flex:none;"
+                hx-post="/admin/structure-age/{{ s.id }}/approve"
                 hx-target="#admin-content" hx-swap="innerHTML">Approve</button>
         <form hx-post="/admin/structure-age/{{ s.id }}/reject" hx-target="#admin-content" hx-swap="innerHTML"
               style="display:flex;gap:0.4rem;flex-wrap:wrap;">
             <input type="text" name="reject_reason" maxlength="200" placeholder="Reason (optional)"
                    class="sa-input" style="min-height:0;width:14rem;resize:none;">
-            <button type="submit" class="b-btn">Reject</button>
+            <button type="submit" class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid var(--danger);color:var(--danger);font-size:9px;flex:none;">Reject</button>
         </form>
     </div>
     {% else %}
@@ -48,8 +51,9 @@
     {% set s = row['sub'] %}
     <div class="b-row" style="flex-wrap:wrap;gap:0.4rem 1rem;align-items:center;">
         <span class="b-row-label" style="font-family:monospace;">{{ s.structure_id }}</span>
-        <span class="b-row-val">{{ s.anchor_date.strftime('%d %b %Y') }} · {{ certainty_labels[s.certainty] }} · added by {{ row['by'] }} · approved by {{ row['reviewer'] }}</span>
-        <button type="button" class="b-btn" hx-post="/admin/structure-age/{{ s.id }}/remove"
+        <span class="b-row-val" style="white-space:normal;text-align:left;flex:1 1 100%;">{{ s.anchor_date.strftime('%d %b %Y') }} · {{ certainty_labels[s.certainty] }} · added by {{ row['by'] }} · approved by {{ row['reviewer'] }}</span>
+        <button type="button" class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid var(--danger);color:var(--danger);font-size:9px;flex:none;"
+                hx-post="/admin/structure-age/{{ s.id }}/remove"
                 hx-target="#admin-content" hx-swap="innerHTML"
                 hx-confirm="Remove this anchor point? Estimates near it will change.">Remove</button>
     </div>

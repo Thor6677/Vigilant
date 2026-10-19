@@ -1,7 +1,8 @@
 """Admin > Structure Age: reviewing user-submitted anchor points
 (spec §6–§7). Runs against the synthetic table in tests/_structure_age.py.
 Ids and names are invented."""
-from datetime import datetime
+import re
+from datetime import datetime, time, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -126,20 +127,85 @@ def test_remove_never_deletes_a_triff_point(review_db):
                 status="approved", submitted_by=USER, submitted_at=datetime(2026, 10, 1)))
             await db.commit()
     run(approved_over_triff())
-    client(ADMIN).post("/admin/structure-age/2/remove")
+    r = client(ADMIN).post("/admin/structure-age/2/remove")
+    assert "no user point for it was in the table" in r.text
     assert _get(review_db, StructureAgeCalibration, point_id(10)).source == "triff"
     assert _get(review_db, StructureAgeSubmission, 2).status == "removed"
 
 
-def test_review_actions_are_audited(review_db):
+def test_review_actions_are_audited_with_the_claim(review_db):
+    """Spec S14: every review action names the structure ID, date and
+    certainty, so the audit log can be searched by structure."""
+    other = point_id(130) + RATE // 2
+
+    async def second():
+        async with review_db() as db:
+            db.add(StructureAgeSubmission(
+                id=4, structure_id=other, anchor_date=point_date(130), certainty="week",
+                status="pending", submitted_by=USER, submitted_at=datetime(2026, 10, 1)))
+            await db.commit()
+    run(second())
     client(ADMIN).post("/admin/structure-age/1/approve")
     client(ADMIN).post("/admin/structure-age/1/remove")
+    client(ADMIN).post("/admin/structure-age/4/reject", data={"reject_reason": "Sample reason"})
 
     async def events():
         async with review_db() as db:
-            return [r[0] for r in (await db.execute(
-                select(AdminAuditLog.event_type).order_by(AdminAuditLog.id))).all()]
-    assert run(events()) == ["structure_age_approve", "structure_age_remove"]
+            return (await db.execute(select(AdminAuditLog.event_type, AdminAuditLog.detail)
+                                     .order_by(AdminAuditLog.id))).all()
+    rows = run(events())
+    assert [r[0] for r in rows] == ["structure_age_approve", "structure_age_remove",
+                                    "structure_age_reject"]
+    for (_, detail), sid, when in zip(rows, (MID_ID, MID_ID, other),
+                                      (point_date(100), point_date(100), point_date(130))):
+        assert str(sid) in detail and when.isoformat() in detail, detail
+    assert rows[2][1].endswith(": Sample reason")
+
+
+def test_an_oversized_submission_id_is_refused_not_a_500(review_db):
+    for action in ("approve", "reject", "remove"):
+        r = client(ADMIN).post(f"/admin/structure-age/99999999999999999999/{action}")
+        assert r.status_code == 422, action
+
+
+def test_the_triff_baseline_ignores_user_points(review_db):
+    """Spec S5: the queue's second gap is measured against triff points only,
+    so drift from a run of approved user points still shows there after the
+    full table has moved with them."""
+    async def drift():
+        async with review_db() as db:
+            # More than NEIGHBOURS user points around MID_ID, all 40 days late.
+            for i in range(70, 131):
+                mid = datetime.combine(point_date(i) + timedelta(days=40), time())
+                db.add(StructureAgeCalibration(
+                    structure_id=point_id(i) + RATE // 4, anchor_mid=mid, anchor_low=mid,
+                    anchor_high=mid, days_wide=2.0, fetched_at=datetime(2026, 10, 2),
+                    source="user"))
+            await db.commit()
+    run(drift())
+    text = " ".join(client(ADMIN).get("/admin/section/structure-age").text.split())
+    full = int(re.search(r"expected \d\d \w{3} \d{4} \(([+-]\d+) d\)", text).group(1))
+    baseline = int(re.search(r"triff baseline ([+-]\d+) d", text).group(1))
+    assert full <= -10                     # the full table has moved with the user points
+    assert abs(baseline) <= 1              # the triff-only baseline has not
+
+
+def test_who_is_shown_main_character_first_or_removed_user(review_db):
+    async def more():
+        async with review_db() as db:
+            # "Alt Pilot" sorts first, but the main character is the label.
+            db.add(Character(character_id=95000002, character_name="Alt Pilot", user_id=USER,
+                             is_main=False, access_token="x", refresh_token="x",
+                             token_expiry=datetime(2030, 1, 1)))
+            db.add(StructureAgeSubmission(
+                id=3, structure_id=point_id(120) + RATE // 2, anchor_date=point_date(120),
+                certainty="day", status="pending", submitted_by=None,
+                submitted_at=datetime(2026, 10, 1, 10, 0)))
+            await db.commit()
+    run(more())
+    text = client(ADMIN).get("/admin/section/structure-age").text
+    assert "by Sample Pilot" in text and "Alt Pilot" not in text
+    assert "by (removed user)" in text
 
 
 def test_the_tab_is_listed_and_not_auto_refreshed():
