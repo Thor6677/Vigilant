@@ -734,7 +734,9 @@ def test_self_checks_key_set(monkeypatch, tmp_path):
     monkeypatch.setattr(sup, "ROOT", str(tmp_path))
     (tmp_path / ".deployed").write_text("2026-01-01T00:00:00Z v1.2.0\n")
     checks = sup._self_checks()
-    assert set(checks) == {"socket", "git", "compose", "remote", "deployed", "tmp"}
+    # The order is part of the contract too: the panel lists checks in it, and
+    # _check_functions() documents why `git` sits right before `remote`.
+    assert list(checks) == ["socket", "git", "remote", "compose", "deployed", "tmp"]
     assert checks["remote"] == "ok"
     assert checks["tmp"] == "ok"
 
@@ -1085,6 +1087,73 @@ def test_a_heartbeat_follows_each_rerun(monkeypatch):
                               on_progress=lambda: beats.append(list(ran)))
     assert ran == ["socket", "remote", "compose"]
     assert beats == [["socket"], ["socket", "remote"], ["socket", "remote", "compose"]]
+
+
+def test_a_check_that_raises_reads_as_failing(monkeypatch):
+    """refresh runs outside run()'s per-tick guard, so a check that raises
+    something it doesn't catch must become a FAIL, not kill the loop."""
+    import updater.supervisor as sup
+
+    def boom():
+        raise RuntimeError("unexpected")
+    monkeypatch.setattr(sup, "_tmp_check", boom)
+    checks = {"tmp": "FAIL: earlier"}
+    sup.refresh_failed_checks(checks, last_checked=None, now=1.0)
+    assert checks["tmp"] == "FAIL: unexpected"
+
+
+class _StopLoop(Exception):
+    pass
+
+
+def test_run_retries_failing_checks_on_the_interval_and_never_goes_stale(tmp_path, monkeypatch):
+    """run() itself, which is the production fix — not just
+    refresh_failed_checks(). The boot-race failure is re-run once the interval
+    passes and heals; a passing check is never re-run; a check that stays
+    failing keeps being retried; and the heartbeat never goes quieter than the
+    app's staleness window even though every re-run is slow."""
+    import types
+    import updater.supervisor as sup
+    from app.ops.updater import HEARTBEAT_MAX_AGE_SECONDS
+    monkeypatch.setattr(sup, "CONTROL", tmp_path)
+    clock = {"t": 1000.0, "sleeps": 0}
+    runs, beats = [], []
+
+    def sleep(_seconds):
+        clock["sleeps"] += 1
+        if clock["sleeps"] > 60:
+            raise _StopLoop
+        clock["t"] += 10.0
+
+    def slow(name, result):
+        def check():
+            runs.append((name, clock["t"]))
+            clock["t"] += 35.0          # each re-run takes most of a staleness window
+            return result
+        return check
+
+    monkeypatch.setattr(sup, "time", types.SimpleNamespace(time=lambda: clock["t"], sleep=sleep))
+    monkeypatch.setattr(sup, "_read_self_update", lambda: None)
+    monkeypatch.setattr(sup, "_reconcile_self_update", lambda record: record)
+    monkeypatch.setattr(sup, "_reconcile_orphaned_status", lambda: None)
+    monkeypatch.setattr(sup, "_self_checks",
+                        lambda on_progress=None: {"socket": "FAIL: timed out", "git": "ok",
+                                                  "compose": "FAIL: x"})
+    monkeypatch.setattr(sup, "_tick", lambda seen, lock, self_update, beat: self_update)
+    monkeypatch.setattr(sup, "_socket_check", slow("socket", "ok"))
+    monkeypatch.setattr(sup, "_compose_check", slow("compose", "FAIL: still"))
+    monkeypatch.setattr(sup, "_git_check", lambda: pytest.fail("a passing check was re-run"))
+    monkeypatch.setattr(sup, "write_heartbeat",
+                        lambda checks, self_update=None: beats.append((clock["t"], dict(checks))))
+    with pytest.raises(_StopLoop):
+        sup.run()
+
+    assert [name for name, _ in runs if name == "socket"] == ["socket"]   # healed once
+    assert runs[0] == ("socket", 1000.0 + _RECHECK_SECONDS)              # not before the interval
+    assert len([name for name, _ in runs if name == "compose"]) >= 2      # still failing: retried
+    gaps = [later[0] - earlier[0] for earlier, later in zip(beats, beats[1:])]
+    assert max(gaps) <= HEARTBEAT_MAX_AGE_SECONDS
+    assert beats[-1][1]["socket"] == "ok"
 
 
 def test_a_recovered_check_is_not_rerun_again(tmp_path, monkeypatch, git_env):

@@ -128,6 +128,8 @@
             <ul>
               {% for name, result in failed_checks %}<li><b>{{ name }}</b>: {{ result }}</li>{% endfor %}
             </ul>
+            Failing checks are re-run every five minutes, so one that clears up on its
+            own — after a host reboot, say — re-enables the buttons without a restart.
           </div>
         {% endif %}
 

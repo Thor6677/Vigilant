@@ -1069,6 +1069,11 @@ def refresh_failed_checks(checks: dict, last_checked: float | None, now: float,
     re-runs the checks that passed too, putting a `docker version` and a
     `docker compose config` on a timer forever.
 
+    At most one pass per interval: every failing check in the pass is
+    re-run, and the next pass is due an interval after this one STARTED, so a
+    check late in a slow pass is retried slightly sooner than that after its
+    own previous run — never back to back.
+
     This BLOCKS the poll loop for up to the failing checks' timeouts combined
     (15s socket, 15s git, 20s remote, 30s compose), which can exceed the app's
     60s heartbeat staleness window. So `on_progress` — run()'s heartbeat — is
@@ -1081,7 +1086,14 @@ def refresh_failed_checks(checks: dict, last_checked: float | None, now: float,
     functions = _check_functions()
     for name in due:
         previous = checks[name]
-        checks[name] = functions[name]()
+        try:
+            checks[name] = functions[name]()
+        except Exception as e:
+            # This runs outside run()'s per-tick guard, and not every check
+            # catches everything (_tmp_check only catches OSError). A check
+            # that raises must read as failing, not take the loop down.
+            checks[name] = f"FAIL: {e}"
+
         if checks[name] == "ok":
             log.info("%s check recovered (was: %s)", name, previous)
         if on_progress is not None:
@@ -1123,9 +1135,9 @@ def _tmp_check() -> str:
     than each tool quietly following its own fallback rules.
 
     Local and instant: no subprocess, no network, no meaningful ceiling to add
-    to _self_checks()'s startup-latency accounting. It belongs with the
-    one-shot checks, not with `remote`'s rate-limited retry — a /tmp mount
-    that is wrong does not heal itself while the container keeps running.
+    to _self_checks()'s startup-latency accounting. Like every check it is
+    re-run while failing (refresh_failed_checks), though a /tmp mount that is
+    wrong rarely heals itself while the container keeps running.
     """
     tmpdir = os.environ.get("TMPDIR") or "/tmp"
     try:
@@ -1222,8 +1234,8 @@ def _self_checks(on_progress: Callable[[dict], None] | None = None) -> dict:
 
     `on_progress` is called with the checks gathered so far after each one, and
     exists because of the restart gap this function sits in the middle of. Add
-    up the timeouts in the checks above and startup can take 15 + 15 + 20 + 30 = 80 seconds
-    before the first heartbeat is written — longer than the app's
+    up the timeouts in the checks above and startup can take 15 + 15 + 20 + 30
+    = 80 seconds before the first heartbeat is written — longer than the app's
     HEARTBEAT_MAX_AGE_SECONDS of 60, so a sidecar restarting into a bad network
     would make the panel vanish entirely while it came up. Beating after each
     check bounds the gap to the single longest timeout (30s, `compose`) instead

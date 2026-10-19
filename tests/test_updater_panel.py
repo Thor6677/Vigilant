@@ -381,9 +381,14 @@ def test_a_failing_check_disables_the_buttons_visibly():
                             targets=["v1.2.1"])
     update = re.search(r"<button[^>]*>\s*Update to v1\.2\.4", html).group(0)
     assert "disabled" in update
+    assert "re-run every five minutes" in " ".join(html.split())
     css = (Path(__file__).resolve().parent.parent / "static" / "css" / "site.css").read_text()
     assert re.search(r"^\.b-btn:disabled \{[^}]*opacity: 0\.4", css, re.M)
     assert re.search(r"^\.b-btn:disabled::after \{[^}]*animation: none", css, re.M)
+    # Roll back is a ghost button: hovering a disabled one must not light up
+    # its accent border and glow either.
+    assert re.search(r"^\.b-btn\.is-ghost:disabled:hover \{[^}]*border-color: var\(--glass-border\)"
+                     r"[^}]*box-shadow: none", css, re.M)
 
 
 def test_a_lagging_sidecar_adds_no_new_form_or_input():
