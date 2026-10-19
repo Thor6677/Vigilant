@@ -1042,6 +1042,8 @@ class StructureAgeCalibration(Base):
     anchor_high = Column(DateTime, nullable=False)
     days_wide = Column(Float, nullable=False, default=6.0)
     fetched_at = Column(DateTime, nullable=False)
+    # No index on this column: _create_missing_indexes runs before the startup
+    # ALTER on existing databases (same trap the UserFitting docstring describes).
     source = Column(String(8), nullable=False, server_default="triff")
 
 
