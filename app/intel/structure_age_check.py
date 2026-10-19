@@ -3,7 +3,8 @@
 Used three ways: to refuse a user-submitted anchor date that makes no sense
 for its structure ID (app/routes/structure_age.py), to show a reviewer how far
 a pending claim is from the expected date (app/routes/admin_structure_age.py),
-and to estimate IDs newer than the newest calibration point.
+and for the public estimate of IDs past the newest calibration point or next
+to a user point (neighbour_estimate).
 
 Upwell structure IDs are allocated roughly in time order — only roughly.
 Measured on the calibration table in 2026-10: half of all points are within a

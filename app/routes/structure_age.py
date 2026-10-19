@@ -1,8 +1,9 @@
 """Structure Age Estimator — estimates when an Upwell structure was anchored
 from its structure ID, using a local interpolation table built from EVERef
 history + triff.tools calibration data, plus admin-approved user points.
-Past the newest point it extrapolates at the recent ID rate
-(app/intel/structure_age_check.py)."""
+Between triff points it draws a straight line; past the newest point, or
+next to a user point, it takes the median over the nearest points moved
+along the recent ID rate (app/intel/structure_age_check.py)."""
 
 import logging
 import re

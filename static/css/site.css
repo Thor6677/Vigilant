@@ -456,9 +456,12 @@
 .sa-meta-item { display: flex; flex-direction: column; gap: 2px; }
 /* The "Know when it was anchored?" box and the admin reject field reuse
    .sa-input on single-line controls: drop the textarea's 70px floor. That
-   rule outranks the global 44px phone floor, so put 44px back on phones
-   here — an inline min-height would beat both. */
+   rule outranks the global tablet (38px) and phone (44px) floors, so put
+   them back here — an inline min-height would beat all of it. */
 .sa-submit-box .sa-input, .sa-reject .sa-input { min-height: 0; resize: none; }
+@media (max-width: 768px) {
+    .sa-submit-box .sa-input, .sa-reject .sa-input { min-height: 38px; }
+}
 @media (max-width: 640px) {
     .sa-submit-box .sa-input, .sa-reject .sa-input { min-height: 44px; }
 }

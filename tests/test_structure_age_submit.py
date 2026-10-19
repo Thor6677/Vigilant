@@ -62,7 +62,7 @@ def test_the_box_keeps_the_phone_tap_floor(sa_db):
     assert "min-height" not in box
     css = open(SITE_CSS, encoding="utf-8").read()
     rules = css[css.index(".sa-submit-box .sa-input, .sa-reject .sa-input { min-height: 0;"):]
-    assert re.match(r"[^\n]*\n@media \(max-width: 640px\) \{\s*"
+    assert re.search(r"@media \(max-width: 640px\) \{\s*"
                     r"\.sa-submit-box \.sa-input, \.sa-reject \.sa-input \{ min-height: 44px; \}",
                     rules)
 
