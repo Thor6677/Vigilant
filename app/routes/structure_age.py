@@ -108,7 +108,7 @@ async def _estimate(db: AsyncSession, structure_id: int) -> dict:
             "note": "ID is older than our earliest calibration point",
         }
     if upper is None:
-        est = await sac.tail_estimate(db, structure_id)
+        est = await sac.neighbour_estimate(db, structure_id)
         if est is None:
             return {"error": sac.FRONTIER_MSG}
         return {
@@ -117,6 +117,18 @@ async def _estimate(db: AsyncSession, structure_id: int) -> dict:
             "note": "ID is newer than our latest calibration point — "
                     "extrapolated from the recent ID rate",
         }
+
+    # A user point among the two nearest: no straight line to it. IDs run
+    # ~10-45 days noisy, so one honest outlier would drag every estimate
+    # between it and its neighbour and leave a jump at its ID. The
+    # many-point rule gives it one vote; as more are approved they take
+    # over. Stretches of triff points keep the straight line (spec §5).
+    if "user" in (lower.source, upper.source):
+        return _capped({
+            "method": "interpolate",
+            **await sac.neighbour_estimate(db, structure_id),
+            "note": "Estimated from the nearest points, including user-submitted ones",
+        })
 
     # Interpolate between lower and upper
     lo_id, hi_id = lower.structure_id, upper.structure_id
@@ -229,7 +241,8 @@ async def structure_age_page(request: Request, paste: str = "",
 @router.get("/tools/structure-age/partial", response_class=HTMLResponse)
 async def structure_age_partial(request: Request, paste: str = "",
                                 db: AsyncSession = Depends(get_db)):
-    """Result card only — embedded via htmx on the wormhole system page."""
+    """Result card only — embedded via htmx on the wormhole system page and
+    the WH Tracker panel."""
     return templates.TemplateResponse(
         request, "structure_age_result.html", await _build_ctx(request, db, paste))
 
@@ -292,10 +305,7 @@ async def structure_age_submit(request: Request, db: AsyncSession = Depends(get_
     # The cap was counted before the insert, so two submits racing from one
     # user could both pass it. The INSERT took SQLite's single write lock,
     # so this recount sees every committed row and holds the cap.
-    mine = await db.scalar(select(func.count()).select_from(StructureAgeSubmission).where(
-        StructureAgeSubmission.submitted_by == user_id,
-        StructureAgeSubmission.status == "pending"))
-    if mine > sac.MAX_PENDING_PER_USER:
+    if await sac.pending_count(db, user_id) > sac.MAX_PENDING_PER_USER:
         await db.rollback()
         return _box(request, _form_state(sid, echo, certainty, sac.LIMIT_MSG))
     # _log_audit commits — the submission and its audit row land together.

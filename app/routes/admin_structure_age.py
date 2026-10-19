@@ -27,6 +27,9 @@ templates = Jinja2Templates(directory="app/templates")
 Cal = StructureAgeCalibration
 Sub = StructureAgeSubmission
 LIST_LIMIT = 200
+# A gap past a month gets flagged: 2025+ triff points sit within 10 days of
+# their neighbours 95% of the time and within 46 days 99% of the time.
+GAP_FLAG_DAYS = 30
 ALREADY_HAS_POINT = "ID already has a calibration point"
 ALREADY_REVIEWED = "That submission was already reviewed."
 # A submission id from the URL; never bind a bigger int to SQLite.
@@ -79,16 +82,21 @@ def _who(labels: dict[int, str], uid: int | None) -> str:
 
 
 async def _gap(db: AsyncSession, sub, rate: float, sources=None) -> dict | None:
-    """How far the claim sits from the expected date right now."""
+    """How far the claim sits from the expected date right now; None with
+    no points to compare. `beyond` when the ID extrapolates past the
+    frontier on these sources — for the triff baseline that is exactly when
+    drift from a chain of user points would be largest, so it's flagged,
+    not shown as n/a."""
     try:
         window = await sac.plausible_window(db, sub.structure_id, sources=sources, rate=rate)
     except LookupError:
         return None
     if window is None:
-        return None
-    return {"expected": sac.fmt_day(window.expected),
-            "days": (sub.anchor_date - window.expected).days,
-            "in_window": window.contains(sub.anchor_date)}
+        return {"beyond": True}
+    days = (sub.anchor_date - window.expected).days
+    return {"beyond": False, "expected": sac.fmt_day(window.expected), "days": days,
+            "in_window": window.contains(sub.anchor_date),
+            "flag": abs(days) > GAP_FLAG_DAYS or not window.contains(sub.anchor_date)}
 
 
 async def _render(request: Request, db: AsyncSession, flash: str | None = None,
@@ -107,12 +115,18 @@ async def _render(request: Request, db: AsyncSession, flash: str | None = None,
     approved_rows = [{"sub": s, "by": _who(labels, s.submitted_by),
                       "reviewer": _who(labels, s.reviewed_by)} for s in approved]
     newest = await db.scalar(select(func.max(Cal.anchor_mid)))
+    # The triff side on its own: a recent user point would otherwise hide a
+    # stalled upstream behind a fresh "newest anchor".
+    newest_triff = await db.scalar(select(func.max(Cal.anchor_mid)).where(Cal.source == "triff"))
     triff_last = await db.scalar(select(func.max(Cal.fetched_at)).where(Cal.source == "triff"))
     stats = {
         "total": await db.scalar(select(func.count()).select_from(Cal)),
         "from_users": await db.scalar(select(func.count()).select_from(Cal)
                                       .where(Cal.source == "user")),
+        "pending": await db.scalar(select(func.count()).select_from(Sub)
+                                   .where(Sub.status == "pending")),
         "newest": newest.strftime("%d %b %Y") if newest else None,
+        "newest_triff": newest_triff.strftime("%d %b %Y") if newest_triff else None,
         "triff_last": triff_last.strftime("%d %b %Y") if triff_last else None,
     }
     return templates.TemplateResponse(request, "partials/admin_structure_age.html", {
@@ -184,8 +198,8 @@ async def admin_structure_age_remove(request: Request, sub_id: int = SUB_ID,
                                      db: AsyncSession = Depends(get_db),
                                      admin: User = Depends(require_admin)):
     admin_id = admin.id
-    claim = (await db.execute(_transition(sub_id, "approved", status="removed",
-                                          reviewed_by=admin_id, reviewed_at=_now()))).first()
+    # reviewed_by/at keep the approver; who removed it is in the audit log.
+    claim = (await db.execute(_transition(sub_id, "approved", status="removed"))).first()
     if claim is None:
         await db.rollback()
         return await _render(request, db, "Only an approved point can be removed.",

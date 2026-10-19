@@ -454,6 +454,14 @@
 .sa-date-val { font-size: 13px; color: var(--text); font-family: monospace; }
 .sa-meta { display: flex; gap: 2rem; margin-top: 1rem; flex-wrap: wrap; }
 .sa-meta-item { display: flex; flex-direction: column; gap: 2px; }
+/* The "Know when it was anchored?" box and the admin reject field reuse
+   .sa-input on single-line controls: drop the textarea's 70px floor. That
+   rule outranks the global 44px phone floor, so put 44px back on phones
+   here — an inline min-height would beat both. */
+.sa-submit-box .sa-input, .sa-reject .sa-input { min-height: 0; resize: none; }
+@media (max-width: 640px) {
+    .sa-submit-box .sa-input, .sa-reject .sa-input { min-height: 44px; }
+}
 
 /* ── Permission picker (permissions_picker.html) ───────────────────────── */
 .visually-hidden { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }

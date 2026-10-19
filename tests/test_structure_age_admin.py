@@ -10,8 +10,9 @@ from sqlalchemy import select
 from app.db.models import (AdminAuditLog, Character, StructureAgeCalibration,
                            StructureAgeSubmission)
 from tests._mobile import source
-from tests._structure_age import (RATE, client, make_db, override_db, point_date, point_id,
-                                  run)
+from app.intel import structure_age_check as sac
+from tests._structure_age import (NEWEST_ID, RATE, client, make_db, override_db, point_date, point_id,
+                                  run, today)
 
 ADMIN, MANAGER, USER = 4501, 4502, 4503
 MID_ID = point_id(100) + RATE // 2
@@ -113,10 +114,12 @@ def test_a_script_in_a_reject_reason_renders_escaped(review_db):
 
 def test_remove_deletes_the_user_point(review_db):
     client(ADMIN).post("/admin/structure-age/1/approve")
-    r = client(ADMIN).post("/admin/structure-age/1/remove")
+    r = client(MANAGER).post("/admin/structure-age/1/remove")
     assert f"Removed {MID_ID}" in r.text
     assert _get(review_db, StructureAgeCalibration, MID_ID) is None
-    assert _get(review_db, StructureAgeSubmission, 1).status == "removed"
+    sub = _get(review_db, StructureAgeSubmission, 1)
+    # The approver stays on record; who removed it is in the audit log.
+    assert (sub.status, sub.reviewed_by) == ("removed", ADMIN)
 
 
 def test_remove_never_deletes_a_triff_point(review_db):
@@ -185,9 +188,44 @@ def test_the_triff_baseline_ignores_user_points(review_db):
     run(drift())
     text = " ".join(client(ADMIN).get("/admin/section/structure-age").text.split())
     full = int(re.search(r"expected \d\d \w{3} \d{4} \(([+-]\d+) d\)", text).group(1))
-    baseline = int(re.search(r"triff baseline ([+-]\d+) d", text).group(1))
+    baseline = int(re.search(r"triff baseline \d\d \w{3} \d{4} \(([+-]\d+) d\)", text).group(1))
     assert full <= -10                     # the full table has moved with the user points
     assert abs(baseline) <= 1              # the triff-only baseline has not
+
+
+def test_a_big_gap_is_flagged_even_inside_the_window(review_db):
+    """40 days off is inside the ±120-day window, but far past what real
+    neighbours show (p99 ~46 days, p95 ~10): the gap is drawn in red."""
+    async def seed():
+        async with review_db() as db:
+            db.add(StructureAgeSubmission(
+                id=5, structure_id=point_id(140) + RATE // 2,
+                anchor_date=point_date(140) - timedelta(days=40), certainty="day",
+                status="pending", submitted_by=USER, submitted_at=datetime(2026, 10, 1)))
+            await db.commit()
+    run(seed())
+    text = " ".join(client(ADMIN).get("/admin/section/structure-age").text.split())
+    assert re.search(r'<span style="color:var\(--danger\);">expected \d\d \w{3} \d{4} \(-4\d d\)</span>',
+                     text), text
+
+
+def test_the_triff_baseline_is_flagged_when_it_runs_out(review_db):
+    """With approved user points far past the triff data, a claim between
+    them is interior on the full table but past the triff frontier — exactly
+    when drift would be largest. That reads as a flag, not as n/a."""
+    async def seed():
+        async with review_db() as db:
+            db.add(StructureAgeCalibration(**sac.calibration_values(
+                NEWEST_ID + 300 * RATE, today() - timedelta(days=5), "day",
+                datetime(2026, 10, 2))))
+            db.add(StructureAgeSubmission(
+                id=6, structure_id=NEWEST_ID + 250 * RATE,
+                anchor_date=today() - timedelta(days=20), certainty="day",
+                status="pending", submitted_by=USER, submitted_at=datetime(2026, 10, 1)))
+            await db.commit()
+    run(seed())
+    text = " ".join(client(ADMIN).get("/admin/section/structure-age").text.split())
+    assert '<span style="color:var(--danger);">triff baseline: past the end of its data</span>' in text
 
 
 def test_who_is_shown_main_character_first_or_removed_user(review_db):

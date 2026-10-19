@@ -192,7 +192,7 @@ def test_readers_refuse_an_id_too_big_for_sqlite_themselves():
     async def fn(SL):
         async with SL() as db:
             return (await sac.plausible_window(db, sac.INT64_MAX + 1),
-                    await sac.tail_estimate(db, sac.INT64_MAX + 1),
+                    await sac.neighbour_estimate(db, sac.INT64_MAX + 1),
                     await sac.pending_for(db, sac.INT64_MAX + 1))
     assert _with_db(fn) == (None, None, False)
 

@@ -17,16 +17,17 @@
 {% else %}
     <span class="sa-date-lbl">Know when it was anchored?</span>
     <form hx-post="/tools/structure-age/submit" hx-target="closest .sa-submit-box" hx-swap="outerHTML"
+          hx-disabled-elt="find button"
           style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:flex-end;margin-top:0.4rem;">
         <input type="hidden" name="structure_id" value="{{ submit['structure_id'] }}">
         <label class="sa-date-col">
             <span class="sa-date-lbl">Anchored (UTC)</span>
-            <input type="text" name="anchor_date" class="sa-input" style="min-height:0;width:9rem;resize:none;"
+            <input type="text" name="anchor_date" class="sa-input" style="width:9rem;"
                    placeholder="YYYY-MM-DD" maxlength="10" autocomplete="off" value="{{ submit['anchor_date'] }}">
         </label>
         <label class="sa-date-col">
             <span class="sa-date-lbl">How sure?</span>
-            <select name="certainty" class="sa-input" style="min-height:0;width:auto;">
+            <select name="certainty" class="sa-input" style="width:auto;">
                 {% for key, label in submit['options'] %}
                 <option value="{{ key }}"{% if key == submit['certainty'] %} selected{% endif %}>{{ label }}</option>
                 {% endfor %}

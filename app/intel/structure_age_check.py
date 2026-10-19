@@ -37,7 +37,7 @@ NEIGHBOURS = 25              # nearest calibration points taken on each side
 TOLERANCE_DAYS = 120         # allowed distance from the expected date
 TAIL_SPREAD = 0.25           # extra allowance per day of IDs to the neighbours
 FUTURE_SLACK_DAYS = 60       # an ID extrapolating further past today doesn't exist yet
-ESTIMATE_HALF_DAYS = 7       # estimate half-width next to the newest point (triff's tail used ±7)
+ESTIMATE_HALF_DAYS = 7       # estimate half-width right next to its neighbours (triff's tail used ±7)
 RATE_WINDOW_DAYS = 180       # triff points used to fit the ID rate
 MIN_RATE_POINTS = 20
 DEFAULT_RATE = 14_000_000    # IDs/day through 2026; only when the fit has too little data
@@ -236,26 +236,34 @@ async def plausible_window(db: AsyncSession, structure_id: int, *, sources=None,
                       tail=not above)
 
 
-async def tail_estimate(db: AsyncSession, structure_id: int, *,
-                        today: date | None = None) -> dict | None:
-    """Estimate for an ID above the newest point: extrapolated at the recent
-    rate, window widening with distance, nothing past today (so the age can
-    never go negative). None past the frontier. Raises LookupError when there
-    are no points below it."""
+async def neighbour_estimate(db: AsyncSession, structure_id: int, *,
+                             today: date | None = None) -> dict | None:
+    """Public estimate from the nearest points either side (below only, past
+    the newest point): the median of their dates moved along the recent
+    rate, window widening with their distance, nothing past today (so the
+    age can never go negative). Used past the newest point and wherever a
+    user point is one of the two nearest: a user point is one vote, so a
+    single outlier ID can't drag a whole stretch the way a straight line to
+    it would. None past the frontier. Raises LookupError on an empty table."""
     today = today or utc_today()
     if structure_id > INT64_MAX:
         return None
-    below, _ = await _neighbours(db, structure_id, None)
-    if not below:
+    below, above = await _neighbours(db, structure_id, None)
+    if not below and not above:
         raise LookupError("no calibration points")
-    expected_ord, gap = _expected(structure_id, below, await tail_rate(db))
-    if _past_frontier(expected_ord, today):
+    expected_ord, gap = _expected(structure_id, [*below, *above], await tail_rate(db))
+    if not above and _past_frontier(expected_ord, today):
         return None
     mid = min(date.fromordinal(round(expected_ord)), today)
     half = timedelta(days=round(ESTIMATE_HALF_DAYS + TAIL_SPREAD * gap))
     low, high = mid - half, min(mid + half, today)
     return {"mid": datetime.combine(mid, time()), "low": datetime.combine(low, time()),
             "high": datetime.combine(high, time()), "days_wide": (high - low).days}
+
+
+async def pending_count(db: AsyncSession, user_id: int) -> int:
+    return await db.scalar(select(func.count()).select_from(Sub).where(
+        Sub.submitted_by == user_id, Sub.status == "pending"))
 
 
 async def pending_for(db: AsyncSession, structure_id: int) -> bool:
@@ -283,9 +291,7 @@ async def check_submission(db: AsyncSession, structure_id: int, anchor_date: dat
         return Verdict(False, "This ID already has a confirmed date.", "confirmed")
     if await pending_for(db, structure_id):
         return Verdict(False, "A date for this ID is already awaiting review.", "pending")
-    mine = await db.scalar(select(func.count()).select_from(Sub).where(
-        Sub.submitted_by == user_id, Sub.status == "pending"))
-    if mine >= MAX_PENDING_PER_USER:
+    if await pending_count(db, user_id) >= MAX_PENDING_PER_USER:
         return Verdict(False, LIMIT_MSG, "limit")
     try:
         window = await plausible_window(db, structure_id, today=today)

@@ -73,6 +73,44 @@ def test_interpolation_between_points_is_unchanged(far_from_utc):
     assert est["days_wide"] == 6.0
 
 
+def _user_points(points):
+    async def setup(db):
+        for sid, when in points:
+            db.add(StructureAgeCalibration(**sac.calibration_values(
+                sid, when, "day", datetime(2026, 10, 1))))
+        await db.commit()
+    return setup
+
+
+def _line(k):
+    """The synthetic line's date k days of IDs past the newest point."""
+    return point_date(POINTS - 1) + timedelta(days=k)
+
+
+def test_one_user_point_is_one_vote_not_a_straight_line():
+    """An approved point 30 days off the trend — an honest outlier ID — must
+    not drag every estimate between it and the triff data, nor leave a jump
+    at its ID (spec §5, decided 2026-10-19). A straight line to it put
+    NEWEST+50 15 days off and jumped 31 days across two days of IDs."""
+    outlier = _user_points([(NEWEST_ID + 101 * RATE, today() - timedelta(days=30))])
+    est = _estimate(NEWEST_ID + 50 * RATE, setup=outlier)
+    assert est["method"] == "interpolate" and abs((est["mid"].date() - _line(50)).days) <= 1
+    assert "user-submitted" in est["note"]
+    below = _estimate(NEWEST_ID + 100 * RATE, setup=outlier)["mid"].date()
+    above = _estimate(NEWEST_ID + 102 * RATE, setup=outlier)["mid"].date()
+    assert abs((above - below).days) <= 3
+
+
+def test_as_user_points_accumulate_they_take_over():
+    """Sixty approved points, all 30 days earlier than the line: between
+    them, the estimate follows them, not the triff data."""
+    early = _user_points([(NEWEST_ID + j * RATE + RATE // 2, _line(j - 30))
+                          for j in range(1, 61)])
+    est = _estimate(NEWEST_ID + 30 * RATE, setup=early)
+    assert est["method"] == "interpolate"
+    assert abs((est["mid"].date() - _line(0)).days) <= 1
+
+
 def test_an_exact_user_point_never_shows_a_latest_date_after_today():
     async def recent_month_point(db):
         db.add(StructureAgeCalibration(**sac.calibration_values(

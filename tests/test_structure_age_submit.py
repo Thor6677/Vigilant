@@ -9,6 +9,7 @@ from sqlalchemy import select
 
 from app.db.models import AdminAuditLog, StructureAgeSubmission
 from app.intel import structure_age_check as sac
+from tests._mobile import SITE_CSS
 from tests._structure_age import (NEWEST_ID, POINTS, RATE, client, make_db, override_db,
                                   point_date, point_id, run, showinfo, today)
 
@@ -38,6 +39,32 @@ def _rows(SL):
 def _submit(structure_id, anchor_date, certainty="day"):
     return client(USER).post("/tools/structure-age/submit", data={
         "structure_id": str(structure_id), "anchor_date": anchor_date, "certainty": certainty})
+
+
+def test_a_post_without_the_csrf_token_is_refused(sa_db):
+    """Spec S2: the app-wide CSRF middleware covers this route too."""
+    c = client(USER)
+    del c.headers["X-CSRF-Token"]
+    r = c.post("/tools/structure-age/submit", data={
+        "structure_id": str(MID_ID), "anchor_date": point_date(100).isoformat(),
+        "certainty": "day"})
+    assert r.status_code == 403
+    assert _rows(sa_db) == []
+
+
+def test_the_box_keeps_the_phone_tap_floor(sa_db):
+    """.sa-input carries a 70px textarea floor that outranks the global 44px
+    phone rule. The box's single-line fields reset it and the phone block
+    puts 44px back; an inline min-height would beat both."""
+    page = client(USER).get("/tools/structure-age/partial",
+                            params={"paste": showinfo(MID_ID)}).text
+    box = page[page.index('class="sa-submit-box"'):]
+    assert "min-height" not in box
+    css = open(SITE_CSS, encoding="utf-8").read()
+    rules = css[css.index(".sa-submit-box .sa-input, .sa-reject .sa-input { min-height: 0;"):]
+    assert re.match(r"[^\n]*\n@media \(max-width: 640px\) \{\s*"
+                    r"\.sa-submit-box \.sa-input, \.sa-reject \.sa-input \{ min-height: 44px; \}",
+                    rules)
 
 
 def test_strangers_get_401_and_nothing_is_written(sa_db):
