@@ -14,15 +14,15 @@ from app.ops.version import parse_version
 from updater.supervisor import (
     MIN_ROLLBACK_TAG,
     REWRITTEN_SSH_HOST,
-    _REMOTE_RECHECK_SECONDS,
+    _RECHECK_SECONDS,
     clamp_log_tail,
     eligible_rollback_targets,
     is_stale_lock,
     looks_like_ssh_url,
     parse_deployed_tags,
     redact_userinfo,
+    checks_due,
     remote_failure_reason,
-    should_recheck_remote,
     step_for_line,
     url_host,
     validate_tag,
@@ -982,41 +982,48 @@ def test_redaction_leaves_scp_style_urls_intact():
     assert redact_userinfo("git@example.org:o/r.git") == "git@example.org:o/r.git"
 
 
-# ── Rate-limited re-evaluation of a FAILING remote check ─────────────────────
+# ── Rate-limited re-evaluation of FAILING self-checks ───────────────────────
 #
-# The other self-checks run once at startup and that is correct for them. This
-# one depends on DNS and outbound network, and a sidecar that loses the race
-# after a host reboot would otherwise keep the Update button disabled — with a
-# transient network error as the stated reason — until someone SSHed in to
-# restart the container, which is the thing this feature exists to avoid.
+# After a host reboot the sidecar can start before the network AND before Docker
+# is serving its API: dockerd starts restart-policy containers during its own
+# startup. So `remote` and `socket` can both lose a race that heals itself
+# seconds later. On 2026-10-04 `socket` timed out three seconds before dockerd
+# came up, and because only `remote` was ever retried, the Update button stayed
+# disabled for fifteen days until someone SSHed in. Every FAILING check is now
+# retried on a timer; a passing check is never re-run.
 
 @pytest.mark.parametrize("result", ["ok", None])
-def test_a_passing_or_absent_remote_check_is_never_rerun(result):
+def test_a_passing_or_absent_check_is_never_rerun(result):
     checks = {"socket": "ok"}
     if result is not None:
         checks["remote"] = result
-    assert should_recheck_remote(checks, last_checked=0.0, now=10 ** 9) is False
+    assert checks_due(checks, last_checked=0.0, now=10 ** 9) == []
 
 
-def test_a_failing_remote_check_is_rerun_only_after_the_interval():
-    checks = {"remote": "FAIL: nope"}
-    assert should_recheck_remote(checks, last_checked=1000.0, now=1001.0) is False
-    assert should_recheck_remote(checks, last_checked=1000.0,
-                                 now=1000.0 + _REMOTE_RECHECK_SECONDS) is True
+def test_failing_checks_are_due_only_after_the_interval():
+    checks = {"socket": "FAIL: timed out", "git": "ok", "remote": "FAIL: nope"}
+    assert checks_due(checks, last_checked=1000.0, now=1001.0) == []
+    assert checks_due(checks, last_checked=1000.0,
+                      now=1000.0 + _RECHECK_SECONDS) == ["socket", "remote"]
 
 
 def test_the_interval_is_measured_from_the_attempt_not_the_failure():
     """A check that keeps timing out must not accumulate back-to-back runs."""
     checks = {"remote": "FAIL: timed out"}
-    assert should_recheck_remote(checks, last_checked=5000.0, now=5100.0) is False
+    assert checks_due(checks, last_checked=5000.0, now=5100.0) == []
+
+
+def test_only_known_checks_are_due():
+    """The startup placeholder is not a check and has nothing to re-run."""
+    assert checks_due({"startup": "FAIL: still starting"}, last_checked=None, now=1.0) == []
 
 
 def test_remote_check_recovers_without_a_restart(tmp_path, monkeypatch, git_env):
-    """The whole point, exercised against real git rather than a stub.
+    """The network case, exercised against real git rather than a stub.
 
     Starts with an origin that does not exist (the check fails), then repairs
     origin and advances the clock past the interval. The published `checks` dict
-    must flip to "ok" in place, with the one-shot checks left untouched.
+    must flip to "ok" in place, with the passing checks left untouched.
     """
     import updater.supervisor as sup
     repo = _clone_with_origin(tmp_path, tmp_path / "not-yet.git")
@@ -1032,27 +1039,60 @@ def test_remote_check_recovers_without_a_restart(tmp_path, monkeypatch, git_env)
 
     # Still inside the rate limit: nothing is re-run, so the value must not move
     # even though the underlying problem is already fixed.
-    unchanged = sup.refresh_remote_check(checks, last_checked=1000.0, now=1001.0)
+    unchanged = sup.refresh_failed_checks(checks, last_checked=1000.0, now=1001.0)
     assert unchanged == 1000.0
     assert checks["remote"].startswith("FAIL: ")
 
     # Past the interval: re-evaluated in place, and the timestamp advances.
-    now = 1000.0 + _REMOTE_RECHECK_SECONDS
-    assert sup.refresh_remote_check(checks, last_checked=1000.0, now=now) == now
+    now = 1000.0 + _RECHECK_SECONDS
+    assert sup.refresh_failed_checks(checks, last_checked=1000.0, now=now) == now
     assert checks["remote"] == "ok"
-    # The one-shot checks are NOT re-run: rebuilding the dict via _self_checks()
-    # would put a `docker version` and a `docker compose config` on a timer
-    # forever to recover from a network blip.
+    # Passing checks are NOT re-run, and the key order the panel shows is kept.
     assert [k for k in checks] == ["socket", "git", "compose", "remote", "deployed"]
     assert checks["socket"] == "ok" and checks["compose"] == "ok"
 
 
-def test_a_recovered_remote_check_is_not_rerun_again(tmp_path, monkeypatch, git_env):
+def test_socket_check_recovers_without_a_restart(monkeypatch):
+    """The 2026-10-04 case: `docker version` timed out while dockerd was still
+    starting, and nothing ever asked again. Past the interval it is re-run,
+    flips to "ok" in place, and nothing that passed is run a second time."""
+    import updater.supervisor as sup
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv[:2])
+        return subprocess.CompletedProcess(argv, 0, stdout="29.8.2\n", stderr="")
+
+    monkeypatch.setattr(sup.subprocess, "run", fake_run)
+    checks = {"socket": "FAIL: Command '['docker', 'version']' timed out after 15 seconds",
+              "git": "ok", "remote": "ok", "compose": "ok", "deployed": "ok", "tmp": "ok"}
+    now = 1000.0 + _RECHECK_SECONDS
+    assert sup.refresh_failed_checks(checks, last_checked=1000.0, now=now) == now
+    assert checks["socket"] == "ok"
+    assert calls == [["docker", "version"]]
+
+
+def test_a_heartbeat_follows_each_rerun(monkeypatch):
+    """Several failing checks in one pass could block past the app's 60s
+    staleness window, so the loop's beat runs after every one of them."""
+    import updater.supervisor as sup
+    ran, beats = [], []
+    for name in ("socket", "remote", "compose"):
+        monkeypatch.setattr(sup, f"_{name}_check",
+                            lambda name=name: ran.append(name) or "FAIL: still down")
+    checks = {"socket": "FAIL: a", "git": "ok", "remote": "FAIL: b", "compose": "FAIL: c"}
+    sup.refresh_failed_checks(checks, last_checked=None, now=1.0,
+                              on_progress=lambda: beats.append(list(ran)))
+    assert ran == ["socket", "remote", "compose"]
+    assert beats == [["socket"], ["socket", "remote"], ["socket", "remote", "compose"]]
+
+
+def test_a_recovered_check_is_not_rerun_again(tmp_path, monkeypatch, git_env):
     import updater.supervisor as sup
     monkeypatch.setattr(sup, "ROOT", str(tmp_path))     # would FAIL if re-run
-    checks = {"remote": "ok"}
-    assert sup.refresh_remote_check(checks, last_checked=0.0, now=10 ** 9) == 0.0
-    assert checks["remote"] == "ok"
+    checks = {"remote": "ok", "socket": "ok"}
+    assert sup.refresh_failed_checks(checks, last_checked=0.0, now=10 ** 9) == 0.0
+    assert checks == {"remote": "ok", "socket": "ok"}
 
 
 # ── The image's git configuration must survive into deploy.sh ────────────────

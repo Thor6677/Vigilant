@@ -98,6 +98,16 @@
     text-underline-offset: 3px;
 }
 
+/* ── Disabled buttons ────────────────────────────────────────────── */
+/* components.css gives .b-btn no disabled state, so a disabled primary button
+   kept its gold fill, its shine and its hover lift, and a click that did
+   nothing read as broken: the updater's Update button while an environment
+   check was failing (2026-10-19). */
+.b-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.b-btn:disabled::after { animation: none; display: none; }
+.b-btn:not(.is-primary):disabled:hover { background: none; color: var(--muted); }
+.b-btn.is-primary:disabled:hover { background: var(--accent); color: var(--bg); box-shadow: none; transform: none; }
+
 /* ── Mobile hamburger ─────────────────────────────────────────── */
 .b-hamburger {
     display: none;
