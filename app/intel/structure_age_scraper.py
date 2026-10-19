@@ -102,6 +102,7 @@ async def _store_exact(results: list[dict]) -> int:
                 "anchor_high": datetime.fromisoformat(r["highISO"].replace("Z", "+00:00")).replace(tzinfo=None),
                 "days_wide": float(r.get("daysWide", 6.0)),
                 "fetched_at": now,
+                "source": "triff",
             })
         except (ValueError, KeyError):
             continue

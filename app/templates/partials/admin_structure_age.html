@@ -1,0 +1,71 @@
+{# Admin > Structure Age (app/routes/admin_structure_age.py). Deliberately
+   not in admin.html's refreshSections: a timed re-render would wipe a reject
+   reason mid-typing. Every action swaps the whole section back into
+   #admin-content with a flash line. htmx attributes only (CSP). #}
+{% macro gap(g, label) -%}
+{%- if g is none %}{{ label }} n/a
+{%- elif g['beyond'] %}<span style="color:var(--danger);">{{ label }}: past the end of its data</span>
+{%- else %}<span{% if g['flag'] %} style="color:var(--danger);"{% endif %}>{{ label }} {{ g['expected'] }} ({{ '%+d'|format(g['days']) }} d)</span>{% if not g['in_window'] %} <span style="color:var(--danger);">outside the window now</span>{% endif %}
+{%- endif %}
+{%- endmacro %}
+
+{% if flash %}
+<div class="b-banner" style="margin-bottom:1rem;border-color:{{ 'var(--success)' if flash_ok else 'var(--danger)' }};">
+    <span style="color:{{ 'var(--success)' if flash_ok else 'var(--danger)' }};">{{ flash }}</span>
+</div>
+{% endif %}
+
+<div class="b-panel" style="margin-bottom:1.5rem;">
+    <div class="b-panel-head"><span class="b-label">Calibration</span></div>
+    <div class="b-row"><span class="b-row-label">Points</span><span class="b-row-val">{{ "{:,}".format(stats['total']) }}</span></div>
+    <div class="b-row"><span class="b-row-label">From users</span><span class="b-row-val">{{ "{:,}".format(stats['from_users']) }}</span></div>
+    <div class="b-row"><span class="b-row-label">Newest anchor</span><span class="b-row-val">{{ stats['newest'] or 'None' }}</span></div>
+    <div class="b-row"><span class="b-row-label">Newest triff anchor</span><span class="b-row-val">{{ stats['newest_triff'] or 'None' }}</span></div>
+    <div class="b-row"><span class="b-row-label">Triff last added</span><span class="b-row-val">{{ stats['triff_last'] or 'Never' }}</span></div>
+</div>
+
+<div class="b-panel" style="margin-bottom:1.5rem;">
+    <div class="b-panel-head"><span class="b-label">Pending review</span><span class="b-badge">{{ stats['pending'] }}</span></div>
+    {% for row in pending %}
+    {% set s = row['sub'] %}
+    <div class="b-row" style="flex-wrap:wrap;gap:0.4rem 1rem;align-items:center;">
+        <span class="b-row-label" style="font-family:monospace;">{{ s.structure_id }}</span>
+        {# white-space:normal: .b-row-val is nowrap+ellipsis on desktop, which
+           would cut off the baseline and the submitter at mid widths. #}
+        <span class="b-row-val" style="white-space:normal;text-align:left;flex:1 1 100%;">
+            {{ s.anchor_date.strftime('%d %b %Y') }} · {{ certainty_labels[s.certainty] }}
+            · {{ gap(row['check'], 'expected') }}
+            · {{ gap(row['baseline'], 'triff baseline') }}
+            · by {{ row['by'] }} · {{ s.submitted_at.strftime('%Y-%m-%d %H:%M') }} UTC
+        </span>
+        <button type="button" class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;flex:none;"
+                hx-post="/admin/structure-age/{{ s.id }}/approve" hx-disabled-elt="this"
+                hx-target="#admin-content" hx-swap="innerHTML">Approve</button>
+        <form class="sa-reject" hx-post="/admin/structure-age/{{ s.id }}/reject" hx-target="#admin-content"
+              hx-swap="innerHTML" hx-disabled-elt="find button" style="display:flex;gap:0.4rem;flex-wrap:wrap;">
+            <input type="text" name="reject_reason" maxlength="200" placeholder="Reason (optional)"
+                   class="sa-input" style="width:14rem;">
+            <button type="submit" class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid var(--danger);color:var(--danger);font-size:9px;flex:none;">Reject</button>
+        </form>
+    </div>
+    {% else %}
+    <div class="b-empty">Nothing waiting for review.</div>
+    {% endfor %}
+</div>
+
+<div class="b-panel">
+    <div class="b-panel-head"><span class="b-label">User-added points</span><span class="b-badge">{{ approved|length }}</span></div>
+    {% for row in approved %}
+    {% set s = row['sub'] %}
+    <div class="b-row" style="flex-wrap:wrap;gap:0.4rem 1rem;align-items:center;">
+        <span class="b-row-label" style="font-family:monospace;">{{ s.structure_id }}</span>
+        <span class="b-row-val" style="white-space:normal;text-align:left;flex:1 1 100%;">{{ s.anchor_date.strftime('%d %b %Y') }} · {{ certainty_labels[s.certainty] }} · added by {{ row['by'] }} · approved by {{ row['reviewer'] }}</span>
+        <button type="button" class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid var(--danger);color:var(--danger);font-size:9px;flex:none;"
+                hx-post="/admin/structure-age/{{ s.id }}/remove" hx-disabled-elt="this"
+                hx-target="#admin-content" hx-swap="innerHTML"
+                hx-confirm="Remove this anchor point? Estimates near it will change.">Remove</button>
+    </div>
+    {% else %}
+    <div class="b-empty">No user-added points yet.</div>
+    {% endfor %}
+</div>

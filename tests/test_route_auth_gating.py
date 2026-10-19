@@ -360,6 +360,7 @@ _LOGIN_ONLY_POSTS = (
     "/intel/gatecheck/check", "/intel/gatecheck/wartargets",
     "/dashboard/prefs",
     "/dashboard/group-order",   # T-076: moved from session-only to gated + persisted
+    "/tools/structure-age/submit",   # structure-age user anchor points
 )
 
 

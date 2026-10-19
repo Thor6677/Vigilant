@@ -1,6 +1,6 @@
 """Mobile R6 T6: the Admin console at phone width.
 
-- The eight section buttons become a "Section ▾" dropdown of the same
+- The nine section buttons become a "Section ▾" dropdown of the same
   switchTab buttons; the desktop strip stays outside #admin-content.
 - Lists that re-render themselves every few seconds (ESI logs, the
   scheduler's sync table, the updater's run history) become two-line rows

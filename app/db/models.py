@@ -1022,18 +1022,58 @@ class CharacterKillIngest(Base):
 
 class StructureAgeCalibration(Base):
     """Calibration points for structure age interpolation.
-    Each row is a structure ID with a confirmed anchor-date window sourced
-    from triff.tools (method='exact'). Used to interpolate anchor dates for
-    any structure ID by finding the nearest known IDs above and below it.
+    Each row is a structure ID with a confirmed anchor-date window. Used to
+    interpolate anchor dates for any structure ID by finding the nearest known
+    IDs above and below it.
+
+    `source` is where the point came from: 'triff' (method='exact' results
+    from triff.tools, via app/intel/structure_age_scraper.py) or 'user' (an
+    admin-approved StructureAgeSubmission). It is a server_default, not just a
+    Python default, so the scraper's bulk sqlite_insert and the startup
+    ALTER TABLE agree on fresh and existing databases alike.
     """
     __tablename__ = "structure_age_calibration"
 
     structure_id = Column(BigInteger, primary_key=True)
-    anchor_mid = Column(DateTime, nullable=False)
+    # Indexed for the ID-rate fit (app/intel/structure_age_check.py), which
+    # reads the last 180 days of triff points on every tail estimate.
+    anchor_mid = Column(DateTime, nullable=False, index=True)
     anchor_low = Column(DateTime, nullable=False)
     anchor_high = Column(DateTime, nullable=False)
     days_wide = Column(Float, nullable=False, default=6.0)
     fetched_at = Column(DateTime, nullable=False)
+    # No index on this column: _create_missing_indexes runs before the startup
+    # ALTER on existing databases (same trap the UserFitting docstring describes).
+    source = Column(String(8), nullable=False, server_default="triff")
+
+
+class StructureAgeSubmission(Base):
+    """A user's claimed anchor date for one structure ID, before and after
+    admin review (app/routes/admin_structure_age.py). Approving copies it into
+    structure_age_calibration with source='user'; the row stays here as the
+    record of who claimed what.
+
+    status: pending | approved | rejected | removed. The partial unique index
+    allows one pending row per structure_id — a database guarantee, so two
+    submissions racing for the same ID can't both land.
+    """
+    __tablename__ = "structure_age_submissions"
+    __table_args__ = (
+        Index("ux_structure_age_submissions_pending", "structure_id", unique=True,
+              sqlite_where=text("status = 'pending'")),
+    )
+
+    id = Column(Integer, primary_key=True)
+    structure_id = Column(BigInteger, nullable=False, index=True)
+    anchor_date = Column(Date, nullable=False)
+    certainty = Column(String(8), nullable=False)        # day | week | month
+    status = Column(String(10), nullable=False, default="pending", index=True)
+    expected_date = Column(Date, nullable=True)          # what the check computed at submit time
+    submitted_by = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    submitted_at = Column(DateTime, nullable=False)
+    reviewed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+    reject_reason = Column(String(200), nullable=True)
 
 
 class EverefImportDay(Base):

@@ -1,0 +1,42 @@
+{# "Know when it was anchored?" box under the structure-age result card.
+   Logged-in only: app/routes/structure_age.py passes `submit` only for a
+   session. Rendered inside the card and as the swap after a submit, so it
+   targets its own wrapper rather than an id — the card shows on the tool
+   page, the wormhole system page and the WH Tracker panel. htmx attributes
+   only, no inline script or on* handlers (CSP). Date is a plain text input:
+   datetime-local would convert to the browser's timezone. #}
+<div class="sa-submit-box" style="margin-top:0.75rem;padding-top:0.75rem;border-top:1px solid var(--border);">
+{% if submit['state'] == 'sent' %}
+    <div style="font-size:11px;color:var(--success);">Sent for review — thanks.</div>
+{% elif submit['state'] == 'pending' %}
+    <div style="font-size:11px;color:var(--muted);">A date for this ID is awaiting review.</div>
+{% elif submit['state'] == 'confirmed' %}
+    <div style="font-size:11px;color:var(--muted);">This ID has a confirmed date{% if submit['user_point'] %} (user-submitted){% endif %}.</div>
+{% elif submit['state'] == 'error' %}
+    <div style="font-size:11px;color:var(--danger);">{{ submit['error'] }}</div>
+{% else %}
+    <span class="sa-date-lbl">Know when it was anchored?</span>
+    <form hx-post="/tools/structure-age/submit" hx-target="closest .sa-submit-box" hx-swap="outerHTML"
+          hx-disabled-elt="find button"
+          style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:flex-end;margin-top:0.4rem;">
+        <input type="hidden" name="structure_id" value="{{ submit['structure_id'] }}">
+        <label class="sa-date-col">
+            <span class="sa-date-lbl">Anchored (UTC)</span>
+            <input type="text" name="anchor_date" class="sa-input" style="width:9rem;"
+                   placeholder="YYYY-MM-DD" maxlength="10" autocomplete="off" value="{{ submit['anchor_date'] }}">
+        </label>
+        <label class="sa-date-col">
+            <span class="sa-date-lbl">How sure?</span>
+            <select name="certainty" class="sa-input" style="width:auto;">
+                {% for key, label in submit['options'] %}
+                <option value="{{ key }}"{% if key == submit['certainty'] %} selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        {# flex:none + nowrap: on a phone the button drops to its own line
+           instead of squeezing beside the select onto three lines. #}
+        <button type="submit" class="b-btn" style="padding:0.45rem 0.9rem;border:1px solid var(--accent);color:var(--accent);flex:none;white-space:nowrap;">Add anchor point</button>
+    </form>
+    {% if submit['error'] %}<div style="font-size:11px;color:var(--danger);margin-top:0.4rem;">{{ submit['error'] }}</div>{% endif %}
+{% endif %}
+</div>

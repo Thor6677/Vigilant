@@ -1,7 +1,8 @@
 {# Structure-age estimate result card. Shared by the standalone tool page
    (structure_age.html, via include) and the htmx partial endpoint
-   /tools/structure-age/partial (embedded on the wormhole system page).
-   Context: parsed, estimate, error — see app/routes/structure_age.py. #}
+   /tools/structure-age/partial (embedded on the wormhole system page and the
+   WH Tracker panel). Context: parsed, estimate (optional keys: source, note),
+   error, and submit (sessions only) — see app/routes/structure_age.py. #}
 {% if error %}
 <div class="b-banner" style="border-color:var(--danger);margin-bottom:1rem;">
     <span style="color:var(--danger);">{{ error }}</span>
@@ -13,11 +14,12 @@
     <div class="b-section-head">
         <span class="b-label">Result</span>
         <span class="sa-method is-{{ estimate.method }}">{{ estimate.method }}</span>
+        {% if estimate.get('source') == 'user' %}<span class="sa-method">user-submitted</span>{% endif %}
     </div>
     <div style="padding:0.75rem;">
 
         <div class="sa-age">{{ estimate.age_str }}</div>
-        <div class="sa-window">±{{ estimate.days_wide }} day window</div>
+        <div class="sa-window">{{ '%g'|format(estimate.days_wide) }}-day window</div>
 
         <div class="sa-date-row">
             <div class="sa-date-col">
@@ -60,6 +62,7 @@
             {% endif %}
         </div>
         {% endif %}
+        {% if submit %}{% include "partials/structure_age_submit.html" %}{% endif %}
 
     </div>
 </div>

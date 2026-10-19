@@ -20,7 +20,7 @@
     <div style="padding:0.75rem;">
         <p style="font-size:11px;color:var(--muted);margin-bottom:0.75rem;">
             Paste an in-game showinfo link from chat or the structure window to estimate when it was anchored.
-            Uses {{ "{:,}".format(36403) }} local calibration points — no external API call needed.
+            {% if point_count %}Uses {{ "{:,}".format(point_count) }} local calibration points — no external API call needed.{% endif %}
         </p>
         <form method="GET" action="/tools/structure-age" style="display:flex;flex-direction:column;gap:0.5rem;">
             <textarea
