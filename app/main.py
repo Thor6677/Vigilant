@@ -61,6 +61,7 @@ from app.routes.starmap import router as starmap_router, start_map_poller
 from app.routes.images import router as images_router
 from app.routes.discordtime import router as discordtime_router
 from app.routes.structure_age import router as structure_age_router
+from app.routes.admin_structure_age import router as admin_structure_age_router
 from app.routes.wh_tracker import router as wh_tracker_router
 from app.routes.wormholes import router as wormholes_router
 from app.routes.fitting import router as fitting_router
@@ -254,6 +255,7 @@ app.include_router(starmap_router)
 app.include_router(images_router)
 app.include_router(discordtime_router)
 app.include_router(structure_age_router)
+app.include_router(admin_structure_age_router)
 app.include_router(wormholes_router)
 app.include_router(fitting_router)
 app.include_router(landings_router)

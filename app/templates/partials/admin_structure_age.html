@@ -1,0 +1,59 @@
+{# Admin > Structure Age (app/routes/admin_structure_age.py). Deliberately
+   not in admin.html's refreshSections: a timed re-render would wipe a reject
+   reason mid-typing. Every action swaps the whole section back into
+   #admin-content with a flash line. htmx attributes only (CSP). #}
+{% if flash %}
+<div class="b-banner" style="margin-bottom:1rem;border-color:{{ 'var(--success)' if flash_ok else 'var(--danger)' }};">
+    <span style="color:{{ 'var(--success)' if flash_ok else 'var(--danger)' }};">{{ flash }}</span>
+</div>
+{% endif %}
+
+<div class="b-panel" style="margin-bottom:1.5rem;">
+    <div class="b-panel-head"><span class="b-label">Calibration</span></div>
+    <div class="b-row"><span class="b-row-label">Points</span><span class="b-row-val">{{ "{:,}".format(stats['total']) }}</span></div>
+    <div class="b-row"><span class="b-row-label">From users</span><span class="b-row-val">{{ "{:,}".format(stats['from_users']) }}</span></div>
+    <div class="b-row"><span class="b-row-label">Newest anchor</span><span class="b-row-val">{{ stats['newest'] or 'None' }}</span></div>
+    <div class="b-row"><span class="b-row-label">Triff last added</span><span class="b-row-val">{{ stats['triff_last'] or 'Never' }}</span></div>
+</div>
+
+<div class="b-panel" style="margin-bottom:1.5rem;">
+    <div class="b-panel-head"><span class="b-label">Pending review</span><span class="b-badge">{{ pending|length }}</span></div>
+    {% for row in pending %}
+    {% set s = row['sub'] %}
+    <div class="b-row" style="flex-wrap:wrap;gap:0.4rem 1rem;align-items:center;">
+        <span class="b-row-label" style="font-family:monospace;">{{ s.structure_id }}</span>
+        <span class="b-row-val">
+            {{ s.anchor_date.strftime('%d %b %Y') }} · {{ certainty_labels[s.certainty] }}
+            {% if row['check'] %} · expected {{ row['check']['expected'] }} ({{ '%+d'|format(row['check']['days']) }} d){% if not row['check']['in_window'] %} <span style="color:var(--danger);">outside the window now</span>{% endif %}{% endif %}
+            {% if row['baseline'] %} · triff baseline {{ '%+d'|format(row['baseline']['days']) }} d{% else %} · triff baseline n/a{% endif %}
+            · by {{ row['by'] }} · {{ s.submitted_at.strftime('%Y-%m-%d %H:%M') }}
+        </span>
+        <button type="button" class="b-btn" hx-post="/admin/structure-age/{{ s.id }}/approve"
+                hx-target="#admin-content" hx-swap="innerHTML">Approve</button>
+        <form hx-post="/admin/structure-age/{{ s.id }}/reject" hx-target="#admin-content" hx-swap="innerHTML"
+              style="display:flex;gap:0.4rem;flex-wrap:wrap;">
+            <input type="text" name="reject_reason" maxlength="200" placeholder="Reason (optional)"
+                   class="sa-input" style="min-height:0;width:14rem;resize:none;">
+            <button type="submit" class="b-btn">Reject</button>
+        </form>
+    </div>
+    {% else %}
+    <div class="b-empty">Nothing waiting for review.</div>
+    {% endfor %}
+</div>
+
+<div class="b-panel">
+    <div class="b-panel-head"><span class="b-label">User-added points</span><span class="b-badge">{{ approved|length }}</span></div>
+    {% for row in approved %}
+    {% set s = row['sub'] %}
+    <div class="b-row" style="flex-wrap:wrap;gap:0.4rem 1rem;align-items:center;">
+        <span class="b-row-label" style="font-family:monospace;">{{ s.structure_id }}</span>
+        <span class="b-row-val">{{ s.anchor_date.strftime('%d %b %Y') }} · {{ certainty_labels[s.certainty] }} · added by {{ row['by'] }} · approved by {{ row['reviewer'] }}</span>
+        <button type="button" class="b-btn" hx-post="/admin/structure-age/{{ s.id }}/remove"
+                hx-target="#admin-content" hx-swap="innerHTML"
+                hx-confirm="Remove this anchor point? Estimates near it will change.">Remove</button>
+    </div>
+    {% else %}
+    <div class="b-empty">No user-added points yet.</div>
+    {% endfor %}
+</div>

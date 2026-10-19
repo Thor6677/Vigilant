@@ -206,6 +206,7 @@ ADMIN_SECTIONS = (
     ("scheduler", "Scheduler"),
     ("database", "Database"),
     ("sde", "SDE"),
+    ("structure-age", "Structure Age"),
     ("audit", "Audit Log"),
 )
 
