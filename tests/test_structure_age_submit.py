@@ -60,6 +60,9 @@ def test_the_box_keeps_the_phone_tap_floor(sa_db):
                             params={"paste": showinfo(MID_ID)}).text
     box = page[page.index('class="sa-submit-box"'):]
     assert "min-height" not in box
+    # The button reads as a button and never wraps beside the select.
+    button = re.search(r'<button type="submit"[^>]*>Add anchor point', box).group(0)
+    assert "border:1px solid var(--accent)" in button and "white-space:nowrap" in button
     css = open(SITE_CSS, encoding="utf-8").read()
     rules = css[css.index(".sa-submit-box .sa-input, .sa-reject .sa-input { min-height: 0;"):]
     assert re.search(r"@media \(max-width: 640px\) \{\s*"

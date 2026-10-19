@@ -33,7 +33,9 @@
                 {% endfor %}
             </select>
         </label>
-        <button type="submit" class="b-btn">Add anchor point</button>
+        {# flex:none + nowrap: on a phone the button drops to its own line
+           instead of squeezing beside the select onto three lines. #}
+        <button type="submit" class="b-btn" style="padding:0.45rem 0.9rem;border:1px solid var(--accent);color:var(--accent);flex:none;white-space:nowrap;">Add anchor point</button>
     </form>
     {% if submit['error'] %}<div style="font-size:11px;color:var(--danger);margin-top:0.4rem;">{{ submit['error'] }}</div>{% endif %}
 {% endif %}
