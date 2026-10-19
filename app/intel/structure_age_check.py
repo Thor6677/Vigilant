@@ -35,7 +35,7 @@ from app.db.models import StructureAgeCalibration, StructureAgeSubmission
 
 NEIGHBOURS = 25              # nearest calibration points taken on each side
 TOLERANCE_DAYS = 120         # allowed distance from the expected date
-TAIL_SPREAD = 0.25           # extra allowance per day of IDs to the nearest point
+TAIL_SPREAD = 0.25           # extra allowance per day of IDs to the neighbours
 FUTURE_SLACK_DAYS = 60       # an ID extrapolating further past today doesn't exist yet
 ESTIMATE_HALF_DAYS = 7       # estimate half-width next to the newest point (triff's tail used ±7)
 RATE_WINDOW_DAYS = 180       # triff points used to fit the ID rate
@@ -132,12 +132,14 @@ def fit_rate(points) -> float:
 
 
 def _expected(structure_id: int, neighbours, rate: float) -> tuple[float, float]:
-    """(expected anchor day as an ordinal, days of IDs to the nearest
-    neighbour) from (structure_id, anchor_mid) neighbours: the median of each
-    neighbour's date moved along the ID rate. Plain numbers, so an absurd ID
-    can't overflow a date before the caller has checked the frontier."""
+    """(expected anchor day as an ordinal, median days of IDs to the
+    neighbours) from (structure_id, anchor_mid) neighbours: the median of each
+    neighbour's date moved along the ID rate. The distance is a median too,
+    not the nearest: one point — say a lone user point — mustn't decide the
+    allowance on its own any more than the date. Plain numbers, so an absurd
+    ID can't overflow a date before the caller has checked the frontier."""
     predictions = [_day(d).toordinal() + (structure_id - sid) / rate for sid, d in neighbours]
-    gap = min(abs(structure_id - sid) for sid, _ in neighbours) / rate
+    gap = median(abs(structure_id - sid) for sid, _ in neighbours) / rate
     return median(predictions), gap
 
 
@@ -149,9 +151,10 @@ def window_for(structure_id: int, neighbours, rate: float, today: date, *,
                tail: bool) -> Window | None:
     """The plausible window for structure_id given its (structure_id,
     anchor_mid) calibration neighbours. The allowance is TOLERANCE_DAYS plus
-    TAIL_SPREAD per day of IDs to the nearest neighbour, capped at today and
-    floored at the Citadel release. None when a tail ID (nothing above it)
-    lands more than FUTURE_SLACK_DAYS after today."""
+    TAIL_SPREAD per day of IDs to the neighbours, capped at today and floored
+    at the Citadel release. None when a tail ID (nothing above it) lands more
+    than FUTURE_SLACK_DAYS after today. Callers apply UPWELL_FLOOR_ID; an ID
+    far below the table can give low > high."""
     expected_ord, gap = _expected(structure_id, neighbours, rate)
     if tail and _past_frontier(expected_ord, today):
         return None
@@ -173,8 +176,8 @@ def calibration_values(structure_id: int, anchor_date: date, certainty: str,
 
 
 # ── Database reads ────────────────────────────────────────────────────────
-# Every function here binds structure_id, so each refuses one above INT64_MAX
-# itself rather than trusting its caller.
+# The public readers below that take a structure_id each refuse one above
+# INT64_MAX themselves rather than trusting their caller.
 
 def _from_sources(stmt, sources):
     return stmt.where(Cal.source.in_(sources)) if sources else stmt
@@ -207,19 +210,21 @@ async def tail_rate(db: AsyncSession) -> float:
 
 
 async def plausible_window(db: AsyncSession, structure_id: int, *, sources=None,
-                           today: date | None = None) -> Window | None:
+                           today: date | None = None,
+                           rate: float | None = None) -> Window | None:
     """The plausible anchor-date window for structure_id, or None when it is
     past the frontier (FRONTIER_MSG). sources=("triff",) is the baseline that
     approved user points can't move. Pending submissions never count: they
-    aren't in the calibration table. Raises LookupError when there are no
-    points to compare with."""
+    aren't in the calibration table. Pass `rate` (from tail_rate) when judging
+    many IDs in one request. Raises LookupError when there are no points to
+    compare with."""
     today = today or utc_today()
     if structure_id > INT64_MAX:
         return None
     below, above = await _neighbours(db, structure_id, sources)
     if not below and not above:
         raise LookupError("no calibration points")
-    return window_for(structure_id, [*below, *above], await tail_rate(db), today,
+    return window_for(structure_id, [*below, *above], rate or await tail_rate(db), today,
                       tail=not above)
 
 

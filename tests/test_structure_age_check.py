@@ -81,7 +81,9 @@ def test_dense_neighbours_on_both_sides_give_their_own_median():
     w = sac.window_for(line[100][0] + RATE // 2, line[76:126], RATE,
                        D0 + timedelta(days=400), tail=False)
     assert not w.tail and abs((w.expected - (D0 + timedelta(days=100))).days) <= 1
-    assert w.low == w.expected - timedelta(days=sac.TOLERANCE_DAYS)
+    # The allowance grows by a quarter of the neighbours' median distance:
+    # ~3 days on this one-point-a-day line, under one on real recent data.
+    assert sac.TOLERANCE_DAYS <= (w.expected - w.low).days <= sac.TOLERANCE_DAYS + 5
 
 
 def test_one_wild_neighbour_doesnt_move_the_median():
@@ -117,6 +119,19 @@ def test_a_gap_above_the_stalled_data_is_bridged_not_pinned():
         w = sac.window_for(line[-1][0] + k * RATE, line[-25:] + [user], RATE, on, tail=False)
         assert abs((w.expected - true_date).days) <= 1, k
         assert w.contains(true_date), k
+
+
+def test_one_point_doesnt_decide_the_allowance_alone():
+    """A lone user point next to a tail ID is one vote on the date, and must
+    not shrink the allowance to the bare tolerance either."""
+    t = date(2026, 10, 18)
+    top = _line(n=25, start=t - timedelta(days=184))     # newest point 160 days ago
+    sid = top[-1][0] + 151 * RATE
+    alone = sac.window_for(sid, top, RATE, t, tail=True)
+    user = (top[-1][0] + 150 * RATE, datetime.combine(t - timedelta(days=10), time()))
+    with_user = sac.window_for(sid, top + [user], RATE, t, tail=False)
+    assert with_user.expected == alone.expected == t - timedelta(days=9)
+    assert (with_user.expected - with_user.low).days >= (alone.expected - alone.low).days - 5
 
 
 def test_tail_windows_widen_with_distance_and_stop_at_the_frontier():
@@ -171,6 +186,24 @@ def test_interior_expected_date_follows_the_line():
             return await sac.plausible_window(db, MID_ID)
     w = _with_db(fn)
     assert not w.tail and abs((w.expected - point_date(100)).days) <= 1
+
+
+def test_readers_refuse_an_id_too_big_for_sqlite_themselves():
+    async def fn(SL):
+        async with SL() as db:
+            return (await sac.plausible_window(db, sac.INT64_MAX + 1),
+                    await sac.tail_estimate(db, sac.INT64_MAX + 1),
+                    await sac.pending_for(db, sac.INT64_MAX + 1))
+    assert _with_db(fn) == (None, None, False)
+
+
+def test_a_passed_rate_is_used_instead_of_refitting():
+    async def fn(SL):
+        async with SL() as db:
+            return (await sac.plausible_window(db, TAIL_ID),
+                    await sac.plausible_window(db, TAIL_ID, rate=RATE / 2))
+    fitted, halved = _with_db(fn)
+    assert halved.expected > fitted.expected + timedelta(days=30)
 
 
 def test_misdated_neighbour_doesnt_cause_a_false_refusal():
