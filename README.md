@@ -561,9 +561,11 @@ readable over HTTPS**:
   failed `remote` check explaining why and keeps the buttons disabled. Deploy
   those with `scripts/deploy.sh` over SSH as usual; nothing else changes.
 
-The `remote` check runs at startup and, **while it is failing**, retries every
-few minutes — so a sidecar that came up before the host's network did re-enables
-itself without a restart.
+Every self-check runs at startup and, **while it is failing**, retries every
+five minutes; a passing check is never re-run. After a host reboot the sidecar
+can come up before the network or before Docker is serving its API, and both
+races heal themselves seconds later — so the panel re-enables itself without a
+restart.
 
 #### The sidecar upgrades itself
 
@@ -661,12 +663,12 @@ an in-app update cannot delete the sidecar out from under itself mid-run.
 | Symptom | Cause | Fix |
 |---|---|---|
 | No panel in Admin › Updates | Sidecar not running, or its heartbeat is stale | `docker compose --profile updater ps`; check `docker logs vigilant-updater-1` |
-| Panel says "socket: FAIL" | `DOCKER_GID` does not match this host | `getent group docker \| cut -d: -f3`, correct `.env`, recreate the sidecar |
+| Panel says "socket: FAIL" | `DOCKER_GID` does not match this host — or, just after a host reboot, Docker was still starting when the sidecar came up | Wait five minutes: the check retries by itself. If it stays failing, `getent group docker \| cut -d: -f3`, correct `.env`, recreate the sidecar |
 | Panel says "git: FAIL" | `/opt/vigilant` not mounted, or not owned by `VIGILANT_UID` | Check the bind mount is `/opt/vigilant:/opt/vigilant` on both sides |
-| Panel says "remote: FAIL" | The sidecar cannot fetch from `origin` — an SSH origin on a non-github host, a private repo, or no outbound network | See [`origin` must be fetchable without credentials](#origin-must-be-fetchable-without-credentials). The check retries by itself every few minutes |
-| Panel says "deployed: FAIL" | `.deployed` missing — no release has been deployed by the scripts yet | Deploy once with `scripts/deploy.sh` |
+| Panel says "remote: FAIL" | The sidecar cannot fetch from `origin` — an SSH origin on a non-github host, a private repo, or no outbound network | See [`origin` must be fetchable without credentials](#origin-must-be-fetchable-without-credentials) |
+| Panel says "deployed: FAIL" | `.deployed` missing — no release has been deployed by the scripts yet | Deploy once with `scripts/deploy.sh`; the check clears within five minutes |
 | Panel says "tmp: FAIL" | The sidecar cannot create a file in its own temp directory — `scripts/deploy.sh` and `scripts/rollback.sh` copy themselves there before doing anything else, so neither can run until this is fixed | Confirm the `updater:` service's `/tmp` mount in `docker-compose.yml` is actually a writable tmpfs on this host, not a read-only leftover from an older config |
-| Buttons are disabled | One of the self-checks above is failing | Fix the named check; the panel lists which |
+| Buttons are disabled | One of the self-checks above is failing | Fix the named check; the panel lists which. Failing checks are re-run every five minutes, so a fix needs no restart |
 | "The last run was interrupted" | The sidecar died mid-deploy | Check the host and `docker logs`; the app will not queue another run until it is resolved |
 | Panel says the updater is still running an older version | The last deploy was run from the command line, or this sidecar predates self-update | `docker compose --profile updater up -d updater` from the install directory. Updating and rolling back still work meanwhile |
 | Panel reports a failed self-update | The new sidecar image could not be pulled, or the helper could not recreate the service — the reason is shown with the warning | Fix what the reason names, then run the manual recreate above. The deploy itself succeeded; only the sidecar is behind |

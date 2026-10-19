@@ -370,6 +370,27 @@ def test_a_lagging_sidecar_does_not_disable_the_buttons():
     assert "disabled" not in html
 
 
+def test_a_failing_check_disables_the_buttons_visibly():
+    """A failing environment check disables Update and Roll back — and the
+    disabled state must LOOK disabled. components.css styles .b-btn.is-primary
+    with a gold fill, a shine and a hover lift and has no :disabled rule, so on
+    2026-10-19 a disabled Update button looked live and a click "did nothing"."""
+    html = _render_finished(_finished_status(),
+                            checks={"socket": "FAIL: timed out after 15 seconds"},
+                            update_available=True, latest_tag="v1.2.4",
+                            targets=["v1.2.1"])
+    update = re.search(r"<button[^>]*>\s*Update to v1\.2\.4", html).group(0)
+    assert "disabled" in update
+    assert "re-run every five minutes" in " ".join(html.split())
+    css = (Path(__file__).resolve().parent.parent / "static" / "css" / "site.css").read_text()
+    assert re.search(r"^\.b-btn:disabled \{[^}]*opacity: 0\.4", css, re.M)
+    assert re.search(r"^\.b-btn:disabled::after \{[^}]*animation: none", css, re.M)
+    # Roll back is a ghost button: hovering a disabled one must not light up
+    # its accent border and glow either.
+    assert re.search(r"^\.b-btn\.is-ghost:disabled:hover \{[^}]*border-color: var\(--glass-border\)"
+                     r"[^}]*box-shadow: none", css, re.M)
+
+
 def test_a_lagging_sidecar_adds_no_new_form_or_input():
     """Every form in the panel is pinned by the tests above, and CSP forbids
     inline handlers — so the remedy has to be text the operator copies, not

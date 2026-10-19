@@ -284,18 +284,20 @@ def clamp_log_tail(lines: list[str]) -> list[str]:
 # main suite with no git, no network and no container anywhere near it. The
 # subprocess half lives below the banner and does nothing but feed these.
 
-# How often a FAILING `remote` check is retried. The other self-checks run once
-# at startup and stay put, which is right for them — a wrong DOCKER_GID does not
-# heal itself. This one is different: it depends on DNS and outbound network,
-# and after a host reboot the sidecar can easily win the race against either.
-# One-shot semantics there would leave the Update button disabled, with a
-# network error as its reason, until a human SSHed in to restart the container —
-# the exact situation this feature exists to avoid.
+# How often a FAILING self-check is retried. After a host reboot the sidecar can
+# start before the network AND before Docker is serving its API — dockerd starts
+# restart-policy containers during its own startup — so `remote` and `socket`
+# can both lose a race that heals itself seconds later. One-shot semantics leave
+# the Update button disabled, with that stale error as its reason, until a human
+# SSHes in to restart the container: on 2026-10-04 `socket` timed out three
+# seconds before dockerd came up, and the button stayed disabled for fifteen
+# days. A real misconfiguration (a wrong DOCKER_GID) does not heal, but
+# re-running a failing local check costs one cheap command per interval.
 #
 # Five minutes, not every tick: at POLL_SECONDS=1.0 a per-tick retry would mean
 # ~17,000 ls-remote calls a day against github.com from every install that has
 # this profile enabled. A passing check is never re-run at all.
-_REMOTE_RECHECK_SECONDS = 5 * 60
+_RECHECK_SECONDS = 5 * 60
 
 # Userinfo in a URL, i.e. the `user:token@` in `https://user:token@host/path`.
 # A self-hoster who cloned with a personal access token embedded in the origin
@@ -431,27 +433,27 @@ def remote_failure_reason(effective_url: str | None, stderr: str | None) -> str:
     return f"could not reach origin {url}.{suffix}"
 
 
-def should_recheck_remote(checks: dict, last_checked: float | None,
-                          now: float, interval: float = _REMOTE_RECHECK_SECONDS) -> bool:
-    """Whether the failing `remote` check is due for another attempt.
+def checks_due(checks: dict, last_checked: float | None,
+               now: float, interval: float = _RECHECK_SECONDS) -> list[str]:
+    """The failing self-checks due for another attempt, in check order.
 
     Deliberately narrow, and each condition is load-bearing:
-      - a missing `remote` key means _self_checks() never ran; the caller that
-        owns startup handles that, not the retry loop.
+      - only names _check_functions() knows: the startup placeholder and a
+        missing key mean _self_checks() never ran, which the caller that owns
+        startup handles, not the retry loop.
       - "ok" is never re-run. A check that passed has nothing to heal, and
-        re-running it would put a network call on a timer for the life of the
-        container.
+        re-running it would put a docker or network call on a timer for the
+        life of the container.
       - the rate limit is measured from the LAST ATTEMPT, not the last failure,
         so a check that keeps timing out does not accumulate back-to-back runs.
     """
     if not isinstance(checks, dict):
-        return False
-    result = checks.get("remote")
-    if result is None or result == "ok":
-        return False
-    if last_checked is None:
-        return True
-    return (now - last_checked) >= interval
+        return []
+    if last_checked is not None and (now - last_checked) < interval:
+        return []
+    known = _check_functions()
+    return [name for name, result in checks.items()
+            if name in known and result is not None and result != "ok"]
 
 
 # ── Self-update ──────────────────────────────────────────────────────────────
@@ -1056,29 +1058,46 @@ def _remote_check() -> str:
         return "FAIL: " + redact_userinfo(f"could not run git ls-remote: {e}")[:512]
 
 
-def refresh_remote_check(checks: dict, last_checked: float, now: float) -> float:
-    """Re-run a failing `remote` check, in place. Returns the new attempt time.
+def refresh_failed_checks(checks: dict, last_checked: float | None, now: float,
+                          on_progress: Callable[[], None] | None = None) -> float | None:
+    """Re-run the failing self-checks, in place. Returns the new attempt time.
 
     Mutates the caller's dict rather than returning a fresh one so that run()'s
     single `checks` object — the same one handed to write_heartbeat() every
-    tick — picks the new value up with no further plumbing. Rebuilding it by
-    calling _self_checks() again would be the obvious alternative and is wrong:
-    that re-runs socket, compose and deployed too, putting a `docker version`
-    and a `docker compose config` on a timer forever to fix a network blip.
+    tick — picks the new values up with no further plumbing. Calling
+    _self_checks() again would be the obvious alternative and is wrong: it
+    re-runs the checks that passed too, putting a `docker version` and a
+    `docker compose config` on a timer forever.
 
-    This BLOCKS the poll loop for up to _REMOTE_CHECK_TIMEOUT_SECONDS when it
-    does run, which delays that iteration's heartbeat: a 10s beat interval can
-    stretch to ~30s. The app treats a heartbeat older than 60s as no updater at
-    all, so today it fits — but that headroom is now spoken for, and anyone
-    tightening the staleness window or lengthening the timeout has to count
-    this call against it.
+    At most one pass per interval: every failing check in the pass is
+    re-run, and the next pass is due an interval after this one STARTED, so a
+    check late in a slow pass is retried slightly sooner than that after its
+    own previous run — never back to back.
+
+    This BLOCKS the poll loop for up to the failing checks' timeouts combined
+    (15s socket, 15s git, 20s remote, 30s compose), which can exceed the app's
+    60s heartbeat staleness window. So `on_progress` — run()'s heartbeat — is
+    called after each re-run, bounding the gap to the single longest timeout,
+    the same arithmetic as startup.
     """
-    if not should_recheck_remote(checks, last_checked, now):
+    due = checks_due(checks, last_checked, now)
+    if not due:
         return last_checked
-    previous = checks.get("remote")
-    checks["remote"] = _remote_check()
-    if checks["remote"] == "ok":
-        log.info("remote check recovered (was: %s)", previous)
+    functions = _check_functions()
+    for name in due:
+        previous = checks[name]
+        try:
+            checks[name] = functions[name]()
+        except Exception as e:
+            # This runs outside run()'s per-tick guard, and not every check
+            # catches everything (_tmp_check only catches OSError). A check
+            # that raises must read as failing, not take the loop down.
+            checks[name] = f"FAIL: {e}"
+
+        if checks[name] == "ok":
+            log.info("%s check recovered (was: %s)", name, previous)
+        if on_progress is not None:
+            on_progress()
     return now
 
 
@@ -1116,9 +1135,9 @@ def _tmp_check() -> str:
     than each tool quietly following its own fallback rules.
 
     Local and instant: no subprocess, no network, no meaningful ceiling to add
-    to _self_checks()'s startup-latency accounting. It belongs with the
-    one-shot checks, not with `remote`'s rate-limited retry — a /tmp mount
-    that is wrong does not heal itself while the container keeps running.
+    to _self_checks()'s startup-latency accounting. Like every check it is
+    re-run while failing (refresh_failed_checks), though a /tmp mount that is
+    wrong rarely heals itself while the container keeps running.
     """
     tmpdir = os.environ.get("TMPDIR") or "/tmp"
     try:
@@ -1142,6 +1161,64 @@ def _tmp_check() -> str:
     return "ok"
 
 
+def _socket_check() -> str:
+    try:
+        subprocess.run(["docker", "version", "--format", "{{.Server.Version}}"],
+                       check=True, capture_output=True, timeout=15)
+        return "ok"
+    except Exception as e:
+        return f"FAIL: {e}"
+
+
+def _git_check() -> str:
+    try:
+        subprocess.run(["git", "-C", ROOT, "rev-parse", "HEAD"],
+                       check=True, capture_output=True, timeout=15)
+        return "ok"
+    except Exception as e:
+        return f"FAIL: {e}"
+
+
+def _compose_check() -> str:
+    try:
+        subprocess.run(["docker", "compose", "-f",
+                        os.environ.get("VIGILANT_COMPOSE_FILE", "docker-compose.yml"),
+                        "config", "--quiet"],
+                       cwd=ROOT, check=True, capture_output=True, timeout=30)
+        return "ok"
+    except Exception as e:
+        return f"FAIL: {e}"
+
+
+def _deployed_check() -> str:
+    # .deployed is the file the entire rollback list depends on
+    # (eligible_rollback_targets reads it fresh on every pickup) — the one thing
+    # the checks before it do not cover.
+    try:
+        with open(f"{ROOT}/.deployed") as fh:
+            fh.read()
+        return "ok"
+    except Exception as e:
+        return f"FAIL: {e}"
+
+
+def _check_functions() -> dict[str, Callable[[], str]]:
+    """Every self-check, by the name the panel shows, in the order it runs.
+
+    `git` sits right before `remote` because it is the half of it that was
+    missing: `rev-parse HEAD` proves the bind mount and the repo ownership,
+    and nothing about whether this container can reach the remote it is about
+    to fetch a release tag from. `tmp` is last, not because it matters least —
+    the class of failure it catches (a /tmp mount with the wrong permissions)
+    passed every check above it on a real stack — but because it is the newest
+    and the others already have an established order tests and docs refer to.
+
+    Built at call time, so a test can monkeypatch any single check.
+    """
+    return {"socket": _socket_check, "git": _git_check, "remote": _remote_check,
+            "compose": _compose_check, "deployed": _deployed_check, "tmp": _tmp_check}
+
+
 def _self_checks(on_progress: Callable[[dict], None] | None = None) -> dict:
     """Startup environment checks, published so self-hoster environment
     failures show up as a disabled button with a readable reason instead of a
@@ -1150,15 +1227,15 @@ def _self_checks(on_progress: Callable[[dict], None] | None = None) -> dict:
     The socket gid varies by distro and compose in this image is older than the
     host's, so a file the host parses might not parse here.
 
-    All but one are one-shot: they describe a mounting or permissions mistake,
-    which does not fix itself while the container keeps running. `remote` is the
-    exception — it depends on the network — and run() re-runs THAT ONE on a
-    timer while it is failing. See refresh_remote_check().
+    A failing check is re-run on a timer by run() — see refresh_failed_checks().
+    Most failures describe a mounting or permissions mistake that will not heal,
+    but after a host reboot `remote` (the network) and `socket` (dockerd still
+    starting) can fail for a few seconds and then be fine for good.
 
     `on_progress` is called with the checks gathered so far after each one, and
     exists because of the restart gap this function sits in the middle of. Add
-    up the timeouts below and startup can take 15 + 15 + 20 + 30 = 80 seconds
-    before the first heartbeat is written — longer than the app's
+    up the timeouts in the checks above and startup can take 15 + 15 + 20 + 30
+    = 80 seconds before the first heartbeat is written — longer than the app's
     HEARTBEAT_MAX_AGE_SECONDS of 60, so a sidecar restarting into a bad network
     would make the panel vanish entirely while it came up. Beating after each
     check bounds the gap to the single longest timeout (30s, `compose`) instead
@@ -1179,51 +1256,9 @@ def _self_checks(on_progress: Callable[[dict], None] | None = None) -> dict:
             # A copy: the caller publishes this and we keep mutating ours.
             on_progress(dict(checks))
 
-    try:
-        subprocess.run(["docker", "version", "--format", "{{.Server.Version}}"],
-                       check=True, capture_output=True, timeout=15)
-        checks["socket"] = "ok"
-    except Exception as e:
-        checks["socket"] = f"FAIL: {e}"
-    _progress()
-    try:
-        subprocess.run(["git", "-C", ROOT, "rev-parse", "HEAD"],
-                       check=True, capture_output=True, timeout=15)
-        checks["git"] = "ok"
-    except Exception as e:
-        checks["git"] = f"FAIL: {e}"
-    _progress()
-    # Deliberately adjacent to the `git` check above, because it is the half of
-    # it that was missing: `rev-parse HEAD` proves the bind mount and the repo
-    # ownership, and proves nothing at all about whether this container can
-    # reach the remote it is about to fetch a release tag from.
-    checks["remote"] = _remote_check()
-    _progress()
-    try:
-        subprocess.run(["docker", "compose", "-f",
-                        os.environ.get("VIGILANT_COMPOSE_FILE", "docker-compose.yml"),
-                        "config", "--quiet"],
-                       cwd=ROOT, check=True, capture_output=True, timeout=30)
-        checks["compose"] = "ok"
-    except Exception as e:
-        checks["compose"] = f"FAIL: {e}"
-    _progress()
-    try:
-        # .deployed is the file the entire rollback list depends on
-        # (eligible_rollback_targets reads it fresh on every pickup) — the one
-        # thing the checks above did not cover.
-        with open(f"{ROOT}/.deployed") as fh:
-            fh.read()
-        checks["deployed"] = "ok"
-    except Exception as e:
-        checks["deployed"] = f"FAIL: {e}"
-    _progress()
-    # Last, not because it matters least — the class of failure it catches
-    # (a /tmp mount with the wrong permissions) passed every check above it on
-    # a real stack — but because it is the newest and the others already have
-    # an established order tests and docs refer to.
-    checks["tmp"] = _tmp_check()
-    _progress()
+    for name, check in _check_functions().items():
+        checks[name] = check()
+        _progress()
     return checks
 
 
@@ -1997,7 +2032,7 @@ def run() -> None:
     # _self_checks(), whose timeouts sum to 15 + 15 + 20 + 30 = 80s — over the
     # limit on its own, before anything else is counted. Typical is a few
     # seconds, but "typical" is not what a restart gap needs to be sized for,
-    # and refresh_remote_check() already spends the headroom that used to exist.
+    # and refresh_failed_checks() already spends the headroom that used to exist.
     #
     # So: beat immediately, then after every check. The largest remaining gap is
     # one check's own timeout, 30s for `compose`, which leaves real margin.
@@ -2021,19 +2056,23 @@ def run() -> None:
     seen: list[str] = []
     last_beat = 0.0
     # Seeded with the time _self_checks() ran, not with 0.0 or None: those would
-    # both make the first loop iteration re-run the network check immediately,
-    # milliseconds after the startup one, and then again every interval — which
+    # both make the first loop iteration re-run the failing checks immediately,
+    # milliseconds after the startup ones, and then again every interval — which
     # is the opposite of rate limiting. A boot-time failure waits the full
     # interval before its first retry.
-    last_remote_check = time.time()
+    last_recheck = time.time()
     lock_path = CONTROL / "update.lock"
 
     global _last_tick_error
     while True:
-        # Mutates `checks` in place while `remote` is failing, so the next
+        # Mutates `checks` in place while any check is failing, so the next
         # heartbeat publishes the new value and the panel's button re-enables
-        # itself without anyone restarting the container. A no-op once it is ok.
-        last_remote_check = refresh_remote_check(checks, last_remote_check, time.time())
+        # itself without anyone restarting the container. A no-op once all are
+        # ok. The callback beats after each re-run; it reads `self_update` at
+        # call time, so it always carries this loop's current record.
+        last_recheck = refresh_failed_checks(
+            checks, last_recheck, time.time(),
+            lambda: write_heartbeat(checks, self_update))
         if time.time() - last_beat >= HEARTBEAT_SECONDS:
             write_heartbeat(checks, self_update)
             last_beat = time.time()
