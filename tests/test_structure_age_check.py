@@ -308,7 +308,7 @@ def test_impossible_dates_and_ids_are_refused():
     t = today()
     assert _check(MID_ID, t + timedelta(days=1), on=t).code == "invalid"
     assert _check(MID_ID, date(2016, 1, 1), on=t).code == "invalid"
-    assert _check(1_020_999_999_999, point_date(0), on=t).code == "invalid"
+    assert _check(999_999_999_999, point_date(0), on=t).code == "invalid"
     assert _check(sac.INT64_MAX + 1, point_date(0), on=t).code == "frontier"
     assert _check(NEWEST_ID + 200 * RATE, t - timedelta(days=1), on=t).code == "frontier"
 

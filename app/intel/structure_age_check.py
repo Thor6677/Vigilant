@@ -41,7 +41,10 @@ ESTIMATE_HALF_DAYS = 7       # estimate half-width next to the newest point (tri
 RATE_WINDOW_DAYS = 180       # triff points used to fit the ID rate
 MIN_RATE_POINTS = 20
 DEFAULT_RATE = 14_000_000    # IDs/day through 2026; only when the fit has too little data
-UPWELL_FLOOR_ID = 1_021_000_000_000
+# Item IDs, not character or corporation IDs. The calibration data starts at
+# 1,021,010,094,060 (Nov 2016), but structures anchored from the Citadel
+# release in Apr 2016 have lower IDs, so the floor sits well below it.
+UPWELL_FLOOR_ID = 1_000_000_000_000
 INT64_MAX = 2**63 - 1        # SQLite INTEGER; a bigger int raises when bound
 CITADEL_RELEASE = date(2016, 4, 26)
 MAX_PENDING_PER_USER = 20
@@ -50,6 +53,7 @@ CERTAINTY_DAYS = {"day": 2, "week": 7, "month": 30}
 CERTAINTY_LABELS = {"day": "Exact day", "week": "Within a week", "month": "Roughly that month"}
 
 FRONTIER_MSG = "This ID is higher than any structure yet — check it was pasted whole."
+NOT_UPWELL_MSG = "That isn't an Upwell structure ID — paste the structure's own showinfo link."
 LIMIT_MSG = (f"You already have {MAX_PENDING_PER_USER} dates awaiting review — "
              "try again once some have been reviewed.")
 
@@ -264,7 +268,7 @@ async def check_submission(db: AsyncSession, structure_id: int, anchor_date: dat
     checks run in Python before anything is bound to SQLite (spec §7 S8)."""
     today = today or utc_today()
     if structure_id < UPWELL_FLOOR_ID:
-        return Verdict(False, "That isn't an Upwell structure ID.", "invalid")
+        return Verdict(False, NOT_UPWELL_MSG, "invalid")
     if structure_id > INT64_MAX:
         return Verdict(False, FRONTIER_MSG, "frontier")
     if anchor_date > today:

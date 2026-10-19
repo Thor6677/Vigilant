@@ -1,7 +1,8 @@
 """Structure Age estimates past the newest calibration point, the
 user-submitted tag, the window label and the live point count. Runs against
 the synthetic table in tests/_structure_age.py. Ids and names are invented."""
-from datetime import datetime, timedelta
+import re
+from datetime import datetime, time, timedelta, timezone
 
 import pytest
 
@@ -57,7 +58,24 @@ def test_an_exact_hit_carries_its_source():
 def test_interpolation_between_points_is_unchanged():
     est = _estimate(point_id(100) + RATE // 2)
     assert est["method"] == "interpolate"
-    assert abs((est["mid"].date() - point_date(100)).days) <= 1
+    assert est["mid"] == datetime.combine(point_date(100), time()) + timedelta(hours=12)
+    assert est["days_wide"] == 6.0
+
+
+def test_an_exact_user_point_never_shows_a_latest_date_after_today():
+    async def recent_month_point(db):
+        db.add(StructureAgeCalibration(**sac.calibration_values(
+            NEWEST_ID + RATE, today() - timedelta(days=3), "month", datetime(2026, 10, 1))))
+        await db.commit()
+    est = _estimate(NEWEST_ID + RATE, setup=recent_month_point)
+    assert est["method"] == "exact" and est["high"].date() <= today()
+
+
+def test_age_reads_naturally_for_recent_dates():
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    assert sa_mod._age_str(now) == "today"
+    assert sa_mod._age_str(now - timedelta(days=1, hours=1)) == "1 day"
+    assert sa_mod._age_str(now - timedelta(days=5, hours=1)) == "5 days"
 
 
 def _card(**estimate):
@@ -90,9 +108,29 @@ def sa_db():
 def test_page_shows_the_live_point_count(sa_db):
     r = client().get("/tools/structure-age")
     assert r.status_code == 200
-    assert f"Uses {POINTS} local calibration points" in r.text and "36,403" not in r.text
+    assert f"Uses {POINTS:,} local calibration points" in r.text and "36,403" not in r.text
 
 
-def test_a_huge_pasted_number_gets_a_message_not_a_500(sa_db):
-    r = client().get("/tools/structure-age", params={"paste": showinfo(int("9" * 25))})
-    assert r.status_code == 200 and sac.FRONTIER_MSG in r.text
+@pytest.mark.parametrize("digits", [25, 5000])
+def test_a_huge_pasted_number_gets_a_message_not_a_500(sa_db, digits):
+    """25 digits overflow SQLite's INTEGER; past 4300, int() itself refuses."""
+    huge = "9" * digits
+    for paste in (huge, f"<url=showinfo:35833//{huge}>J123456 - Sample Citadel (Sample Corp)</url>"):
+        for path in ("/tools/structure-age", "/tools/structure-age/partial"):
+            r = client().get(path, params={"paste": paste})
+            assert r.status_code == 200 and sac.FRONTIER_MSG in r.text, (digits, path)
+
+
+def test_a_character_id_is_not_an_upwell_structure(sa_db):
+    r = client().get("/tools/structure-age/partial", params={"paste": "2112345678"})
+    assert r.status_code == 200 and "an Upwell structure ID" in r.text
+    assert "sa-age" not in r.text
+
+
+def test_a_new_structure_pasted_into_an_embed_is_extrapolated(sa_db):
+    r = client().get("/tools/structure-age/partial",
+                     params={"paste": showinfo(NEWEST_ID + 30 * RATE)})
+    assert r.status_code == 200 and "is-extrapolate" in r.text
+    assert "extrapolated from the recent ID rate" in r.text
+    age = re.search(r'class="sa-age">([^<]*)<', r.text).group(1).strip()
+    assert age and not age.startswith("-"), age

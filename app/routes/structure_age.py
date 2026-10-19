@@ -23,8 +23,16 @@ templates = Jinja2Templates(directory="app/templates")
 def _parse_showinfo(text: str) -> dict:
     """Extract structure_id, jcode, and corp_name from an in-game showinfo paste."""
     text = text.strip()
-    m = re.search(r'//(\d{10,})>', text) or re.search(r'\b(\d{10,})\b', text)
-    structure_id = int(m.group(1)) if m else None
+    m = re.search(r'//([0-9]{10,})>', text) or re.search(r'\b([0-9]{10,})\b', text)
+    digits = m.group(1).lstrip("0") or "0" if m else None
+    # Past 19 digits it's beyond INT64 whatever the digits are, and int()
+    # refuses strings over 4300 digits — so those aren't converted at all.
+    if digits is None:
+        structure_id = None
+    elif len(digits) > 19:
+        structure_id = sac.INT64_MAX + 1
+    else:
+        structure_id = int(digits)
 
     m = re.search(r'\b(J\d{6})\b', text, re.IGNORECASE)
     jcode = m.group(1).upper() if m else None
@@ -39,6 +47,12 @@ def _parse_showinfo(text: str) -> dict:
 
 async def _estimate(db: AsyncSession, structure_id: int) -> dict:
     """Interpolate anchor date from the calibration table."""
+    if structure_id > sac.INT64_MAX:
+        # Too big for SQLite's INTEGER: binding it would raise, not miss.
+        return {"error": sac.FRONTIER_MSG}
+    if structure_id < sac.UPWELL_FLOOR_ID:
+        return {"error": sac.NOT_UPWELL_MSG}
+
     lower = (await db.execute(
         select(StructureAgeCalibration)
         .where(StructureAgeCalibration.structure_id <= structure_id)
@@ -56,13 +70,14 @@ async def _estimate(db: AsyncSession, structure_id: int) -> dict:
     if lower is None and upper is None:
         return {"error": "Calibration table is empty — run the scraper first."}
 
-    # Exact hit
+    # Exact hit. A recent user point's window can reach past today ("roughly
+    # that month" is ±15 days); the latest possible date is still today.
     if lower and lower.structure_id == structure_id:
         return {
             "method": "exact",
             "mid": lower.anchor_mid,
             "low": lower.anchor_low,
-            "high": lower.anchor_high,
+            "high": min(lower.anchor_high, datetime.now(timezone.utc).replace(tzinfo=None)),
             "days_wide": lower.days_wide,
             "source": lower.source,
         }
@@ -92,8 +107,10 @@ async def _estimate(db: AsyncSession, structure_id: int) -> dict:
     lo_id, hi_id = lower.structure_id, upper.structure_id
     frac = (structure_id - lo_id) / (hi_id - lo_id)
 
-    lo_ts = lower.anchor_mid.timestamp()
-    hi_ts = upper.anchor_mid.timestamp()
+    # The columns hold naive UTC; a bare .timestamp() would read them as the
+    # host's local time and shift the midpoint by its UTC offset.
+    lo_ts = lower.anchor_mid.replace(tzinfo=timezone.utc).timestamp()
+    hi_ts = upper.anchor_mid.replace(tzinfo=timezone.utc).timestamp()
     mid_ts = lo_ts + frac * (hi_ts - lo_ts)
     mid = datetime.fromtimestamp(mid_ts, tz=timezone.utc).replace(tzinfo=None)
 
@@ -116,12 +133,14 @@ async def _estimate(db: AsyncSession, structure_id: int) -> dict:
 
 
 def _age_str(anchor_mid: datetime) -> str:
-    """Return a human-readable age string like '8 months' or '2 years 3 months'."""
+    """Return a human-readable age string like 'today', '3 days', '≈ 8 months' or '≈ 2y 3m'."""
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     delta = now - anchor_mid
     months = int(delta.days / 30.44)
     if months < 1:
-        return f"{delta.days} days"
+        if delta.days < 1:
+            return "today"
+        return f"{delta.days} day{'s' if delta.days != 1 else ''}"
     if months < 24:
         return f"≈ {months} month{'s' if months != 1 else ''}"
     years = months // 12
@@ -143,9 +162,6 @@ async def _build_ctx(request: Request, db: AsyncSession, paste: str) -> dict:
 
         if sid is None:
             ctx["error"] = "Could not find a structure ID in that text. Paste the full showinfo link."
-        elif sid > sac.INT64_MAX:
-            # Too big for SQLite's INTEGER: binding it would raise, not miss.
-            ctx["error"] = sac.FRONTIER_MSG
         else:
             est = await _estimate(db, sid)
             if "error" in est:
