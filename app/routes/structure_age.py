@@ -241,15 +241,17 @@ async def structure_age_submit(request: Request, db: AsyncSession = Depends(get_
     Refusals answer 200 with the box re-rendered: htmx doesn't swap a 4xx
     body, and base.html's ISS-007 handler would turn it into an error pill.
     Only "no session" is a 401, like the other login-only tool POSTs. A
-    refused attempt writes nothing — not even an audit row — so retrying
-    can't flood anything (spec §7 S10)."""
+    refused attempt writes nothing to the database — not even an audit row;
+    it's logged at INFO — so retrying can't fill the queue or the audit log
+    (spec §7 S10)."""
     user_id = request.session.get("user_id")
     if not user_id:
         return HTMLResponse("", status_code=401)
 
     form = await request.form()
     sid = sac.parse_structure_id(str(form.get("structure_id") or ""))
-    raw_date = str(form.get("anchor_date") or "").strip()[:32]
+    raw_date = str(form.get("anchor_date") or "").strip()
+    echo = raw_date[:32]                 # what goes back into the field; parse the whole thing
     certainty = str(form.get("certainty") or "")
     if sid is None:
         return _box(request, {"state": "error",
@@ -257,9 +259,9 @@ async def structure_age_submit(request: Request, db: AsyncSession = Depends(get_
     keep = certainty if certainty in sac.CERTAINTY_DAYS else "day"
     anchor = sac.parse_anchor_date(raw_date)
     if anchor is None:
-        return _box(request, _form_state(sid, raw_date, keep, "Enter the date as YYYY-MM-DD (UTC)."))
+        return _box(request, _form_state(sid, echo, keep, "Enter the date as YYYY-MM-DD (UTC)."))
     if certainty not in sac.CERTAINTY_DAYS:
-        return _box(request, _form_state(sid, raw_date, keep, "Pick how sure you are."))
+        return _box(request, _form_state(sid, echo, keep, "Pick how sure you are."))
 
     verdict = await sac.check_submission(db, sid, anchor, user_id)
     if not verdict.ok:
@@ -267,7 +269,10 @@ async def structure_age_submit(request: Request, db: AsyncSession = Depends(get_
                  user_id, sid, anchor, verdict.reason)
         if verdict.code in ("confirmed", "pending"):
             return _box(request, await _submit_state(db, sid))
-        return _box(request, _form_state(sid, raw_date, certainty, verdict.reason))
+        if verdict.code in ("not_upwell", "frontier", "empty"):
+            # About the ID or the data: no date would pass, so no form.
+            return _box(request, {"state": "error", "error": verdict.reason})
+        return _box(request, _form_state(sid, echo, certainty, verdict.reason))
 
     db.add(StructureAgeSubmission(
         structure_id=sid, anchor_date=anchor, certainty=certainty, status="pending",
@@ -275,9 +280,14 @@ async def structure_age_submit(request: Request, db: AsyncSession = Depends(get_
         submitted_at=datetime.now(timezone.utc).replace(tzinfo=None)))
     try:
         await db.flush()
-    except IntegrityError:
-        # Another submission for this ID landed between the check and here.
+    except IntegrityError as e:
+        # Another submission for this ID landed between the check and here:
+        # the one-pending-per-ID index refused this one. Anything else is a
+        # real fault, not a race.
+        if "structure_age_submissions.structure_id" not in str(e.orig):
+            raise
         await db.rollback()
+        log.info("structure_age submit raced: user=%s id=%s already pending", user_id, sid)
         return _box(request, {"state": "pending"})
     # The cap was counted before the insert, so two submits racing from one
     # user could both pass it. The INSERT took SQLite's single write lock,
@@ -287,7 +297,7 @@ async def structure_age_submit(request: Request, db: AsyncSession = Depends(get_
         StructureAgeSubmission.status == "pending"))
     if mine > sac.MAX_PENDING_PER_USER:
         await db.rollback()
-        return _box(request, _form_state(sid, raw_date, certainty, sac.LIMIT_MSG))
+        return _box(request, _form_state(sid, echo, certainty, sac.LIMIT_MSG))
     # _log_audit commits — the submission and its audit row land together.
     await _log_audit(db, "structure_age_submit", user_id,
                      detail=f"{sid} anchored {anchor.isoformat()} ({certainty})",

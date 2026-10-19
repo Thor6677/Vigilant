@@ -106,7 +106,9 @@ class Window:
 class Verdict:
     ok: bool
     reason: str | None = None
-    # ok | invalid | frontier | confirmed | pending | limit | empty | outside
+    # ok | invalid (the date) | not_upwell | frontier | confirmed | pending |
+    # limit | empty | outside. not_upwell, frontier and empty are about the ID
+    # or the data: no date the user could enter would pass.
     code: str = "ok"
     window: Window | None = None
 
@@ -270,7 +272,7 @@ async def check_submission(db: AsyncSession, structure_id: int, anchor_date: dat
     checks run in Python before anything is bound to SQLite (spec §7 S8)."""
     today = today or utc_today()
     if structure_id < UPWELL_FLOOR_ID:
-        return Verdict(False, NOT_UPWELL_MSG, "invalid")
+        return Verdict(False, NOT_UPWELL_MSG, "not_upwell")
     if structure_id > INT64_MAX:
         return Verdict(False, FRONTIER_MSG, "frontier")
     if anchor_date > today:
@@ -292,7 +294,7 @@ async def check_submission(db: AsyncSession, structure_id: int, anchor_date: dat
     if window is None:
         return Verdict(False, FRONTIER_MSG, "frontier")
     if window.low > window.high:
-        return Verdict(False, NOT_UPWELL_MSG, "invalid")
+        return Verdict(False, NOT_UPWELL_MSG, "not_upwell")
     if not window.contains(anchor_date):
         return Verdict(False, f"For this ID the plausible anchor date is "
                               f"{fmt_day(window.low)} – {fmt_day(window.high)}.",

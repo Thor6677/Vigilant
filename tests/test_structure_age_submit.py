@@ -13,6 +13,7 @@ from tests._structure_age import (NEWEST_ID, POINTS, RATE, client, make_db, over
                                   point_date, point_id, run, showinfo, today)
 
 USER = 4401
+OTHER = 4402
 MID_ID = point_id(100) + RATE // 2
 TAIL_ID = NEWEST_ID + 30 * RATE
 FORM = 'hx-post="/tools/structure-age/submit"'
@@ -20,7 +21,7 @@ FORM = 'hx-post="/tools/structure-age/submit"'
 
 @pytest.fixture
 def sa_db():
-    engine, SL = run(make_db(users=[(USER, "user")]))
+    engine, SL = run(make_db(users=[(USER, "user"), (OTHER, "user")]))
     undo = override_db(SL)
     yield SL
     undo()
@@ -84,11 +85,12 @@ def test_a_new_structure_with_a_recent_date_is_accepted(sa_db):
     ("9" * 25, "2026-01-01", "day", "structure ID isn"),
     (str(MID_ID), "2026-13-45", "day", "YYYY-MM-DD"),
     (str(MID_ID), "yesterday", "day", "YYYY-MM-DD"),
+    (str(MID_ID), "__DATE__" + " " * 22 + "garbage", "day", "YYYY-MM-DD"),   # parsed whole, not cut
     (str(MID_ID), "__DATE__", "forever", "how sure"),
     (str(sac.INT64_MAX + 1), "2026-01-01", "day", "higher than any structure yet"),
 ])
 def test_malformed_input_gets_a_message_not_a_500(sa_db, sid, date_, certainty, needle):
-    date_ = point_date(100).isoformat() if date_ == "__DATE__" else date_
+    date_ = date_.replace("__DATE__", point_date(100).isoformat())
     r = client(USER).post("/tools/structure-age/submit",
                           data={"structure_id": sid, "anchor_date": date_, "certainty": certainty})
     assert r.status_code == 200 and needle in r.text
@@ -138,6 +140,50 @@ def test_the_cap_holds_even_when_the_first_count_was_stale(sa_db, monkeypatch):
     r = _submit(MID_ID, point_date(100).isoformat())
     assert f"You already have {sac.MAX_PENDING_PER_USER}" in r.text
     assert len(_rows(sa_db)) == sac.MAX_PENDING_PER_USER
+
+
+def test_the_twentieth_pending_is_accepted(sa_db):
+    async def seed():
+        async with sa_db() as db:
+            for i in range(sac.MAX_PENDING_PER_USER - 1):
+                db.add(StructureAgeSubmission(
+                    structure_id=point_id(i) + 1, anchor_date=point_date(i), certainty="day",
+                    status="pending", submitted_by=USER, submitted_at=datetime(2026, 10, 1)))
+            await db.commit()
+    run(seed())
+    assert "Sent for review" in _submit(MID_ID, point_date(100).isoformat()).text
+    assert len(_rows(sa_db)) == sac.MAX_PENDING_PER_USER
+
+
+def test_a_race_on_the_same_id_lands_on_the_unique_index(sa_db, monkeypatch):
+    """Two users submitting one ID at once can both pass check_submission;
+    the partial unique index refuses the second, which reads as "awaiting
+    review" — not a 500, and without naming the other submitter."""
+    async def seed():
+        async with sa_db() as db:
+            db.add(StructureAgeSubmission(
+                structure_id=MID_ID, anchor_date=point_date(100), certainty="day",
+                status="pending", submitted_by=OTHER, submitted_at=datetime(2026, 10, 1)))
+            await db.commit()
+    run(seed())
+
+    async def stale_check(db, structure_id, anchor_date, user_id, **kw):
+        return sac.Verdict(True, window=await sac.plausible_window(db, structure_id))
+    monkeypatch.setattr(sac, "check_submission", stale_check)
+    r = _submit(MID_ID, point_date(100).isoformat())
+    assert r.status_code == 200 and "awaiting review" in r.text
+    assert str(OTHER) not in r.text
+    assert len(_rows(sa_db)) == 1
+
+    async def audit_rows():
+        async with sa_db() as db:
+            return (await db.execute(select(AdminAuditLog))).scalars().all()
+    assert run(audit_rows()) == []
+
+
+def test_an_id_no_date_could_fix_gets_a_message_not_a_form(sa_db):
+    r = _submit(999_999_999_999, point_date(100).isoformat())
+    assert "an Upwell structure ID" in r.text and FORM not in r.text
 
 
 def test_echoed_values_are_escaped(sa_db):

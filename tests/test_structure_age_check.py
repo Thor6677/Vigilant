@@ -308,7 +308,7 @@ def test_impossible_dates_and_ids_are_refused():
     t = today()
     assert _check(MID_ID, t + timedelta(days=1), on=t).code == "invalid"
     assert _check(MID_ID, date(2016, 1, 1), on=t).code == "invalid"
-    assert _check(999_999_999_999, point_date(0), on=t).code == "invalid"
+    assert _check(999_999_999_999, point_date(0), on=t).code == "not_upwell"
     assert _check(sac.INT64_MAX + 1, point_date(0), on=t).code == "frontier"
     assert _check(NEWEST_ID + 200 * RATE, t - timedelta(days=1), on=t).code == "frontier"
 
@@ -328,7 +328,7 @@ def test_an_id_that_extrapolates_to_before_the_citadel_release_isnt_upwell():
     enough below, even its latest date is before the Citadel release — the
     window would read backwards — so the ID isn't an Upwell structure."""
     v = _check(1_010_000_000_000, date(2016, 6, 1), setup=_late_2016)
-    assert v.code == "invalid" and v.reason == sac.NOT_UPWELL_MSG
+    assert v.code == "not_upwell" and v.reason == sac.NOT_UPWELL_MSG
     assert _check(1_020_500_000_000, date(2016, 10, 1), setup=_late_2016).ok
 
 

@@ -132,6 +132,7 @@ AUDIT_FILTERS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("updates", "Updates & rollbacks", ("admin_update", "admin_rollback", "auto_update", "scheduled_update")),
     ("sde", "SDE updates", ("admin_sde_update",)),
     ("cache", "Cache purges", ("admin_cache_purge",)),
+    ("structure_age", "Structure age", ("structure_age",)),
 )
 _AUDIT_FILTER_PREFIXES = {key: prefixes for key, _label, prefixes in AUDIT_FILTERS}
 
