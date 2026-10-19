@@ -13,11 +13,12 @@
     <div class="b-section-head">
         <span class="b-label">Result</span>
         <span class="sa-method is-{{ estimate.method }}">{{ estimate.method }}</span>
+        {% if estimate.get('source') == 'user' %}<span class="sa-method">user-submitted</span>{% endif %}
     </div>
     <div style="padding:0.75rem;">
 
         <div class="sa-age">{{ estimate.age_str }}</div>
-        <div class="sa-window">±{{ estimate.days_wide }} day window</div>
+        <div class="sa-window">{{ estimate.days_wide }}-day window</div>
 
         <div class="sa-date-row">
             <div class="sa-date-col">

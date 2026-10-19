@@ -1,16 +1,20 @@
 """Structure Age Estimator — estimates when an Upwell structure was anchored
 from its structure ID, using a local interpolation table built from EVERef
-history + triff.tools calibration data (36k known anchor dates)."""
+history + triff.tools calibration data, plus admin-approved user points.
+Past the newest point it extrapolates at the recent ID rate
+(app/intel/structure_age_check.py)."""
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import AsyncSessionLocal, StructureAgeCalibration
+from app.db.models import StructureAgeCalibration, get_db
+from app.intel import structure_age_check as sac
 
 router = APIRouter(tags=["tools"])
 templates = Jinja2Templates(directory="app/templates")
@@ -33,22 +37,21 @@ def _parse_showinfo(text: str) -> dict:
     return {"structure_id": structure_id, "jcode": jcode, "corp_name": corp_name}
 
 
-async def _estimate(structure_id: int) -> dict:
+async def _estimate(db: AsyncSession, structure_id: int) -> dict:
     """Interpolate anchor date from the calibration table."""
-    async with AsyncSessionLocal() as db:
-        lower = (await db.execute(
-            select(StructureAgeCalibration)
-            .where(StructureAgeCalibration.structure_id <= structure_id)
-            .order_by(StructureAgeCalibration.structure_id.desc())
-            .limit(1)
-        )).scalar_one_or_none()
+    lower = (await db.execute(
+        select(StructureAgeCalibration)
+        .where(StructureAgeCalibration.structure_id <= structure_id)
+        .order_by(StructureAgeCalibration.structure_id.desc())
+        .limit(1)
+    )).scalar_one_or_none()
 
-        upper = (await db.execute(
-            select(StructureAgeCalibration)
-            .where(StructureAgeCalibration.structure_id >= structure_id)
-            .order_by(StructureAgeCalibration.structure_id.asc())
-            .limit(1)
-        )).scalar_one_or_none()
+    upper = (await db.execute(
+        select(StructureAgeCalibration)
+        .where(StructureAgeCalibration.structure_id >= structure_id)
+        .order_by(StructureAgeCalibration.structure_id.asc())
+        .limit(1)
+    )).scalar_one_or_none()
 
     if lower is None and upper is None:
         return {"error": "Calibration table is empty — run the scraper first."}
@@ -61,6 +64,7 @@ async def _estimate(structure_id: int) -> dict:
             "low": lower.anchor_low,
             "high": lower.anchor_high,
             "days_wide": lower.days_wide,
+            "source": lower.source,
         }
 
     # Beyond range
@@ -74,13 +78,14 @@ async def _estimate(structure_id: int) -> dict:
             "note": "ID is older than our earliest calibration point",
         }
     if upper is None:
+        est = await sac.tail_estimate(db, structure_id)
+        if est is None:
+            return {"error": sac.FRONTIER_MSG}
         return {
             "method": "extrapolate",
-            "mid": lower.anchor_mid,
-            "low": lower.anchor_low,
-            "high": lower.anchor_high,
-            "days_wide": lower.days_wide,
-            "note": "ID is newer than our latest calibration point",
+            **est,
+            "note": "ID is newer than our latest calibration point — "
+                    "extrapolated from the recent ID rate",
         }
 
     # Interpolate between lower and upper
@@ -98,7 +103,6 @@ async def _estimate(structure_id: int) -> dict:
     window_secs = lo_window + frac * (hi_window - lo_window)
     days_wide = window_secs / 86400
 
-    from datetime import timedelta
     low = mid - timedelta(seconds=window_secs / 2)
     high = mid + timedelta(seconds=window_secs / 2)
 
@@ -127,18 +131,23 @@ def _age_str(anchor_mid: datetime) -> str:
     return f"≈ {years}y {rem}m"
 
 
-async def _build_ctx(paste: str) -> dict:
+async def _build_ctx(request: Request, db: AsyncSession, paste: str) -> dict:
     """Shared context builder for the full page and the htmx partial."""
-    ctx: dict = {"paste": paste, "parsed": None, "estimate": None, "error": None}
+    ctx: dict = {"paste": paste, "parsed": None, "estimate": None, "error": None,
+                 "submit": None}
 
     if paste.strip():
         parsed = _parse_showinfo(paste)
         ctx["parsed"] = parsed
+        sid = parsed["structure_id"]
 
-        if parsed["structure_id"] is None:
+        if sid is None:
             ctx["error"] = "Could not find a structure ID in that text. Paste the full showinfo link."
+        elif sid > sac.INT64_MAX:
+            # Too big for SQLite's INTEGER: binding it would raise, not miss.
+            ctx["error"] = sac.FRONTIER_MSG
         else:
-            est = await _estimate(parsed["structure_id"])
+            est = await _estimate(db, sid)
             if "error" in est:
                 ctx["error"] = est["error"]
             else:
@@ -154,13 +163,17 @@ async def _build_ctx(paste: str) -> dict:
 
 
 @router.get("/tools/structure-age", response_class=HTMLResponse)
-async def structure_age_page(request: Request, paste: str = ""):
-    return templates.TemplateResponse(
-        request, "structure_age.html", await _build_ctx(paste))
+async def structure_age_page(request: Request, paste: str = "",
+                             db: AsyncSession = Depends(get_db)):
+    ctx = await _build_ctx(request, db, paste)
+    ctx["point_count"] = await db.scalar(
+        select(func.count()).select_from(StructureAgeCalibration))
+    return templates.TemplateResponse(request, "structure_age.html", ctx)
 
 
 @router.get("/tools/structure-age/partial", response_class=HTMLResponse)
-async def structure_age_partial(request: Request, paste: str = ""):
+async def structure_age_partial(request: Request, paste: str = "",
+                                db: AsyncSession = Depends(get_db)):
     """Result card only — embedded via htmx on the wormhole system page."""
     return templates.TemplateResponse(
-        request, "structure_age_result.html", await _build_ctx(paste))
+        request, "structure_age_result.html", await _build_ctx(request, db, paste))
