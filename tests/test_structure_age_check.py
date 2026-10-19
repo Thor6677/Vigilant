@@ -4,6 +4,7 @@ straight-line synthetic table in tests/_structure_age.py. Ids are invented."""
 from datetime import date, datetime, time, timedelta
 
 import pytest
+from sqlalchemy import select
 
 from app.db.models import StructureAgeCalibration, StructureAgeSubmission
 from app.intel import structure_age_check as sac
@@ -47,8 +48,8 @@ def test_parse_anchor_date(raw, want):
 
 # ── pure window maths ─────────────────────────────────────────────────────
 
-def _line(n=200):
-    return [(1_050_000_000_000 + i * RATE, datetime.combine(D0 + timedelta(days=i), time()))
+def _line(n=200, start=D0):
+    return [(1_050_000_000_000 + i * RATE, datetime.combine(start + timedelta(days=i), time()))
             for i in range(n)]
 
 
@@ -68,36 +69,78 @@ def test_fit_rate_falls_back_with_too_few_points():
     assert sac.fit_rate(_line(n=5)) == sac.DEFAULT_RATE
 
 
-def test_interior_window_uses_the_median_and_caps_at_today():
-    dates = [D0 + timedelta(days=i) for i in range(50)]
-    w = sac.interior_window(dates, today=D0 + timedelta(days=60))
-    assert w.expected in (D0 + timedelta(days=24), D0 + timedelta(days=25))
+def test_fit_rate_falls_back_when_ids_repeat():
+    """A zero rate would divide by zero in every extrapolation."""
+    pts = [(1_050_000_000_000, datetime.combine(D0 + timedelta(days=i), time()))
+           for i in range(40)]
+    assert sac.fit_rate(pts) == sac.DEFAULT_RATE
+
+
+def test_dense_neighbours_on_both_sides_give_their_own_median():
+    line = _line()
+    w = sac.window_for(line[100][0] + RATE // 2, line[76:126], RATE,
+                       D0 + timedelta(days=400), tail=False)
+    assert not w.tail and abs((w.expected - (D0 + timedelta(days=100))).days) <= 1
     assert w.low == w.expected - timedelta(days=sac.TOLERANCE_DAYS)
-    assert w.high == D0 + timedelta(days=60)
-    assert not w.tail
 
 
 def test_one_wild_neighbour_doesnt_move_the_median():
-    dates = [D0 + timedelta(days=i) for i in range(50)]
-    dates[30] = D0 - timedelta(days=4 * 365)
-    w = sac.interior_window(dates, today=D0 + timedelta(days=400))
-    assert abs((w.expected - (D0 + timedelta(days=24))).days) <= 1
+    line = _line()
+    neighbours = line[76:126]
+    sid, when = neighbours[10]
+    neighbours[10] = (sid, when - timedelta(days=4 * 365))
+    w = sac.window_for(line[100][0] + RATE // 2, neighbours, RATE,
+                       D0 + timedelta(days=400), tail=False)
+    assert abs((w.expected - (D0 + timedelta(days=100))).days) <= 1
 
 
-def test_tail_window_widens_with_distance_and_stops_at_the_frontier():
+def test_window_is_capped_at_today_and_floored_at_the_citadel_release():
+    line = _line()
+    w = sac.window_for(line[100][0] + RATE // 2, line[76:126], RATE,
+                       D0 + timedelta(days=110), tail=False)
+    assert w.high == D0 + timedelta(days=110)
+    early = _line(start=date(2016, 5, 1))        # expected 9 Aug 2016: 120 days back is pre-release
+    w = sac.window_for(early[100][0] + RATE // 2, early[76:126], RATE, D0, tail=False)
+    assert w.low == sac.CITADEL_RELEASE
+
+
+def test_a_gap_above_the_stalled_data_is_bridged_not_pinned():
+    """Triff stops at day 199; one user point sits 150 days of IDs above it.
+    An ID in the gap must expect its own date. A plain median of the
+    neighbours' dates expected ~day 187 everywhere in the gap and refused
+    true dates once the gap passed ~132 days."""
+    line = _line()
+    user = (line[-1][0] + 150 * RATE, datetime.combine(D0 + timedelta(days=349), time()))
+    on = D0 + timedelta(days=360)
+    for k in (30, 100, 140, 145):
+        true_date = D0 + timedelta(days=199 + k)
+        w = sac.window_for(line[-1][0] + k * RATE, line[-25:] + [user], RATE, on, tail=False)
+        assert abs((w.expected - true_date).days) <= 1, k
+        assert w.contains(true_date), k
+
+
+def test_tail_windows_widen_with_distance_and_stop_at_the_frontier():
     t = date(2026, 10, 18)
-    base_id, base = 1_055_000_000_000, t - timedelta(days=100)
-    near = sac.tail_window(base_id + 10 * RATE, base_id, base, RATE, t)
-    far = sac.tail_window(base_id + 90 * RATE, base_id, base, RATE, t)
-    assert near.tail and near.expected == base + timedelta(days=10)
+    top = _line(n=25, start=t - timedelta(days=124))     # newest point 100 days ago
+    newest_id = top[-1][0]
+    near = sac.window_for(newest_id + 10 * RATE, top, RATE, t, tail=True)
+    far = sac.window_for(newest_id + 90 * RATE, top, RATE, t, tail=True)
+    assert near.tail and near.expected == t - timedelta(days=90)
     assert (far.expected - far.low) > (near.expected - near.low)
-    # 161 days past the base is today + 61: past the 60-day slack.
-    assert sac.tail_window(base_id + 161 * RATE, base_id, base, RATE, t) is None
+    assert far.high == t
+    # 161 days past the newest point is today + 61: past the 60-day slack.
+    assert sac.window_for(newest_id + 161 * RATE, top, RATE, t, tail=True) is None
 
 
 def test_an_absurd_id_hits_the_frontier_instead_of_overflowing():
     t = date(2026, 10, 18)
-    assert sac.tail_window(sac.INT64_MAX, 1_055_000_000_000, t, RATE, t) is None
+    assert sac.window_for(sac.INT64_MAX, _line(n=25), RATE, t, tail=True) is None
+
+
+def test_the_tail_slack_stays_inside_the_tolerance():
+    """Keeps every tail window non-empty: expected is at most today + slack,
+    and the allowance is at least TOLERANCE_DAYS."""
+    assert sac.FUTURE_SLACK_DAYS < sac.TOLERANCE_DAYS
 
 
 @pytest.mark.parametrize("certainty,width", [("day", 2), ("week", 7), ("month", 30)])
@@ -122,7 +165,7 @@ def _with_db(fn, users=()):
     return run(go())
 
 
-def test_interior_expected_date_is_the_neighbours_median():
+def test_interior_expected_date_follows_the_line():
     async def fn(SL):
         async with SL() as db:
             return await sac.plausible_window(db, MID_ID)
@@ -153,14 +196,22 @@ def test_user_points_cannot_move_the_rate():
     async def fn(SL):
         async with SL() as db:
             before = await sac.tail_rate(db)
-            # 40 approved user points claiming a tenth of the real rate.
-            for i in range(1, 41):
+            # 100 approved user points claiming a tenth of the real rate.
+            for i in range(1, 101):
                 db.add(StructureAgeCalibration(**sac.calibration_values(
                     NEWEST_ID + i * RATE // 10, point_date(POINTS - 1) + timedelta(days=i),
                     "day", datetime(2026, 10, 1))))
             await db.commit()
-            return before, await sac.tail_rate(db)
-    before, after = _with_db(fn)
+            rows = (await db.execute(select(StructureAgeCalibration.structure_id,
+                                            StructureAgeCalibration.anchor_mid))).all()
+            return before, await sac.tail_rate(db), rows
+    before, after, rows = _with_db(fn)
+    # Control: fitted without the triff-only filter, these points drag the
+    # rate well away — so the equality below really tests the filter.
+    cutoff = (datetime.combine(point_date(POINTS - 1), time())
+              - timedelta(days=sac.RATE_WINDOW_DAYS))
+    unfiltered = sac.fit_rate([(r[0], r[1]) for r in rows if r[1] >= cutoff])
+    assert abs(unfiltered - RATE) / RATE > 0.1
     assert before == pytest.approx(RATE, rel=0.01) and after == before
 
 
@@ -176,16 +227,31 @@ def test_triff_baseline_ignores_user_points():
             return (await sac.plausible_window(db, TAIL_ID),
                     await sac.plausible_window(db, TAIL_ID, sources=("triff",)))
     full, baseline = _with_db(fn)
+    want = point_date(POINTS - 1) + timedelta(days=30)
     assert not full.tail and baseline.tail
+    assert abs((full.expected - want).days) <= 1
+    assert abs((baseline.expected - want).days) <= 1
 
 
-def _check(structure_id, anchor, setup=None):
+def _check(structure_id, anchor, setup=None, *, on=None):
+    """check_submission against a fresh table. `on` pins "today" so a run
+    that crosses midnight UTC can't flip a date-boundary assertion."""
     async def fn(SL):
         async with SL() as db:
             if setup:
                 await setup(db)
-            return await sac.check_submission(db, structure_id, anchor, USER)
+            return await sac.check_submission(db, structure_id, anchor, USER, today=on)
     return _with_db(fn, users=[(USER, "user")])
+
+
+def _pending(n):
+    async def setup(db):
+        for i in range(n):
+            db.add(StructureAgeSubmission(structure_id=point_id(i) + 1, anchor_date=point_date(i),
+                                          certainty="day", status="pending", submitted_by=USER,
+                                          submitted_at=datetime(2026, 10, 1)))
+        await db.commit()
+    return setup
 
 
 def test_a_sensible_interior_date_passes():
@@ -194,21 +260,24 @@ def test_a_sensible_interior_date_passes():
 
 
 def test_a_recent_id_claimed_four_years_ago_is_refused():
-    v = _check(MID_ID, today() - timedelta(days=4 * 365))
+    t = today()
+    v = _check(MID_ID, t - timedelta(days=4 * 365), on=t)
     assert not v.ok and v.code == "outside" and "plausible anchor date is" in v.reason
 
 
 def test_a_sensible_tail_date_passes_and_an_old_one_doesnt():
-    assert _check(TAIL_ID, point_date(POINTS - 1) + timedelta(days=28)).ok
-    assert _check(TAIL_ID, today() - timedelta(days=4 * 365)).code == "outside"
+    t = today()
+    assert _check(TAIL_ID, point_date(POINTS - 1) + timedelta(days=28), on=t).ok
+    assert _check(TAIL_ID, t - timedelta(days=4 * 365), on=t).code == "outside"
 
 
 def test_impossible_dates_and_ids_are_refused():
-    assert _check(MID_ID, today() + timedelta(days=1)).code == "invalid"
-    assert _check(MID_ID, date(2016, 1, 1)).code == "invalid"
-    assert _check(1_020_999_999_999, point_date(0)).code == "invalid"
-    assert _check(sac.INT64_MAX + 1, point_date(0)).code == "frontier"
-    assert _check(NEWEST_ID + 200 * RATE, today() - timedelta(days=1)).code == "frontier"
+    t = today()
+    assert _check(MID_ID, t + timedelta(days=1), on=t).code == "invalid"
+    assert _check(MID_ID, date(2016, 1, 1), on=t).code == "invalid"
+    assert _check(1_020_999_999_999, point_date(0), on=t).code == "invalid"
+    assert _check(sac.INT64_MAX + 1, point_date(0), on=t).code == "frontier"
+    assert _check(NEWEST_ID + 200 * RATE, t - timedelta(days=1), on=t).code == "frontier"
 
 
 def test_ids_with_a_point_or_a_pending_claim_are_refused():
@@ -222,11 +291,7 @@ def test_ids_with_a_point_or_a_pending_claim_are_refused():
     assert _check(MID_ID, point_date(100), setup=pending).code == "pending"
 
 
-def test_a_user_can_have_at_most_twenty_pending():
-    async def twenty(db):
-        for i in range(sac.MAX_PENDING_PER_USER):
-            db.add(StructureAgeSubmission(structure_id=point_id(i) + 1, anchor_date=point_date(i),
-                                          certainty="day", status="pending", submitted_by=USER,
-                                          submitted_at=datetime(2026, 10, 1)))
-        await db.commit()
-    assert _check(MID_ID, point_date(100), setup=twenty).code == "limit"
+def test_a_user_can_have_twenty_pending_but_not_twenty_one():
+    assert _check(MID_ID, point_date(100), setup=_pending(sac.MAX_PENDING_PER_USER - 1)).ok
+    v = _check(MID_ID, point_date(100), setup=_pending(sac.MAX_PENDING_PER_USER))
+    assert v.code == "limit" and v.reason == sac.LIMIT_MSG

@@ -7,14 +7,19 @@ and to estimate IDs newer than the newest calibration point.
 
 Upwell structure IDs are allocated roughly in time order — only roughly.
 Measured on the calibration table in 2026-10: half of all points are within a
-day of the median of their 50 nearest neighbours, but 1% are more than 77 days
-off and the worst 130. So a claim is compared with the MEDIAN of many
+day of the median of their 50 nearest neighbours, but 1% are more than 78 days
+off and the worst 130. So a claim is compared with the MEDIAN over many
 neighbours and allowed months, not days. That still refuses what the check is
 for: a recent ID claimed to be years old.
 
-Past the newest point there are no neighbours above, so the expected date is
-extrapolated from the recent ID rate (~14M IDs/day through 2026). The rate is
-fitted on triff-sourced points only, so approved user points can never move it.
+Each neighbour predicts the date by moving its own along the ID rate (~14M
+IDs/day through 2026), and the expected date is the median prediction. Where
+neighbours are dense on both sides that moves them a day or so and the median
+is simply theirs. Where there's a gap — above the newest point, or between the
+stalled triff data and the first user point above it — it extrapolates
+instead of sticking to the far side's dates. The rate is fitted on
+triff-sourced points only, so approved user points can never move it, and a
+user point is one vote among up to fifty.
 """
 from __future__ import annotations
 
@@ -30,9 +35,9 @@ from app.db.models import StructureAgeCalibration, StructureAgeSubmission
 
 NEIGHBOURS = 25              # nearest calibration points taken on each side
 TOLERANCE_DAYS = 120         # allowed distance from the expected date
-TAIL_SPREAD = 0.25           # extra allowance per day extrapolated past the newest points
+TAIL_SPREAD = 0.25           # extra allowance per day of IDs to the nearest point
 FUTURE_SLACK_DAYS = 60       # an ID extrapolating further past today doesn't exist yet
-ESTIMATE_HALF_DAYS = 7       # estimate window half-width at the tail base (triff's tail used ±7)
+ESTIMATE_HALF_DAYS = 7       # estimate half-width next to the newest point (triff's tail used ±7)
 RATE_WINDOW_DAYS = 180       # triff points used to fit the ID rate
 MIN_RATE_POINTS = 20
 DEFAULT_RATE = 14_000_000    # IDs/day through 2026; only when the fit has too little data
@@ -45,6 +50,8 @@ CERTAINTY_DAYS = {"day": 2, "week": 7, "month": 30}
 CERTAINTY_LABELS = {"day": "Exact day", "week": "Within a week", "month": "Roughly that month"}
 
 FRONTIER_MSG = "This ID is higher than any structure yet — check it was pasted whole."
+LIMIT_MSG = (f"You already have {MAX_PENDING_PER_USER} dates awaiting review — "
+             "try again once some have been reviewed.")
 
 # fullmatch, not $ (which allows a trailing newline); [0-9], not \d (which
 # matches non-ASCII digits that int() would happily accept).
@@ -85,7 +92,7 @@ class Window:
     expected: date
     low: date
     high: date
-    tail: bool               # extrapolated past the newest points
+    tail: bool               # nothing above it: extrapolated past the newest point
 
     def contains(self, d: date) -> bool:
         return self.low <= d <= self.high
@@ -104,18 +111,6 @@ def _day(d: datetime | date) -> date:
     return d.date() if isinstance(d, datetime) else d
 
 
-def _median_date(dates) -> date:
-    return date.fromordinal(round(median(_day(d).toordinal() for d in dates)))
-
-
-def interior_window(neighbour_dates, today: date) -> Window:
-    """Window around the median of the neighbours' anchor dates."""
-    expected = _median_date(neighbour_dates)
-    spread = timedelta(days=TOLERANCE_DAYS)
-    return Window(expected, max(expected - spread, CITADEL_RELEASE),
-                  min(expected + spread, today), tail=False)
-
-
 def fit_rate(points) -> float:
     """IDs per day from (structure_id, anchor_mid) pairs. Theil–Sen style:
     sorted by ID, each point is paired with the one half the sample further
@@ -130,30 +125,40 @@ def fit_rate(points) -> float:
         days = (_day(d_b) - _day(d_a)).days
         if days > 0:
             slopes.append((id_b - id_a) / days)
-    return median(slopes) if len(slopes) >= MIN_RATE_POINTS // 2 else DEFAULT_RATE
+    if len(slopes) < MIN_RATE_POINTS // 2:
+        return DEFAULT_RATE
+    rate = median(slopes)
+    return rate if rate > 0 else DEFAULT_RATE
 
 
-def extrapolate(structure_id: int, base_id: int, base_date: date, rate: float,
-                today: date) -> tuple[date, float] | None:
-    """(expected date, days extrapolated) for an ID past the tail base, or
-    None when it lands more than FUTURE_SLACK_DAYS after today. The frontier
-    is checked on plain numbers before any timedelta is built, so an absurd
-    ID can't overflow one."""
-    ahead = max(0.0, (structure_id - base_id) / rate)
-    if base_date.toordinal() + ahead > (today + timedelta(days=FUTURE_SLACK_DAYS)).toordinal():
+def _expected(structure_id: int, neighbours, rate: float) -> tuple[float, float]:
+    """(expected anchor day as an ordinal, days of IDs to the nearest
+    neighbour) from (structure_id, anchor_mid) neighbours: the median of each
+    neighbour's date moved along the ID rate. Plain numbers, so an absurd ID
+    can't overflow a date before the caller has checked the frontier."""
+    predictions = [_day(d).toordinal() + (structure_id - sid) / rate for sid, d in neighbours]
+    gap = min(abs(structure_id - sid) for sid, _ in neighbours) / rate
+    return median(predictions), gap
+
+
+def _past_frontier(expected_ord: float, today: date) -> bool:
+    return expected_ord > (today + timedelta(days=FUTURE_SLACK_DAYS)).toordinal()
+
+
+def window_for(structure_id: int, neighbours, rate: float, today: date, *,
+               tail: bool) -> Window | None:
+    """The plausible window for structure_id given its (structure_id,
+    anchor_mid) calibration neighbours. The allowance is TOLERANCE_DAYS plus
+    TAIL_SPREAD per day of IDs to the nearest neighbour, capped at today and
+    floored at the Citadel release. None when a tail ID (nothing above it)
+    lands more than FUTURE_SLACK_DAYS after today."""
+    expected_ord, gap = _expected(structure_id, neighbours, rate)
+    if tail and _past_frontier(expected_ord, today):
         return None
-    return base_date + timedelta(days=round(ahead)), ahead
-
-
-def tail_window(structure_id: int, base_id: int, base_date: date, rate: float,
-                today: date) -> Window | None:
-    hit = extrapolate(structure_id, base_id, base_date, rate, today)
-    if hit is None:
-        return None
-    expected, ahead = hit
-    spread = timedelta(days=round(TOLERANCE_DAYS + TAIL_SPREAD * ahead))
+    expected = date.fromordinal(round(expected_ord))
+    spread = timedelta(days=round(TOLERANCE_DAYS + TAIL_SPREAD * gap))
     return Window(expected, max(expected - spread, CITADEL_RELEASE),
-                  min(expected + spread, today), tail=True)
+                  min(expected + spread, today), tail=tail)
 
 
 def calibration_values(structure_id: int, anchor_date: date, certainty: str,
@@ -168,27 +173,24 @@ def calibration_values(structure_id: int, anchor_date: date, certainty: str,
 
 
 # ── Database reads ────────────────────────────────────────────────────────
+# Every function here binds structure_id, so each refuses one above INT64_MAX
+# itself rather than trusting its caller.
 
-def _only(stmt, sources):
+def _from_sources(stmt, sources):
     return stmt.where(Cal.source.in_(sources)) if sources else stmt
 
 
 async def _neighbours(db: AsyncSession, structure_id: int, sources):
+    """Up to NEIGHBOURS points either side, nearest first."""
     below = (await db.execute(
-        _only(select(Cal.structure_id, Cal.anchor_mid).where(Cal.structure_id < structure_id),
-              sources).order_by(Cal.structure_id.desc()).limit(NEIGHBOURS))).all()
-    above = (await db.execute(
-        _only(select(Cal.structure_id, Cal.anchor_mid).where(Cal.structure_id > structure_id),
-              sources).order_by(Cal.structure_id.asc()).limit(NEIGHBOURS))).all()
-    return below, above
-
-
-async def _tail_base(db: AsyncSession, sources) -> tuple[int, date]:
-    """Median ID and median anchor date of the NEIGHBOURS highest-ID points."""
-    top = (await db.execute(
-        _only(select(Cal.structure_id, Cal.anchor_mid), sources)
+        _from_sources(select(Cal.structure_id, Cal.anchor_mid)
+                      .where(Cal.structure_id < structure_id), sources)
         .order_by(Cal.structure_id.desc()).limit(NEIGHBOURS))).all()
-    return round(median(r[0] for r in top)), _median_date(r[1] for r in top)
+    above = (await db.execute(
+        _from_sources(select(Cal.structure_id, Cal.anchor_mid)
+                      .where(Cal.structure_id > structure_id), sources)
+        .order_by(Cal.structure_id.asc()).limit(NEIGHBOURS))).all()
+    return below, above
 
 
 async def tail_rate(db: AsyncSession) -> float:
@@ -206,41 +208,46 @@ async def tail_rate(db: AsyncSession) -> float:
 
 async def plausible_window(db: AsyncSession, structure_id: int, *, sources=None,
                            today: date | None = None) -> Window | None:
-    """The plausible anchor-date window for structure_id, or None when it
-    extrapolates past the frontier (FRONTIER_MSG). sources=("triff",) is the
-    baseline approved user points can't move. Pending submissions never count:
-    they aren't in the calibration table. Raises LookupError when there are
-    no points to compare with."""
+    """The plausible anchor-date window for structure_id, or None when it is
+    past the frontier (FRONTIER_MSG). sources=("triff",) is the baseline that
+    approved user points can't move. Pending submissions never count: they
+    aren't in the calibration table. Raises LookupError when there are no
+    points to compare with."""
     today = today or utc_today()
+    if structure_id > INT64_MAX:
+        return None
     below, above = await _neighbours(db, structure_id, sources)
     if not below and not above:
         raise LookupError("no calibration points")
-    if above:
-        return interior_window([r[1] for r in below + above], today)
-    base_id, base_date = await _tail_base(db, sources)
-    return tail_window(structure_id, base_id, base_date, await tail_rate(db), today)
+    return window_for(structure_id, [*below, *above], await tail_rate(db), today,
+                      tail=not above)
 
 
 async def tail_estimate(db: AsyncSession, structure_id: int, *,
                         today: date | None = None) -> dict | None:
     """Estimate for an ID above the newest point: extrapolated at the recent
     rate, window widening with distance, nothing past today (so the age can
-    never go negative). None past the frontier. Only called when the table
-    has points."""
+    never go negative). None past the frontier. Raises LookupError when there
+    are no points below it."""
     today = today or utc_today()
-    base_id, base_date = await _tail_base(db, None)
-    hit = extrapolate(structure_id, base_id, base_date, await tail_rate(db), today)
-    if hit is None:
+    if structure_id > INT64_MAX:
         return None
-    expected, ahead = hit
-    mid = min(expected, today)
-    half = timedelta(days=round(ESTIMATE_HALF_DAYS + TAIL_SPREAD * ahead))
+    below, _ = await _neighbours(db, structure_id, None)
+    if not below:
+        raise LookupError("no calibration points")
+    expected_ord, gap = _expected(structure_id, below, await tail_rate(db))
+    if _past_frontier(expected_ord, today):
+        return None
+    mid = min(date.fromordinal(round(expected_ord)), today)
+    half = timedelta(days=round(ESTIMATE_HALF_DAYS + TAIL_SPREAD * gap))
     low, high = mid - half, min(mid + half, today)
     return {"mid": datetime.combine(mid, time()), "low": datetime.combine(low, time()),
             "high": datetime.combine(high, time()), "days_wide": (high - low).days}
 
 
 async def pending_for(db: AsyncSession, structure_id: int) -> bool:
+    if structure_id > INT64_MAX:
+        return False
     return await db.scalar(
         select(Sub.id).where(Sub.structure_id == structure_id, Sub.status == "pending").limit(1)
     ) is not None
@@ -266,8 +273,7 @@ async def check_submission(db: AsyncSession, structure_id: int, anchor_date: dat
     mine = await db.scalar(select(func.count()).select_from(Sub).where(
         Sub.submitted_by == user_id, Sub.status == "pending"))
     if mine >= MAX_PENDING_PER_USER:
-        return Verdict(False, f"You already have {MAX_PENDING_PER_USER} dates awaiting review — "
-                              "try again once some have been reviewed.", "limit")
+        return Verdict(False, LIMIT_MSG, "limit")
     try:
         window = await plausible_window(db, structure_id, today=today)
     except LookupError:
