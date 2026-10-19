@@ -396,6 +396,8 @@ async def startup():
             "ALTER TABLE update_policy ADD COLUMN held_reason VARCHAR(255)",
             "ALTER TABLE update_policy ADD COLUMN last_skipped_window VARCHAR(10)",
             "ALTER TABLE update_policy ADD COLUMN observed_window VARCHAR(10)",
+            # Structure age user anchor points: where each calibration point came from
+            "ALTER TABLE structure_age_calibration ADD COLUMN source VARCHAR(8) NOT NULL DEFAULT 'triff'",
         ]:
             try:
                 await db.execute(text(stmt))

@@ -100,6 +100,10 @@ NULLABLE_FKS = (
     # ISS-070: the account that removed a character with its history kept. The
     # record outlives the account and then binds the history by EVE owner alone.
     ("kept_character_histories", "user_id"),
+    # Structure age submissions outlive the account: the claim and its review
+    # stay on record, and the admin tab shows "(removed user)".
+    ("structure_age_submissions", "submitted_by"),
+    ("structure_age_submissions", "reviewed_by"),
 )
 
 # (table, column) pairs that hold a users.id but aren't touched by the two
