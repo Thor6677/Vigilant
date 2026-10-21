@@ -12,6 +12,7 @@ from app.db.sde_models import (
     SDEType, SDESystem, SDEJump, SDEStation, SDERegion, SDEConstellation,
     SDEBlueprintMaterial, SDETypeMaterial, SDECompressible, SDEBlueprintInfo,
     SDEBlueprintInvention, SDEBlueprintInventionMaterial, SDEBlueprintInventionSkill,
+    SDEBlueprintMfgSkill,
     SDEGroup, SDETypeSkillReq, SDESkillInfo, SDECertificate, SDECertificateSkill,
     SDEShipMastery,
     SDEWormholeClass, SDEWormholeType, SDEMoon, SDEStar, SDEPlanet,
@@ -1828,3 +1829,126 @@ async def get_sde_version_stamp(db: AsyncSession) -> str:
         select(SDEMeta.value).where(SDEMeta.key == "last_updated")
     )).scalar_one_or_none()
     return row or ""
+
+
+# ── Copy packs (/industry/copy-packs) ─────────────────────────────────────────
+
+async def get_blueprint_tree(
+    db: AsyncSession, root_product_type_id: int, max_depth: int = 10,
+) -> dict[int, dict]:
+    """Every manufacturing blueprint reachable from a product, keyed by the
+    product it makes, in the shape `copy_pack.blueprint_from_row` takes:
+
+        {product_type_id: {"blueprint_type_id", "product_type_id",
+          "product_quantity", "manufacturing_time", "max_production_limit",
+          "copying_time", "invented", "invented_runs",
+          "materials": [(type_id, qty)], "skills": [(skill_id, level)]}}
+
+    Walks every material breadth-first regardless of build/buy, so flipping
+    a toggle on the page never needs another query. Items with no
+    manufacturing blueprint (minerals, PI, reaction products) are simply
+    absent. When several blueprints make one product, a copyable one wins,
+    then the lowest id. A blueprint with no manufacturing materials is
+    skipped, as `find_blueprint_for_product` does."""
+    out: dict[int, dict] = {}
+    seen: set[int] = set()
+    frontier = {root_product_type_id}
+    for _depth in range(max_depth + 1):
+        frontier -= seen
+        if not frontier:
+            break
+        seen |= frontier
+        rows = (await db.execute(
+            select(SDEBlueprintInfo)
+            .where(SDEBlueprintInfo.product_type_id.in_(frontier))
+        )).scalars().all()
+        chosen: dict[int, SDEBlueprintInfo] = {}
+        for r in sorted(rows, key=lambda r: (r.copying_time is None, r.blueprint_type_id)):
+            chosen.setdefault(r.product_type_id, r)
+        if not chosen:
+            break
+        bp_ids = [r.blueprint_type_id for r in chosen.values()]
+
+        materials: dict[int, list] = {}
+        for bid, mid, qty in (await db.execute(
+            select(SDEBlueprintMaterial.blueprint_type_id,
+                   SDEBlueprintMaterial.material_type_id,
+                   SDEBlueprintMaterial.quantity)
+            .where(SDEBlueprintMaterial.blueprint_type_id.in_(bp_ids))
+            .where(SDEBlueprintMaterial.activity_id == 1)
+            .order_by(SDEBlueprintMaterial.id)
+        )).all():
+            materials.setdefault(bid, []).append((mid, qty))
+
+        skills: dict[int, list] = {}
+        for bid, sid, lvl in (await db.execute(
+            select(SDEBlueprintMfgSkill.blueprint_type_id,
+                   SDEBlueprintMfgSkill.skill_type_id,
+                   SDEBlueprintMfgSkill.level)
+            .where(SDEBlueprintMfgSkill.blueprint_type_id.in_(bp_ids))
+            .order_by(SDEBlueprintMfgSkill.id)
+        )).all():
+            skills.setdefault(bid, []).append((sid, lvl))
+
+        # {invented blueprint: runs on the BPC invention produces}
+        invented = dict((await db.execute(
+            select(SDEBlueprintInvention.product_blueprint_type_id,
+                   SDEBlueprintInvention.base_runs)
+            .where(SDEBlueprintInvention.product_blueprint_type_id.in_(bp_ids))
+        )).all())
+
+        frontier = set()
+        for pid, r in chosen.items():
+            mats = materials.get(r.blueprint_type_id)
+            if not mats:
+                continue
+            out[pid] = {
+                "blueprint_type_id": r.blueprint_type_id,
+                "product_type_id": pid,
+                "product_quantity": r.product_quantity or 1,
+                "manufacturing_time": r.manufacturing_time or 0,
+                "max_production_limit": r.max_production_limit,
+                "copying_time": r.copying_time,
+                "invented": r.blueprint_type_id in invented,
+                "invented_runs": invented.get(r.blueprint_type_id),
+                "materials": mats,
+                "skills": skills.get(r.blueprint_type_id, []),
+            }
+            frontier |= {t for t, _q in mats}
+    return out
+
+
+async def search_manufacturable_products(
+    db: AsyncSession, query: str, limit: int = 8,
+) -> list[dict]:
+    """Published items some blueprint manufactures, matching `query`.
+    Shortest name first, so "Archon" ranks above longer names containing it."""
+    q = query.strip().lower()
+    if not q:
+        return []
+    with_materials = (
+        select(SDEBlueprintMaterial.blueprint_type_id)
+        .where(SDEBlueprintMaterial.activity_id == 1)
+    )
+    result = await db.execute(
+        select(SDEType.type_id, SDEType.type_name)
+        .join(SDEBlueprintInfo, SDEBlueprintInfo.product_type_id == SDEType.type_id)
+        .where(SDEBlueprintInfo.blueprint_type_id.in_(with_materials))
+        .where(func.lower(SDEType.type_name).contains(q))
+        .where(SDEType.published == True)  # noqa: E712 — SQL comparison
+        .group_by(SDEType.type_id, SDEType.type_name)
+        .order_by(func.length(SDEType.type_name), SDEType.type_name)
+        .limit(limit)
+    )
+    return [{"type_id": r.type_id, "type_name": r.type_name} for r in result.all()]
+
+
+async def blueprint_copy_data_loaded(db: AsyncSession) -> bool:
+    """False until an SDE import has filled `copying_time`. The columns exist
+    from startup (main.py's ALTERs); the values arrive with the next import."""
+    row = (await db.execute(
+        select(SDEBlueprintInfo.blueprint_type_id)
+        .where(SDEBlueprintInfo.copying_time.isnot(None))
+        .limit(1)
+    )).first()
+    return row is not None
