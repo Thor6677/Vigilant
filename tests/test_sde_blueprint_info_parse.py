@@ -3,6 +3,7 @@
 
 Fixtures are trimmed copies of real 2026-10-20 SDE entries."""
 from app.sde.loader import _parse_blueprint_info_item
+from tests.test_fitting_engine import _needs_update_with
 
 ARCHON_BLUEPRINT = {
     "_key": 23758,
@@ -113,3 +114,17 @@ def test_parse_skips_bad_skill_entries_but_keeps_row():
         {"blueprint_type_id": 100, "skill_type_id": 3380, "level": 1},
         {"blueprint_type_id": 100, "skill_type_id": 3381, "level": 1},
     ]
+
+
+_HEALTHY_EFFECTS = [
+    (5231, "modifyActiveArmorResonancePostPercent", 1),
+    (2737, "boosterShieldCapacityPenalty", 0, 1089),
+]
+
+
+def test_needs_update_reimports_once_for_copy_pack_fields():
+    assert _needs_update_with(_HEALTHY_EFFECTS, copy_marker=False) is True
+
+
+def test_needs_update_quiet_once_copy_pack_marker_is_set():
+    assert _needs_update_with(_HEALTHY_EFFECTS, copy_marker=True) is False

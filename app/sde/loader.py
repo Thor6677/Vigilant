@@ -86,6 +86,13 @@ REFRESH_DAYS = 30
 # single boot forever, since the reimport can never make the check pass.
 EFFECTS_USAGE_CHANCE_MARKER = "effects_usage_chance_v1"
 
+# Copy packs need sde_blueprint_info.max_production_limit / copying_time and
+# sde_blueprint_mfg_skills. An install that imported before they existed has
+# the columns (main.py adds them) but every value NULL, and nothing in the
+# data says so reliably, so this marker makes needs_update() reimport exactly
+# once, the same way as EFFECTS_USAGE_CHANCE_MARKER.
+BLUEPRINT_COPY_MARKER = "blueprint_copy_v1"
+
 
 async def _get_meta(db: AsyncSession, key: str) -> str | None:
     result = await db.execute(text("SELECT value FROM sde_meta WHERE key = :key"), {"key": key})
@@ -129,6 +136,14 @@ async def needs_update(db: AsyncSession) -> bool:
             "sde_meta has no %r marker — this install predates T-049's "
             "fittingUsageChanceAttributeID column. Forcing SDE reimport.",
             EFFECTS_USAGE_CHANCE_MARKER,
+        )
+        return True
+
+    if not await _get_meta(db, BLUEPRINT_COPY_MARKER):
+        log.warning(
+            "sde_meta has no %r marker — this install predates the copy-pack "
+            "blueprint fields. Forcing SDE reimport.",
+            BLUEPRINT_COPY_MARKER,
         )
         return True
 
@@ -1386,6 +1401,8 @@ async def download_and_import(db: AsyncSession):
     # fittingUsageChanceAttributeID, so needs_update() never has to force
     # another reimport just to check for it again.
     await _set_meta(db, EFFECTS_USAGE_CHANCE_MARKER, "1")
+    # Copy packs: this run filled the copy fields and manufacturing skills.
+    await _set_meta(db, BLUEPRINT_COPY_MARKER, "1")
     await _set_meta(db, "last_updated", datetime.now(timezone.utc).isoformat())
     await _set_meta(db, "import_in_progress", "0")
     log.info("SDE import complete.")
