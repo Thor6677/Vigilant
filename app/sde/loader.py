@@ -19,6 +19,7 @@ from app.db.sde_models import (
     SDEType, SDESystem, SDEJump, SDEStation, SDERegion, SDEConstellation, SDEMeta,
     SDEBlueprintMaterial, SDETypeMaterial, SDECompressible, SDEBlueprintInfo,
     SDEBlueprintInvention, SDEBlueprintInventionMaterial, SDEBlueprintInventionSkill,
+    SDEBlueprintMfgSkill,
     SDEGroup, SDETypeSkillReq, SDESkillInfo, SDECertificate, SDECertificateSkill,
     SDEShipMastery,
     SDEPlanet, SDEPlanetSchematic, SDEPlanetSchematicMaterial,
@@ -204,6 +205,49 @@ async def _bulk_insert(db: AsyncSession, table, rows: list[dict]):
     if rows:
         await db.execute(table.insert(), rows)
         await db.commit()
+
+
+def _parse_blueprint_info_item(item: dict):
+    """(info_row | None, mfg_skill_rows) for one blueprints.jsonl entry.
+
+    info_row is the sde_blueprint_info row: manufacturing time and product,
+    plus the two copy-planning fields — `maxProductionLimit` (top level; the
+    most runs one copy can have) and `activities.copying.time` (seconds per
+    run; None when the blueprint has no copying activity, e.g. T2 or
+    faction). mfg_skill_rows are the skills the manufacturing job needs.
+    Entries with no manufacturing activity (reaction formulas) give
+    (None, [])."""
+    acts = item.get("activities", {})
+    mfg = acts.get("manufacturing")
+    if not mfg:
+        return None, []
+    try:
+        bp_type_id = int(item["_key"])
+        time_secs = mfg.get("time")
+        products = mfg.get("products", [])
+        product_type_id, product_qty = None, 1
+        if products:
+            product_type_id = int(products[0].get("typeID", 0)) or None
+            product_qty = int(products[0].get("quantity", 1))
+        if not (time_secs or product_type_id):
+            return None, []
+        copying = acts.get("copying")
+        limit = item.get("maxProductionLimit")
+        info = {
+            "blueprint_type_id": bp_type_id,
+            "product_type_id": product_type_id,
+            "manufacturing_time": time_secs,
+            "product_quantity": product_qty,
+            "max_production_limit": int(limit) if limit else None,
+            "copying_time": int(copying.get("time") or 0) if copying else None,
+        }
+        skills = [{"blueprint_type_id": bp_type_id,
+                   "skill_type_id": int(s["typeID"]),
+                   "level": int(s.get("level", 1))}
+                  for s in mfg.get("skills", []) if s.get("typeID")]
+    except (KeyError, ValueError, TypeError):
+        return None, []
+    return info, skills
 
 
 def _parse_invention_item(item: dict):
@@ -534,37 +578,32 @@ async def download_and_import(db: AsyncSession):
     count += len(batch)
     log.info(f"Imported {count} blueprint material rows")
 
-    # --- blueprint info (manufacturing time + product mapping) ---
-    log.info("Importing blueprint info (time + products)...")
+    # --- blueprint info (manufacturing time + product mapping + the
+    # copy-pack fields) and manufacturing skill requirements ---
+    log.info("Importing blueprint info (time + products + copying) and manufacturing skills...")
     await db.execute(text("DELETE FROM sde_blueprint_info"))
+    await db.execute(text("DELETE FROM sde_blueprint_mfg_skills"))
     await db.commit()
-    count, batch = 0, []
+    count, skill_count, batch, skill_batch = 0, 0, [], []
     for item in _iter_jsonl(zf, "blueprints.jsonl"):
-        mfg = item.get("activities", {}).get("manufacturing")
-        if not mfg:
+        info, skills = _parse_blueprint_info_item(item)
+        if info is None:
             continue
-        bp_type_id = int(item["_key"])
-        time_secs = mfg.get("time")
-        products = mfg.get("products", [])
-        product_type_id = None
-        product_qty = 1
-        if products:
-            product_type_id = int(products[0].get("typeID", 0)) or None
-            product_qty = int(products[0].get("quantity", 1))
-        if time_secs or product_type_id:
-            batch.append({
-                "blueprint_type_id": bp_type_id,
-                "product_type_id": product_type_id,
-                "manufacturing_time": time_secs,
-                "product_quantity": product_qty,
-            })
-            if len(batch) >= 500:
-                await _bulk_insert(db, SDEBlueprintInfo.__table__, batch)
-                count += len(batch)
-                batch = []
+        batch.append(info)
+        skill_batch.extend(skills)
+        if len(batch) >= 500:
+            await _bulk_insert(db, SDEBlueprintInfo.__table__, batch)
+            count += len(batch)
+            batch = []
+        if len(skill_batch) >= 500:
+            await _bulk_insert(db, SDEBlueprintMfgSkill.__table__, skill_batch)
+            skill_count += len(skill_batch)
+            skill_batch = []
     await _bulk_insert(db, SDEBlueprintInfo.__table__, batch)
     count += len(batch)
-    log.info(f"Imported {count} blueprint info rows")
+    await _bulk_insert(db, SDEBlueprintMfgSkill.__table__, skill_batch)
+    skill_count += len(skill_batch)
+    log.info(f"Imported {count} blueprint info rows, {skill_count} manufacturing skill rows")
 
     # --- blueprint invention (T1 -> T2 datacores/decryptor/skills) ---
     log.info("Importing blueprint invention activities...")

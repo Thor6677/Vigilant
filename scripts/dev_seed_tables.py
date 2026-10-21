@@ -115,6 +115,7 @@ COPY_ALL = (
     'sde_blueprint_invention_materials',
     'sde_blueprint_invention_skills',
     'sde_blueprint_materials',
+    'sde_blueprint_mfg_skills',
     'sde_certificate_skills',
     'sde_certificates',
     'sde_compressible',

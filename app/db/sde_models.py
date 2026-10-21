@@ -104,13 +104,16 @@ class SDECompressible(Base):
 
 
 class SDEBlueprintInfo(Base):
-    """Blueprint manufacturing time and product mapping."""
+    """Blueprint manufacturing time and product mapping, plus the two
+    copy-planning fields used by /industry/copy-packs."""
     __tablename__ = "sde_blueprint_info"
 
     blueprint_type_id = Column(Integer, primary_key=True)
     product_type_id = Column(Integer, nullable=True, index=True)
     manufacturing_time = Column(Integer, nullable=True)  # seconds
     product_quantity = Column(Integer, nullable=True, default=1)
+    max_production_limit = Column(Integer, nullable=True)  # most runs one copy can have
+    copying_time = Column(Integer, nullable=True)  # seconds per run; NULL = can't be copied
 
 
 class SDEBlueprintInvention(Base):
@@ -141,6 +144,16 @@ class SDEBlueprintInventionSkill(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     blueprint_type_id = Column(Integer, nullable=False, index=True)
     skill_type_id = Column(Integer, nullable=False)
+
+
+class SDEBlueprintMfgSkill(Base):
+    """Skills a blueprint's manufacturing job needs, with the level."""
+    __tablename__ = "sde_blueprint_mfg_skills"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    blueprint_type_id = Column(Integer, nullable=False, index=True)
+    skill_type_id = Column(Integer, nullable=False)
+    level = Column(Integer, nullable=False)
 
 
 # ── Skill planning SDE tables ───────────────────────────────────────────────

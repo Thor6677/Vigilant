@@ -360,6 +360,9 @@ async def startup():
             # Fitting engine: mass and capacity from invTypes
             "ALTER TABLE sde_types ADD COLUMN mass REAL",
             "ALTER TABLE sde_types ADD COLUMN capacity REAL",
+            # Copy packs: max runs per copy + copy time per run
+            "ALTER TABLE sde_blueprint_info ADD COLUMN max_production_limit INTEGER",
+            "ALTER TABLE sde_blueprint_info ADD COLUMN copying_time INTEGER",
             # Fitting tool: nested folders for saved fits
             "ALTER TABLE user_fittings ADD COLUMN folder_id INTEGER REFERENCES user_fitting_folders(id) ON DELETE SET NULL",
             # Fitting tool: implant loadout persisted with saved fits (ISS-016)
