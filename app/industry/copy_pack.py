@@ -5,8 +5,9 @@ build, work out the blueprint copies to make from the BPOs you own: how many
 copies of each, how many runs per copy, and which BPO they come from. Copies
 are split so the character's manufacturing slots build the tree in parallel.
 
-Pure functions only. The route gathers SDE rows, owned blueprints and skills
-and passes them in, so every rule here is unit-testable.
+No DB or ESI access: the route gathers SDE rows, owned blueprints and skills
+and passes them in, so every rule here is unit-testable. (`split_level`
+reports its choice by setting `.copies` on the Splittables it is handed.)
 
 Quantities follow the real jobs: each copy (and each owned BPC used) is one
 manufacturing job, and a job rounds its materials up on its own, exactly as
@@ -61,9 +62,10 @@ class BlueprintData:
     manufacturing_time: int
     max_production_limit: int | None
     copying_time: int | None
-    materials: tuple = ()
-    skills: tuple = ()          # (skill_id, level) needed to build
+    materials: tuple[tuple[int, int], ...] = ()
+    skills: tuple[tuple[int, int], ...] = ()   # (skill_id, level) needed to build
     invented: bool = False      # this blueprint is an invention product
+    invented_runs: int | None = None   # runs on an invented BPC (no decryptor)
 
     @property
     def copyable(self) -> bool:
@@ -82,6 +84,7 @@ def blueprint_from_row(row: dict) -> BlueprintData:
         materials=tuple(tuple(m) for m in row["materials"]),
         skills=tuple(tuple(s) for s in row["skills"]),
         invented=row["invented"],
+        invented_runs=row.get("invented_runs"),
     )
 
 
@@ -112,9 +115,9 @@ class Facility:
 class PlanInput:
     product_type_id: int
     quantity: int
-    blueprints: dict                      # product_type_id -> BlueprintData
-    bpos: tuple = ()                      # OwnedBlueprint, every source
-    bpcs: tuple = ()                      # OwnedBlueprint the character can use
+    blueprints: dict[int, BlueprintData]  # keyed by product_type_id
+    bpos: tuple[OwnedBlueprint, ...] = ()  # every source
+    bpcs: tuple[OwnedBlueprint, ...] = ()  # the ones the character can use
     build: dict = field(default_factory=dict)        # product_type_id -> bool
     bpo_choice: dict = field(default_factory=dict)   # product_type_id -> item_id
     me_override: dict = field(default_factory=dict)  # product_type_id -> ME, no-BPO items
@@ -148,7 +151,7 @@ class ItemPlan:
     bpo: OwnedBlueprint | None = None
     bpo_options: list = field(default_factory=list)
     bpcs_used: list = field(default_factory=list)    # (OwnedBlueprint, runs used)
-    copies: int = 0
+    copies: int = 0                       # copies to make; BPCs to source if uncopyable
     runs_per_copy: int = 0
     spare_runs: int = 0
     copy_seconds: int | None = None
@@ -250,15 +253,16 @@ def item_levels(inp: PlanInput) -> dict:
     processing (and its tie-breaks) in tree order."""
     levels: dict[int, int] = {}
 
-    def visit(t: int, depth: int) -> None:
-        if depth > MAX_DEPTH or levels.get(t, -1) >= depth:
+    def visit(t: int, depth: int, path: frozenset) -> None:
+        # `path` stops a manufacturing cycle from re-levelling an ancestor.
+        if depth > MAX_DEPTH or t in path or levels.get(t, -1) >= depth:
             return
         levels[t] = depth
         if is_build(inp, t):
             for m, _q in inp.blueprints[t].materials:
-                visit(m, depth + 1)
+                visit(m, depth + 1, path | {t})
 
-    visit(inp.product_type_id, 0)
+    visit(inp.product_type_id, 0, frozenset())
     return levels
 
 
@@ -285,11 +289,12 @@ def tree_rows(inp: PlanInput, demand: dict) -> list:
 # ── Sources ───────────────────────────────────────────────────────────────────
 
 def bpo_options(inp: PlanInput, bp: BlueprintData) -> list:
-    """Owned BPOs of this blueprint, best first: ME, then TE, then one the
-    character can reach."""
+    """Owned BPOs of this blueprint, best first: ME, then one the character
+    can reach, then TE. Reachability beats TE because TE only changes build
+    time, while an unreachable BPO has to be moved before it can be copied."""
     opts = [o for o in inp.bpos
             if o.is_bpo and o.blueprint_type_id == bp.blueprint_type_id]
-    return sorted(opts, key=lambda o: (-o.me, -o.te, not o.reachable, o.item_id))
+    return sorted(opts, key=lambda o: (-o.me, not o.reachable, -o.te, o.item_id))
 
 
 def choose_bpo(inp: PlanInput, product_type_id: int, bp: BlueprintData):
@@ -319,6 +324,14 @@ def assumed_me_te(inp: PlanInput, product_type_id: int, bp: BlueprintData) -> tu
     me, te = INVENTED_ME_TE if bp.invented else DEFAULT_ME_TE
     return (inp.me_override.get(product_type_id, me),
             inp.te_override.get(product_type_id, te))
+
+
+def bpc_run_cap(bp: BlueprintData) -> int | None:
+    """Most runs one BPC of an uncopyable blueprint carries: an invented
+    BPC's runs, else the blueprint's max runs per copy (None = no cap)."""
+    if bp.invented and bp.invented_runs:
+        return bp.invented_runs
+    return bp.max_production_limit or None
 
 
 def cover_item(inp: PlanInput, product_type_id: int, level: int, units: int) -> ItemPlan:
@@ -441,8 +454,9 @@ def split_level(splittable: list, fixed: list, slots: int) -> int:
                 continue
             before = s.copies
             s.copies = _normalised(s.runs, s.copies - 1)
-            if max(ends()) <= best[0]:
-                best, changed = _score(ends()), True
+            e = ends()
+            if max(e) <= best[0]:
+                best, changed = _score(e), True
             else:
                 s.copies = before
     return max(ends())
@@ -477,9 +491,17 @@ def plan(inp: PlanInput) -> Plan:
                 continue
             per_run = run_seconds(inp, bp, ip.te)
             if ip.group == GROUP_NOCOPY:
-                ip.runs_per_copy = ip.copy_runs
-                ip.jobs.append(Job(ip.copy_runs, ip.me, ip.te, ip.copy_runs * per_run))
-                fixed.append(ip.copy_runs * per_run)
+                # Each sourced BPC is its own job, capped at its runs, so
+                # its materials round per job like everything else.
+                cap = bpc_run_cap(bp) or ip.copy_runs
+                ip.copies = math.ceil(ip.copy_runs / cap)
+                ip.runs_per_copy = min(cap, ip.copy_runs)
+                left = ip.copy_runs
+                while left > 0:
+                    n = min(cap, left)
+                    ip.jobs.append(Job(n, ip.me, ip.te, n * per_run))
+                    fixed.append(n * per_run)
+                    left -= n
             else:
                 splittable.append(Splittable(t, ip.copy_runs, per_run,
                                              bp.max_production_limit))
@@ -502,6 +524,10 @@ def plan(inp: PlanInput) -> Plan:
             bp = inp.blueprints[t]
             for job in items[t].jobs:
                 for m, q in bp.materials:
+                    if m in items:
+                        # Only past the depth cut-off: an item is planned
+                        # after all of its parents, never before.
+                        continue
                     demand[m] = demand.get(m, 0) + calc_material(
                         q, job.runs, job.me, f.struct_mat, f.rig_mat, f.sec_mult)
 

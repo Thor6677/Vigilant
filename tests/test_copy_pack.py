@@ -6,8 +6,7 @@ expected split was computed independently while the design was written:
 components level 30.9h over 23 jobs against a 29.7h lower bound.
 """
 import math
-
-import pytest
+import random
 
 from app.industry import copy_pack as cp
 
@@ -16,11 +15,12 @@ AZBEL = cp.Facility(struct_mat=0.99, struct_time=0.80)
 
 
 def bp(product, bp_id, mats=(), time=100, limit=None, copy=10, qty=1,
-       skills=(), invented=False):
+       skills=(), invented=False, invented_runs=None):
     return cp.BlueprintData(
         blueprint_type_id=bp_id, product_type_id=product, product_quantity=qty,
         manufacturing_time=time, max_production_limit=limit, copying_time=copy,
         materials=tuple(mats), skills=tuple(skills), invented=invented,
+        invented_runs=invented_runs,
     )
 
 
@@ -143,14 +143,16 @@ def test_ignoring_owned_bpcs_copies_everything():
     assert p.items[2].has_bpcs   # the switch still shows
 
 
-def test_best_bpo_by_me_then_te_then_reachable():
+def test_best_bpo_by_me_then_reachable_then_te():
+    # A reachable ME10/TE10 beats an unreachable ME10/TE20: TE only changes
+    # build time, an unreachable BPO has to be moved before copying.
     b = bp(1, 101)
     opts = (bpo(1, 101, me=8, te=20), bpo(2, 101, me=10, te=10),
             bpo(3, 101, me=10, te=20, reachable=False),
             bpo(4, 101, me=10, te=20, reachable=True))
     chosen, ranked = cp.choose_bpo(inp(1, 1, [b], bpos=opts), 1, b)
     assert chosen.item_id == 4
-    assert [o.item_id for o in ranked] == [4, 3, 2, 1]
+    assert [o.item_id for o in ranked] == [4, 2, 3, 1]
 
 
 def test_bpo_override_respected_and_stale_override_ignored():
@@ -171,14 +173,36 @@ def test_no_bpo_goes_to_source_elsewhere_with_assumed_me():
     assert ip.copy_seconds is None
 
 
-def test_uncopyable_blueprint_is_can_t_copy_single_job():
+def test_invented_item_is_can_t_copy_with_one_job_per_bpc():
+    # Each invented BPC carries `invented_runs` runs and is its own job.
     top = bp(1, 101, mats=[(2, 30)])
-    t2 = bp(2, 202, copy=None, invented=True, limit=10)
+    t2 = bp(2, 202, copy=None, invented=True, limit=10, invented_runs=1)
     p = cp.plan(inp(1, 1, [top, t2], bpos=(bpo(1, 101, me=0),), build={2: True}))
     ip = p.items[2]
     assert ip.group == cp.GROUP_NOCOPY
     assert (ip.me, ip.te) == cp.INVENTED_ME_TE
-    assert len(ip.jobs) == 1 and ip.jobs[0].runs == 30
+    assert (ip.copies, ip.runs_per_copy) == (30, 1)
+    assert [j.runs for j in ip.jobs] == [1] * 30
+
+
+def test_uncopyable_item_jobs_capped_at_max_runs_per_copy():
+    top = bp(1, 101, mats=[(2, 25)])
+    faction = bp(2, 202, copy=None, limit=10)
+    p = cp.plan(inp(1, 1, [top, faction], bpos=(bpo(1, 101, me=0),), build={2: True}))
+    ip = p.items[2]
+    assert (ip.copies, ip.runs_per_copy) == (3, 10)
+    assert [j.runs for j in ip.jobs] == [10, 10, 5]
+
+
+def test_uncopyable_parent_rounds_children_per_bpc():
+    # A T2 hull from ten 1-run invented BPCs at ME2 in an Azbel: each job
+    # needs ceil(6 x 0.98 x 0.99) = 6 parts, 60 in all. One 10-run job
+    # would need 59 and leave the copy pack a run short.
+    hull = bp(1, 101, mats=[(2, 6)], copy=None, invented=True, invented_runs=1, limit=10)
+    part = bp(2, 202, limit=40)
+    p = cp.plan(inp(1, 10, [hull, part], bpos=(bpo(2, 202),), facility=AZBEL))
+    assert len(p.items[1].jobs) == 10
+    assert p.items[2].units == 60
 
 
 def test_me_override_alone_keeps_the_default_te():
@@ -214,7 +238,8 @@ def test_split_respects_max_runs_per_copy():
     assert (s.copies, s.per_copy) == (4, 25)
 
 
-def test_split_fills_slots_and_never_finishes_later_than_the_start():
+def test_split_fills_slots():
+    # One copy of 12 runs would take 1200s; four copies of 3 use 4 slots.
     s = cp.Splittable(key=1, runs=12, run_seconds=100, max_per_copy=None)
     finish = cp.split_level([s], [], slots=4)
     assert s.copies == 4 and s.per_copy == 3 and finish == 300
@@ -238,13 +263,56 @@ def test_prune_removes_copies_that_do_not_help():
 
 
 def test_spare_runs_reported_for_equal_copies():
+    # 22 runs over 3 slots: three copies of 8, two runs spare.
     hull = bp(1, 101, mats=[(2, 22)], limit=1)
     bay = bp(2, 202, time=16000, limit=40)
     p = cp.plan(inp(1, 1, [hull, bay], bpos=(bpo(1, 101, me=0), bpo(2, 202)),
                     skills={**ALL_FIVE, cp.MASS_PRODUCTION: 0,
                             cp.ADV_MASS_PRODUCTION: 2}))
     ip = p.items[2]
-    assert ip.copies * ip.runs_per_copy - ip.copy_runs == ip.spare_runs
+    assert (ip.copies, ip.runs_per_copy, ip.spare_runs) == (3, 8, 2)
+
+
+def test_owned_bpc_jobs_are_fixed_and_count_toward_the_level():
+    # A 10-run owned BPC is one unsplit job; the copied remainder is split
+    # around it and the level can't finish before the BPC job does.
+    top = bp(1, 101, mats=[(2, 30)])
+    part = bp(2, 202, time=100)
+    p = cp.plan(inp(1, 1, [top, part], bpos=(bpo(1, 101, me=0), bpo(2, 202)),
+                    bpcs=(bpc(9, 202, runs=10),)))
+    ip = p.items[2]
+    bpc_jobs = [j for j in ip.jobs if j.bpc is not None]
+    assert [j.runs for j in bpc_jobs] == [10]
+    assert ip.copy_runs == 20
+    assert dict(p.level_seconds)[1] >= bpc_jobs[0].seconds
+
+
+def test_split_invariants_hold_on_random_levels():
+    rng = random.Random(20261021)
+    for _ in range(300):
+        items = [cp.Splittable(key=i, runs=rng.randint(1, 400),
+                               run_seconds=rng.randint(1, 5000),
+                               max_per_copy=rng.choice([None, 1, 5, 40, 200]))
+                 for i in range(rng.randint(1, 8))]
+        fixed = [rng.randint(1, 50000) for _ in range(rng.randint(0, 3))]
+        slots = rng.randint(1, 11)
+        for s in items:
+            s.copies = s.min_copies
+        start = max(cp.schedule(fixed + [d for s in items for d in s.durations()], slots))
+        finish = cp.split_level(items, fixed, slots)
+        assert finish <= start
+        for s in items:
+            assert s.copies <= s.runs
+            assert s.max_per_copy is None or s.per_copy <= s.max_per_copy
+            assert math.ceil(s.runs / s.per_copy) == s.copies   # no pure-spare copy
+
+
+def test_manufacturing_cycle_terminates_with_product_at_level_zero():
+    a = bp(1, 101, mats=[(2, 1)])
+    b = bp(2, 202, mats=[(1, 1)])
+    p = cp.plan(inp(1, 1, [a, b], bpos=(bpo(1, 101), bpo(2, 202))))
+    assert p.items[1].level == 0 and p.items[2].level == 1
+    assert p.items[2].units == 1
 
 
 # ── Archon fixture (2026-10-20 SDE) ──────────────────────────────────────────
