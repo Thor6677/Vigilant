@@ -207,16 +207,29 @@ async def _bulk_insert(db: AsyncSession, table, rows: list[dict]):
         await db.commit()
 
 
+def _positive_int_or_none(value):
+    """int(value) when it parses to a positive integer, else None."""
+    try:
+        n = int(value)
+    except (ValueError, TypeError):
+        return None
+    return n if n > 0 else None
+
+
 def _parse_blueprint_info_item(item: dict):
     """(info_row | None, mfg_skill_rows) for one blueprints.jsonl entry.
 
     info_row is the sde_blueprint_info row: manufacturing time and product,
     plus the two copy-planning fields — `maxProductionLimit` (top level; the
     most runs one copy can have) and `activities.copying.time` (seconds per
-    run; None when the blueprint has no copying activity, e.g. T2 or
-    faction). mfg_skill_rows are the skills the manufacturing job needs.
-    Entries with no manufacturing activity (reaction formulas) give
-    (None, [])."""
+    run). Each copy field is parsed on its own and is None when missing,
+    malformed or not positive (a copying activity with no time is None, never
+    0), so a bad copy field never drops the row. Only the manufacturing
+    fields can reject an entry: no manufacturing activity (reaction
+    formulas), a bad key, or a bad product give (None, []).
+
+    mfg_skill_rows are the skills the manufacturing job needs; a malformed
+    skill entry is skipped on its own, a missing level defaults to 1."""
     acts = item.get("activities", {})
     mfg = acts.get("manufacturing")
     if not mfg:
@@ -229,24 +242,31 @@ def _parse_blueprint_info_item(item: dict):
         if products:
             product_type_id = int(products[0].get("typeID", 0)) or None
             product_qty = int(products[0].get("quantity", 1))
-        if not (time_secs or product_type_id):
-            return None, []
-        copying = acts.get("copying")
-        limit = item.get("maxProductionLimit")
-        info = {
-            "blueprint_type_id": bp_type_id,
-            "product_type_id": product_type_id,
-            "manufacturing_time": time_secs,
-            "product_quantity": product_qty,
-            "max_production_limit": int(limit) if limit else None,
-            "copying_time": int(copying.get("time") or 0) if copying else None,
-        }
-        skills = [{"blueprint_type_id": bp_type_id,
-                   "skill_type_id": int(s["typeID"]),
-                   "level": int(s.get("level", 1))}
-                  for s in mfg.get("skills", []) if s.get("typeID")]
-    except (KeyError, ValueError, TypeError):
+    except (KeyError, ValueError, TypeError, AttributeError):
         return None, []
+    if not (time_secs or product_type_id):
+        return None, []
+    copying = acts.get("copying")
+    info = {
+        "blueprint_type_id": bp_type_id,
+        "product_type_id": product_type_id,
+        "manufacturing_time": time_secs,
+        "product_quantity": product_qty,
+        "max_production_limit": _positive_int_or_none(item.get("maxProductionLimit")),
+        "copying_time": _positive_int_or_none(
+            copying.get("time") if isinstance(copying, dict) else None),
+    }
+    skills = []
+    raw_skills = mfg.get("skills")
+    for s in raw_skills if isinstance(raw_skills, list) else []:
+        if not isinstance(s, dict) or not s.get("typeID"):
+            continue
+        try:
+            skills.append({"blueprint_type_id": bp_type_id,
+                           "skill_type_id": int(s["typeID"]),
+                           "level": int(s.get("level") or 1)})
+        except (ValueError, TypeError):
+            continue
     return info, skills
 
 

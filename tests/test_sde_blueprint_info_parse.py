@@ -52,8 +52,9 @@ def test_parse_blueprint_without_copying_has_null_copying_time():
         "manufacturing": {"products": [{"typeID": 11371, "quantity": 1}], "time": 600,
                           "skills": [{"typeID": 3380, "level": 1}]},
     }}
-    info, _skills = _parse_blueprint_info_item(item)
+    info, skills = _parse_blueprint_info_item(item)
     assert info["copying_time"] is None
+    assert skills == [{"blueprint_type_id": 11373, "skill_type_id": 3380, "level": 1}]
 
 
 def test_parse_skips_reaction_formulas():
@@ -68,3 +69,47 @@ def test_parse_skips_unparseable_entries():
         "manufacturing": {"products": [{"typeID": 1, "quantity": 1}], "time": 1},
     }}
     assert _parse_blueprint_info_item(item) == (None, [])
+
+
+def _mfg(**extra):
+    return {"_key": 100, "activities": {
+        "manufacturing": {"products": [{"typeID": 200, "quantity": 2}], "time": 60},
+        **extra.pop("acts", {})}, **extra}
+
+
+def test_parse_malformed_max_production_limit_keeps_row():
+    info, _ = _parse_blueprint_info_item(_mfg(maxProductionLimit="abc"))
+    assert info == {
+        "blueprint_type_id": 100, "product_type_id": 200,
+        "manufacturing_time": 60, "product_quantity": 2,
+        "max_production_limit": None, "copying_time": None,
+    }
+
+
+def test_parse_missing_max_production_limit_is_none():
+    info, _ = _parse_blueprint_info_item(_mfg())
+    assert info["max_production_limit"] is None
+
+
+def test_parse_copying_without_time_is_none_not_zero():
+    for copying in ({}, {"time": 0}, {"time": None}, "bad"):
+        info, _ = _parse_blueprint_info_item(_mfg(acts={"copying": copying}))
+        assert info is not None and info["copying_time"] is None
+
+
+def test_parse_skips_bad_skill_entries_but_keeps_row():
+    item = _mfg()
+    item["activities"]["manufacturing"]["skills"] = [
+        {"level": 2},                    # no typeID
+        {"typeID": 3380, "level": None},  # null level -> 1
+        {"typeID": 3381},                # missing level -> 1
+        "garbage",                       # not a dict
+        {"typeID": "x", "level": 1},     # non-integer typeID
+        {"typeID": 3382, "level": "y"},  # non-integer level
+    ]
+    info, skills = _parse_blueprint_info_item(item)
+    assert info is not None
+    assert skills == [
+        {"blueprint_type_id": 100, "skill_type_id": 3380, "level": 1},
+        {"blueprint_type_id": 100, "skill_type_id": 3381, "level": 1},
+    ]

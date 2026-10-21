@@ -105,7 +105,7 @@ class SDECompressible(Base):
 
 class SDEBlueprintInfo(Base):
     """Blueprint manufacturing time and product mapping, plus the two
-    copy-planning fields used by /industry/copy-packs."""
+    copy-planning fields (max runs per copy, copy time per run)."""
     __tablename__ = "sde_blueprint_info"
 
     blueprint_type_id = Column(Integer, primary_key=True)
