@@ -569,7 +569,8 @@ async def startup():
     import asyncio
     # NOT gated by BACKGROUND_JOBS_ENABLED: every page that renders a type or
     # system name needs the SDE tables, and on a seeded dev DB this no-ops
-    # immediately because the tables are already populated.
+    # immediately once the DB carries every sde_meta marker (a dev DB seeded
+    # from a prod DB that predates a marker reimports once).
     asyncio.create_task(ensure_sde_loaded())
 
     # T-080: ix_wallet_snapshots_char_recorded, off the blocking startup

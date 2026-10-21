@@ -2,7 +2,9 @@
 (_parse_blueprint_info_item).
 
 Fixtures are trimmed copies of real 2026-10-20 SDE entries."""
-from app.sde.loader import _parse_blueprint_info_item
+import inspect
+
+from app.sde.loader import _parse_blueprint_info_item, download_and_import
 from tests.test_fitting_engine import _needs_update_with
 
 ARCHON_BLUEPRINT = {
@@ -116,6 +118,8 @@ def test_parse_skips_bad_skill_entries_but_keeps_row():
     ]
 
 
+# needs_update() also requires a populated, non-legacy sde_effects table, which
+# is why fitting effect rows appear here.
 _HEALTHY_EFFECTS = [
     (5231, "modifyActiveArmorResonancePostPercent", 1),
     (2737, "boosterShieldCapacityPenalty", 0, 1089),
@@ -128,3 +132,11 @@ def test_needs_update_reimports_once_for_copy_pack_fields():
 
 def test_needs_update_quiet_once_copy_pack_marker_is_set():
     assert _needs_update_with(_HEALTHY_EFFECTS, copy_marker=True) is False
+
+
+def test_download_and_import_writes_copy_pack_marker():
+    """Deleting this line would make every boot re-download the SDE, and no
+    other test would notice."""
+    assert '_set_meta(db, BLUEPRINT_COPY_MARKER, "1")' in inspect.getsource(
+        download_and_import
+    )

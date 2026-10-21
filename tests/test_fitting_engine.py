@@ -551,6 +551,9 @@ def _needs_update_with(effect_rows, marker=True, copy_marker=True):
     that turns this False to prove the "install predates the marker" path.
     Defaults True so every other caller here, which is testing something
     else entirely, gets the healthy baseline it's assuming.
+
+    `copy_marker` likewise seeds (or omits) BLUEPRINT_COPY_MARKER;
+    tests/test_sde_blueprint_info_parse.py is the file that turns it False.
     """
     tables = (
         "sde_types", "sde_planets", "sde_planet_schematics",
