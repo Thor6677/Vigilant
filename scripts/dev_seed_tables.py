@@ -113,6 +113,7 @@ COPY_ALL = (
     'sde_blueprint_info',
     'sde_blueprint_invention',
     'sde_blueprint_invention_materials',
+    'sde_blueprint_invention_products',
     'sde_blueprint_invention_skills',
     'sde_blueprint_materials',
     'sde_blueprint_mfg_skills',

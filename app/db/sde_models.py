@@ -137,6 +137,19 @@ class SDEBlueprintInventionMaterial(Base):
     quantity = Column(Integer, nullable=False)
 
 
+class SDEBlueprintInventionProduct(Base):
+    """Every blueprint an invention job can produce. sde_blueprint_invention
+    keeps one product per T1 blueprint (its first), but many T1 blueprints
+    invent several (Rifter: Jaguar and Wolf), so copy packs read this table
+    to tell whether a blueprint is invented and how many runs its BPC has."""
+    __tablename__ = "sde_blueprint_invention_products"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    blueprint_type_id = Column(Integer, nullable=False, index=True)  # T1 blueprint invented FROM
+    product_blueprint_type_id = Column(Integer, nullable=False, index=True)  # blueprint invented
+    base_runs = Column(Integer, nullable=True)  # runs on the invented BPC (no decryptor)
+
+
 class SDEBlueprintInventionSkill(Base):
     """Skills (encryption + science) required for an invention attempt."""
     __tablename__ = "sde_blueprint_invention_skills"

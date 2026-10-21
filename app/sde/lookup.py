@@ -12,7 +12,7 @@ from app.db.sde_models import (
     SDEType, SDESystem, SDEJump, SDEStation, SDERegion, SDEConstellation,
     SDEBlueprintMaterial, SDETypeMaterial, SDECompressible, SDEBlueprintInfo,
     SDEBlueprintInvention, SDEBlueprintInventionMaterial, SDEBlueprintInventionSkill,
-    SDEBlueprintMfgSkill,
+    SDEBlueprintInventionProduct, SDEBlueprintMfgSkill,
     SDEGroup, SDETypeSkillReq, SDESkillInfo, SDECertificate, SDECertificateSkill,
     SDEShipMastery,
     SDEWormholeClass, SDEWormholeType, SDEMoon, SDEStar, SDEPlanet,
@@ -1847,9 +1847,13 @@ async def get_blueprint_tree(
     Walks every material breadth-first regardless of build/buy, so flipping
     a toggle on the page never needs another query. Items with no
     manufacturing blueprint (minerals, PI, reaction products) are simply
-    absent. When several blueprints make one product, a copyable one wins,
-    then the lowest id. A blueprint with no manufacturing materials is
-    skipped, as `find_blueprint_for_product` does."""
+    absent, and so is anything deeper than `max_depth` levels below the
+    product. A blueprint with no manufacturing materials never counts, as in
+    `find_blueprint_for_product`. When several blueprints make one product,
+    a published one wins (legacy unpublished blueprints still make a few
+    items; sde_types holds only published types), then a copyable one, then
+    the lowest id. `invented_runs` is the most runs any invention source
+    gives (T3 relics give 20, 10 or 3)."""
     out: dict[int, dict] = {}
     seen: set[int] = set()
     frontier = {root_product_type_id}
@@ -1862,23 +1866,33 @@ async def get_blueprint_tree(
             select(SDEBlueprintInfo)
             .where(SDEBlueprintInfo.product_type_id.in_(frontier))
         )).scalars().all()
-        chosen: dict[int, SDEBlueprintInfo] = {}
-        for r in sorted(rows, key=lambda r: (r.copying_time is None, r.blueprint_type_id)):
-            chosen.setdefault(r.product_type_id, r)
-        if not chosen:
+        if not rows:
             break
-        bp_ids = [r.blueprint_type_id for r in chosen.values()]
+        candidates = [r.blueprint_type_id for r in rows]
 
         materials: dict[int, list] = {}
         for bid, mid, qty in (await db.execute(
             select(SDEBlueprintMaterial.blueprint_type_id,
                    SDEBlueprintMaterial.material_type_id,
                    SDEBlueprintMaterial.quantity)
-            .where(SDEBlueprintMaterial.blueprint_type_id.in_(bp_ids))
+            .where(SDEBlueprintMaterial.blueprint_type_id.in_(candidates))
             .where(SDEBlueprintMaterial.activity_id == 1)
             .order_by(SDEBlueprintMaterial.id)
         )).all():
             materials.setdefault(bid, []).append((mid, qty))
+        published = set((await db.execute(
+            select(SDEType.type_id).where(SDEType.type_id.in_(candidates))
+        )).scalars().all())
+
+        chosen: dict[int, SDEBlueprintInfo] = {}
+        for r in sorted(rows, key=lambda r: (r.blueprint_type_id not in published,
+                                             r.copying_time is None,
+                                             r.blueprint_type_id)):
+            if materials.get(r.blueprint_type_id):
+                chosen.setdefault(r.product_type_id, r)
+        if not chosen:
+            break
+        bp_ids = [r.blueprint_type_id for r in chosen.values()]
 
         skills: dict[int, list] = {}
         for bid, sid, lvl in (await db.execute(
@@ -1890,18 +1904,17 @@ async def get_blueprint_tree(
         )).all():
             skills.setdefault(bid, []).append((sid, lvl))
 
-        # {invented blueprint: runs on the BPC invention produces}
+        # {invented blueprint: most runs any invention source gives}
         invented = dict((await db.execute(
-            select(SDEBlueprintInvention.product_blueprint_type_id,
-                   SDEBlueprintInvention.base_runs)
-            .where(SDEBlueprintInvention.product_blueprint_type_id.in_(bp_ids))
+            select(SDEBlueprintInventionProduct.product_blueprint_type_id,
+                   func.max(SDEBlueprintInventionProduct.base_runs))
+            .where(SDEBlueprintInventionProduct.product_blueprint_type_id.in_(bp_ids))
+            .group_by(SDEBlueprintInventionProduct.product_blueprint_type_id)
         )).all())
 
         frontier = set()
         for pid, r in chosen.items():
-            mats = materials.get(r.blueprint_type_id)
-            if not mats:
-                continue
+            mats = materials[r.blueprint_type_id]
             out[pid] = {
                 "blueprint_type_id": r.blueprint_type_id,
                 "product_type_id": pid,

@@ -19,6 +19,7 @@ from app.db.sde_models import (
     SDEType, SDESystem, SDEJump, SDEStation, SDERegion, SDEConstellation, SDEMeta,
     SDEBlueprintMaterial, SDETypeMaterial, SDECompressible, SDEBlueprintInfo,
     SDEBlueprintInvention, SDEBlueprintInventionMaterial, SDEBlueprintInventionSkill,
+    SDEBlueprintInventionProduct,
     SDEBlueprintMfgSkill,
     SDEGroup, SDETypeSkillReq, SDESkillInfo, SDECertificate, SDECertificateSkill,
     SDEShipMastery,
@@ -283,6 +284,28 @@ def _parse_blueprint_info_item(item: dict):
         except (ValueError, TypeError):
             continue
     return info, skills
+
+
+def _parse_invention_products(item: dict) -> list[dict]:
+    """One sde_blueprint_invention_products row per product of a
+    blueprints.jsonl entry's invention activity. `_parse_invention_item`
+    keeps only the first product; this keeps every one."""
+    inv = item.get("activities", {}).get("invention")
+    if not isinstance(inv, dict):
+        return []
+    try:
+        bp_id = int(item["_key"])
+    except (KeyError, ValueError, TypeError):
+        return []
+    rows = []
+    for p in inv.get("products") or []:
+        try:
+            rows.append({"blueprint_type_id": bp_id,
+                         "product_blueprint_type_id": int(p["typeID"]),
+                         "base_runs": int(p.get("quantity") or 1)})
+        except (KeyError, ValueError, TypeError, AttributeError):
+            continue
+    return rows
 
 
 def _parse_invention_item(item: dict):
@@ -645,10 +668,16 @@ async def download_and_import(db: AsyncSession):
     await db.execute(text("DELETE FROM sde_blueprint_invention"))
     await db.execute(text("DELETE FROM sde_blueprint_invention_materials"))
     await db.execute(text("DELETE FROM sde_blueprint_invention_skills"))
+    await db.execute(text("DELETE FROM sde_blueprint_invention_products"))
     await db.commit()
-    info_count, mat_count, skill_count = 0, 0, 0
-    info_batch, mat_batch, skill_batch = [], [], []
+    info_count, mat_count, skill_count, product_count = 0, 0, 0, 0
+    info_batch, mat_batch, skill_batch, product_batch = [], [], [], []
     for item in _iter_jsonl(zf, "blueprints.jsonl"):
+        product_batch.extend(_parse_invention_products(item))
+        if len(product_batch) >= 500:
+            await _bulk_insert(db, SDEBlueprintInventionProduct.__table__, product_batch)
+            product_count += len(product_batch)
+            product_batch = []
         info, mats, skills = _parse_invention_item(item)
         if info is None:
             continue
@@ -673,7 +702,10 @@ async def download_and_import(db: AsyncSession):
     mat_count += len(mat_batch)
     await _bulk_insert(db, SDEBlueprintInventionSkill.__table__, skill_batch)
     skill_count += len(skill_batch)
-    log.info(f"Imported {info_count} invention activities, {mat_count} invention materials, {skill_count} invention skills")
+    await _bulk_insert(db, SDEBlueprintInventionProduct.__table__, product_batch)
+    product_count += len(product_batch)
+    log.info(f"Imported {info_count} invention activities, {mat_count} invention materials, "
+             f"{skill_count} invention skills, {product_count} invention products")
 
     # --- npcCorporations (LP faction mapping: corp -> owning NPC faction,
     # NOT ESI's per-corp `faction_id`, which means FW enlistment — see
