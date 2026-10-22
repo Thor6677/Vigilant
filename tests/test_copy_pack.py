@@ -185,13 +185,45 @@ def test_invented_item_is_can_t_copy_with_one_job_per_bpc():
     assert [j.runs for j in ip.jobs] == [1] * 30
 
 
+def test_invented_item_with_a_copy_time_but_no_bpo_is_sourced_not_copied():
+    # Real T2 blueprints carry copy times (T2 BPOs exist), so "invented and
+    # no BPO" must land in Can't copy, at invented ME/TE, one job per BPC.
+    top = bp(1, 101, mats=[(2, 3)])
+    t2 = bp(2, 202, copy=96000, invented=True, invented_runs=1, limit=10)
+    p = cp.plan(inp(1, 1, [top, t2], bpos=(bpo(1, 101, me=0),), build={2: True}))
+    ip = p.items[2]
+    assert ip.group == cp.GROUP_NOCOPY
+    assert (ip.me, ip.te) == cp.INVENTED_ME_TE
+    assert [j.runs for j in ip.jobs] == [1, 1, 1]
+
+
+def test_invented_item_with_an_owned_bpo_is_copied():
+    top = bp(1, 101, mats=[(2, 3)])
+    t2 = bp(2, 202, copy=96000, invented=True, invented_runs=1, limit=10)
+    p = cp.plan(inp(1, 1, [top, t2], bpos=(bpo(1, 101, me=0), bpo(2, 202, me=8, te=16))))
+    ip = p.items[2]
+    assert ip.group == cp.GROUP_COPY and (ip.me, ip.te) == (8, 16)
+
+
 def test_uncopyable_item_jobs_capped_at_max_runs_per_copy():
     top = bp(1, 101, mats=[(2, 25)])
     faction = bp(2, 202, copy=None, limit=10)
     p = cp.plan(inp(1, 1, [top, faction], bpos=(bpo(1, 101, me=0),), build={2: True}))
     ip = p.items[2]
-    assert (ip.copies, ip.runs_per_copy) == (3, 10)
+    assert (ip.copies, ip.runs_per_copy, ip.spare_runs) == (3, 10, 5)
     assert [j.runs for j in ip.jobs] == [10, 10, 5]
+
+
+def test_uncopyable_item_with_an_owned_bpo_is_one_job():
+    # Nothing to source, and a BPO can only be in one job at a time.
+    top = bp(1, 101, mats=[(2, 25)])
+    faction = bp(2, 202, copy=None, limit=10)
+    p = cp.plan(inp(1, 1, [top, faction],
+                    bpos=(bpo(1, 101, me=0), bpo(2, 202, me=5, te=10)), build={2: True}))
+    ip = p.items[2]
+    assert ip.group == cp.GROUP_NOCOPY and (ip.me, ip.te) == (5, 10)
+    assert [j.runs for j in ip.jobs] == [25]
+    assert (ip.copies, ip.spare_runs) == (1, 0)
 
 
 def test_uncopyable_parent_rounds_children_per_bpc():

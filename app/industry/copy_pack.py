@@ -48,8 +48,8 @@ DEFAULT_ME_TE = (10, 20)
 INVENTED_ME_TE = (2, 4)    # an invented T2 BPC with no decryptor
 
 GROUP_COPY = "copy"            # copy it from an owned BPO
-GROUP_ELSEWHERE = "elsewhere"  # copyable, but no BPO is owned
-GROUP_NOCOPY = "nocopy"        # the blueprint has no copying activity
+GROUP_ELSEWHERE = "elsewhere"  # copyable T1-style blueprint, but no BPO is owned
+GROUP_NOCOPY = "nocopy"        # no copying activity, or invented with no BPO
 
 
 @dataclass(frozen=True)
@@ -350,14 +350,17 @@ def cover_item(inp: PlanInput, product_type_id: int, level: int, units: int) -> 
         used.append((o, n))
         remaining -= n
 
-    if not bp.copyable:
-        group = GROUP_NOCOPY
-        me, te = (bpo.me, bpo.te) if bpo else assumed_me_te(inp, product_type_id, bp)
-    elif bpo is not None:
+    if bp.copyable and bpo is not None:
         group, me, te = GROUP_COPY, bpo.me, bpo.te
-    else:
+    elif bp.copyable and not bp.invented:
         group = GROUP_ELSEWHERE
         me, te = assumed_me_te(inp, product_type_id, bp)
+    else:
+        # No copying activity, or an invented (T2) blueprint with no BPO to
+        # copy from (the SDE gives T2 blueprints copy times because T2 BPOs
+        # exist): its BPCs come from invention or the market.
+        group = GROUP_NOCOPY
+        me, te = (bpo.me, bpo.te) if bpo else assumed_me_te(inp, product_type_id, bp)
 
     return ItemPlan(
         product_type_id=product_type_id, level=level, units=units, runs=runs,
@@ -492,10 +495,13 @@ def plan(inp: PlanInput) -> Plan:
             per_run = run_seconds(inp, bp, ip.te)
             if ip.group == GROUP_NOCOPY:
                 # Each sourced BPC is its own job, capped at its runs, so
-                # its materials round per job like everything else.
-                cap = bpc_run_cap(bp) or ip.copy_runs
+                # its materials round per job like everything else. An owned
+                # BPO needs nothing sourced, and a blueprint can only be in
+                # one job at a time, so it builds everything in one job.
+                cap = ip.copy_runs if ip.bpo else (bpc_run_cap(bp) or ip.copy_runs)
                 ip.copies = math.ceil(ip.copy_runs / cap)
                 ip.runs_per_copy = min(cap, ip.copy_runs)
+                ip.spare_runs = ip.copies * ip.runs_per_copy - ip.copy_runs
                 left = ip.copy_runs
                 while left > 0:
                     n = min(cap, left)
@@ -525,8 +531,9 @@ def plan(inp: PlanInput) -> Plan:
             for job in items[t].jobs:
                 for m, q in bp.materials:
                     if m in items:
-                        # Only past the depth cut-off: an item is planned
-                        # after all of its parents, never before.
+                        # Only past the depth cut-off or on a manufacturing
+                        # cycle: otherwise an item is planned after all of
+                        # its parents, never before.
                         continue
                     demand[m] = demand.get(m, 0) + calc_material(
                         q, job.runs, job.me, f.struct_mat, f.rig_mat, f.sec_mult)
