@@ -190,7 +190,7 @@ def test_plan_renders_groups_tree_and_skills(monkeypatch):
         r = _plan(_client(), state_json=json.dumps({"build": {str(PLATES): True}}))
         assert r.status_code == 200
         text = r.text
-        assert "Copy (1)" in text                      # the Archon hull
+        assert "Make copies (1)" in text                # the Archon hull
         assert "2 × 1" in text                         # 2 copies of 1 run
         assert "Source elsewhere: no BPO (1)" in text  # plates: no BPO owned
         assert "Can&#39;t copy: buy or source (0)" in text or "Can't copy: buy or source (0)" in text
@@ -541,6 +541,70 @@ def test_phone_layout_orders_setup_skills_tree_then_results():
         order[sel] = int(n)
     ranked = sorted(order, key=order.get)
     assert ranked == [".cp-left > .b-section", "#cp-skills", "#cp-tree", ".cp-right"]
+
+
+PLATES_BPC = cp.OwnedBlueprint(7010, PLATES_BP, False, 9, 14, 40, owner_name="Builder",
+                               location_id=None, location_label="Personal Hangar")
+
+
+def test_results_lead_with_the_pack_then_the_work_lists(monkeypatch):
+    teardown = _seeded_db()
+    try:
+        _stub_esi(monkeypatch, bpos=[HULL_BPO], bpcs=[PLATES_BPC])
+        r = _plan(_client(), state_json=json.dumps({"build": {str(PLATES): True}}))
+        text = r.text
+        assert "Pack: 3 BPCs (2 new, 1 existing)" in text
+        assert "2 × 1 runs · 10/20 · new copy" in text
+        assert "1 × 40 runs · 9/14 · existing, uses 12 of 40" in text
+        assert text.index("Pack:") < text.index("1 · Make copies (1)") < text.index("2 · Collect BPCs (1)")
+        assert text.count("Personal Hangar") >= 1          # the place heading
+    finally:
+        teardown()
+
+
+def _synced_skills(monkeypatch):
+    """Give the planner trained skills, so the route adds no "no synced skills" note."""
+    async def fake_skills(db, char, overrides):
+        levels = {sid: 5 for sid, _label in cp.PLANNER_SKILLS}
+        return levels, dict(levels), []
+    monkeypatch.setattr(copy_packs, "_skills", fake_skills)
+
+
+def test_results_fold_the_minor_sections_with_counts(monkeypatch):
+    teardown = _seeded_db()
+    try:
+        _stub_esi(monkeypatch, bpos=[HULL_BPO], notes=["Something is off."])
+        _synced_skills(monkeypatch)
+        r = _plan(_client(), state_json=json.dumps({"build": {str(PLATES): True}}))
+        text = r.text
+        assert text.count("<details") == 3
+        assert "Source elsewhere: no BPO (1)" in text
+        assert "Can&#39;t copy: buy or source (0)" in text or "Can't copy: buy or source (0)" in text
+        assert "Warnings (1)" in text and "Something is off." in text
+    finally:
+        teardown()
+
+
+def test_results_without_warnings_have_no_warnings_fold(monkeypatch):
+    teardown = _seeded_db()
+    try:
+        _stub_esi(monkeypatch, bpos=[HULL_BPO])
+        _synced_skills(monkeypatch)
+        text = _plan(_client()).text
+        assert "Warnings (" not in text
+    finally:
+        teardown()
+
+
+def test_pack_with_nothing_to_hand_over(monkeypatch):
+    teardown = _seeded_db()
+    try:
+        _stub_esi(monkeypatch)                      # no BPO, no BPC
+        text = _plan(_client()).text
+        assert "Pack: 0 BPCs (0 new, 0 existing)" in text
+        assert "Nothing to hand over yet." in text
+    finally:
+        teardown()
 
 
 # ── cache TTL ────────────────────────────────────────────────────────────────

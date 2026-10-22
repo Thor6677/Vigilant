@@ -25,6 +25,7 @@ from app.esi import character as esi_char
 from app.esi import corporation as esi_corp
 from app.esi.client import ESIClient, refresh_token
 from app.industry import copy_pack as cp
+from app.industry import copy_pack_view as view
 from app.industry.copy_pack_form import parse_plan_form
 from app.industry.manufacturing import RIGS, SEC_STATUS, STRUCTURES, format_time
 from app.routes.blueprints import LOCATION_FLAGS, _fetch_all_pages
@@ -339,11 +340,14 @@ async def copy_packs_plan(request: Request, db: AsyncSession = Depends(get_db)):
 
     type_ids = {r.product_type_id for r in plan.tree}
     type_ids |= {sid for ip in plan.items.values() for sid, _lvl in ip.missing_skills}
+    names = await sde.type_ids_to_names(db, sorted(type_ids))
+    location_names = await _location_names(db, plan, candidates)
+    collect = view.group_bpcs(plan, location_names, names)
     return templates.TemplateResponse(request, "partials/copy_pack_plan.html", {
         "plan": plan,
         "blueprints": blueprints,
-        "names": await sde.type_ids_to_names(db, sorted(type_ids)),
-        "location_names": await _location_names(db, plan, candidates),
+        "names": names,
+        "location_names": location_names,
         "copy_loaded": await sde.blueprint_copy_data_loaded(db),
         "notes": notes,
         "skill_rows": skill_rows,
@@ -356,5 +360,7 @@ async def copy_packs_plan(request: Request, db: AsyncSession = Depends(get_db)):
         "copy_items": plan.group(cp.GROUP_COPY),
         "elsewhere_items": plan.group(cp.GROUP_ELSEWHERE),
         "nocopy_items": plan.group(cp.GROUP_NOCOPY),
-        "bpc_items": plan.bpc_items(),
+        "pack": view.build_pack(plan),
+        "collect": collect,
+        "collect_total": sum(len(g.rows) for g in collect),
     })

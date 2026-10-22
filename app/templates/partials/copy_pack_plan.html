@@ -9,11 +9,10 @@
 {%- macro where(o) -%}{{ o.owner_name }}{% set named = location_names.get(o.location_id) %}{% set loc = (named ~ ', ' ~ o.location_label if named and o.location_label.startswith('Corp Hangar') else (named or o.location_label)) %}{% if loc %}, {{ loc }}{% endif %}{%- endmacro -%}
 {%- macro skill_chips(ip) -%}{% for sid, lvl in ip.missing_skills %} <span class="cp-chip cp-chip--warn">needs {{ item_name(sid) }} {{ lvl }}</span>{% endfor %}{%- endmacro -%}
 
-{% if notes or not copy_loaded %}
+{% if not copy_loaded %}
 <div class="b-section">
     <div class="b-panel cp-notes">
-        {% if not copy_loaded %}<div>Copy data hasn't been imported from the SDE yet, so every blueprint shows as "can't copy" until the next SDE import finishes.</div>{% endif %}
-        {% for n in notes %}<div>{{ n }}</div>{% endfor %}
+        <div>Copy data hasn't been imported from the SDE yet, so every blueprint shows as "can't copy" until the next SDE import finishes.</div>
     </div>
 </div>
 {% endif %}
@@ -31,8 +30,26 @@
 </div>
 
 <div class="b-section">
+    <div class="b-panel cp-pack">
+        <div class="b-panel-head"><span class="b-label">Pack: {{ pack.total }} BPCs ({{ pack.new }} new, {{ pack.existing }} existing)</span></div>
+        {%- for e in pack.entries %}
+        <div class="b-table-row cp-row cp-pack-row">
+            <span style="flex:3;">{{ item_name(e.product_type_id) }}</span>
+            <span style="flex:4;">
+                {%- for l in e.lines %}
+                <div>{{ l.count }} × {{ l.runs }} runs · {{ l.me }}/{{ l.te }} · {% if l.kind == 'copy' %}new copy{% else %}existing, uses {{ l.uses }} of {{ l.runs }}{% endif %}</div>
+                {%- endfor %}
+            </span>
+        </div>
+        {%- else %}
+        <div class="b-empty">Nothing to hand over yet.</div>
+        {%- endfor %}
+    </div>
+</div>
+
+<div class="b-section">
     <div class="b-panel">
-        <div class="b-panel-head"><span class="b-label">Copy ({{ copy_items | length }})</span></div>
+        <div class="b-panel-head"><span class="b-label">1 · Make copies ({{ copy_items | length }})</span></div>
         {% if copy_items %}
         <div class="b-table-row m-head cp-head">
             <span style="flex:3;">Blueprint</span>
@@ -56,24 +73,27 @@
     </div>
 </div>
 
-{% if bpc_items %}
+{% if collect %}
 <div class="b-section">
     <div class="b-panel">
-        <div class="b-panel-head"><span class="b-label">Use existing BPCs ({{ bpc_items | length }})</span></div>
-        {%- for ip in bpc_items %}{% for o, n in ip.bpcs_used %}
+        <div class="b-panel-head"><span class="b-label">2 · Collect BPCs ({{ collect_total }})</span></div>
+        {%- for g in collect %}
+        <div class="cp-place">{{ g.place }} <span class="b-muted-sm">({{ g.rows | length }})</span></div>
+        {%- for row in g.rows %}
         <div class="b-table-row cp-row">
-            <span style="flex:3;">{{ item_name(ip.product_type_id) }}{{ skill_chips(ip) }}</span>
-            <span style="flex:3;">{{ o.me }}/{{ o.te }} · {{ where(o) }}</span>
-            <span style="flex:2;text-align:right;">uses {{ n }} of {{ o.runs }} runs</span>
+            <span style="flex:3;">{{ item_name(row.product_type_id) }}{{ skill_chips(plan.items[row.product_type_id]) }}</span>
+            <span style="flex:1;">{{ row.me }}/{{ row.te }}</span>
+            <span style="flex:2;text-align:right;">uses {{ row.uses }} of {{ row.runs }} runs</span>
         </div>
-        {%- endfor %}{% endfor %}
+        {%- endfor %}
+        {%- endfor %}
     </div>
 </div>
 {% endif %}
 
-<div class="b-section">
+<details class="b-section cp-fold">
+    <summary>Source elsewhere: no BPO ({{ elsewhere_items | length }})</summary>
     <div class="b-panel">
-        <div class="b-panel-head"><span class="b-label">Source elsewhere: no BPO ({{ elsewhere_items | length }})</span></div>
         {%- for ip in elsewhere_items %}
         <div class="b-table-row cp-row">
             <span style="flex:3;">{{ item_name(ip.product_type_id) }}{{ skill_chips(ip) }}</span>
@@ -84,11 +104,11 @@
         <div class="b-empty">You own a BPO for everything you're building.</div>
         {%- endfor %}
     </div>
-</div>
+</details>
 
-<div class="b-section">
+<details class="b-section cp-fold">
+    <summary>Can't copy: buy or source ({{ nocopy_items | length }})</summary>
     <div class="b-panel">
-        <div class="b-panel-head"><span class="b-label">Can't copy: buy or source ({{ nocopy_items | length }})</span></div>
         {%- if nocopy_items | selectattr("bpo", "none") | list %}
         <div class="cp-notes">Runs per BPC assume no decryptor and the best invention source (or the blueprint's max runs per copy).</div>
         {%- endif %}
@@ -102,7 +122,16 @@
         <div class="b-empty">T2, faction and other uncopyable items you set to Build land here.</div>
         {%- endfor %}
     </div>
-</div>
+</details>
+
+{% if notes %}
+<details class="b-section cp-fold">
+    <summary>Warnings ({{ notes | length }})</summary>
+    <div class="b-panel cp-notes">
+        {% for n in notes %}<div>{{ n }}</div>{% endfor %}
+    </div>
+</details>
+{% endif %}
 
 <div id="cp-skills" hx-swap-oob="true">
 <div class="b-section">

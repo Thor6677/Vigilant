@@ -3004,6 +3004,10 @@ button.cp-chip { cursor: pointer; }
 .cp-chip--warn { border-color: var(--accent); color: var(--accent); }
 .cp-chip--bad { border-color: var(--danger); color: var(--danger); }
 .cp-search-row { cursor: pointer; }
+.cp-fold > summary { cursor: pointer; padding: 0.6rem 0.75rem; border: 1px solid var(--border); font-size: 11px; color: var(--muted); }
+.cp-fold[open] > summary { margin-bottom: 0.4rem; }
+.cp-place { padding: 0.5rem 0.5rem 0.2rem; font-size: 10px; letter-spacing: 0.05em; color: var(--accent); border-bottom: 1px solid var(--border); }
+.cp-pack-row > span:last-child > div { padding: 1px 0; }
 @media (max-width: 768px) {
     /* One column in the order you work through it: Setup, Skills, the
        build/buy Tree, then the Results they produce. */
