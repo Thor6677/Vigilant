@@ -3008,15 +3008,25 @@ button.cp-chip { cursor: pointer; }
 .cp-fold[open] > summary { margin-bottom: 0.4rem; }
 .cp-place { padding: 0.5rem 0.5rem 0.2rem; font-size: 10px; letter-spacing: 0.05em; color: var(--accent); border-bottom: 1px solid var(--border); }
 .cp-pack-row > span:last-child > div { padding: 1px 0; }
+.cp-steps, .cp-stepnav, .cp-tree-open, .cp-tree-up { display: none; }
+.cp-steps { gap: 0.3rem; margin-bottom: 0.75rem; }
+.cp-step { flex: 1; min-height: 40px; padding: 0 0.2rem; background: none; border: 1px solid var(--border); color: var(--muted); font-family: inherit; font-size: 10px; letter-spacing: 0.04em; cursor: pointer; }
+.cp-step-on { border-color: var(--accent); color: var(--accent); }
+.cp-stepnav { gap: 0.5rem; margin-top: 0.75rem; }
+.cp-stepnav .b-btn { flex: 1; min-height: 44px; border: 1px solid var(--border); }
+.cp-stepnav .b-btn:disabled { opacity: 0.4; cursor: default; }
 @media (max-width: 768px) {
-    /* One column in the order you work through it: Setup, Skills, the
-       build/buy Tree, then the Results they produce. */
+    /* One step at a time: Setup, Skills, Tree, Results. #cp-grid's data-step
+       (set by the page script) picks which section shows. */
+    .cp-steps, .cp-stepnav { display: flex; }
     .cp-grid { flex-direction: column; gap: 0; }
     .cp-left { display: contents; }
-    .cp-left > .b-section { order: 1; width: 100%; }
-    #cp-skills { order: 2; width: 100%; }
-    #cp-tree { order: 3; width: 100%; }
-    .cp-right { order: 4; flex: none; width: 100%; }
+    .cp-left > .b-section, #cp-skills, #cp-tree, .cp-right { display: none; width: 100%; }
+    .cp-right { flex: none; }
+    .cp-grid[data-step="1"] .cp-left > .b-section { display: block; }
+    .cp-grid[data-step="2"] #cp-skills { display: block; }
+    .cp-grid[data-step="3"] #cp-tree { display: block; }
+    .cp-grid[data-step="4"] .cp-right { display: block; }
     .cp-tree-row { flex-wrap: wrap; }
     .cp-tree-name { flex-basis: 100%; }
     .cp-row:not(.m-row) { flex-wrap: wrap; }

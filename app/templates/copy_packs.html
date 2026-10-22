@@ -25,7 +25,13 @@
 <input type="hidden" name="state_json" id="cp-state" value="{}">
 <input type="hidden" name="skills_json" id="cp-skills-json" value="{}">
 
-<div class="cp-grid">
+<div id="cp-steps" class="cp-steps" role="tablist">
+    {% for n, label in [(1, 'Setup'), (2, 'Skills'), (3, 'Tree'), (4, 'Results')] %}
+    <button type="button" role="tab" class="cp-step{% if n == 1 %} cp-step-on{% endif %}" data-click="cpStep" data-step="{{ n }}" aria-selected="{{ 'true' if n == 1 else 'false' }}">{{ n }} {{ label }}</button>
+    {% endfor %}
+</div>
+
+<div class="cp-grid" id="cp-grid" data-step="1">
     <div class="cp-left">
         <div class="b-section">
             <div class="b-panel">
@@ -94,6 +100,11 @@
     <div class="cp-right" id="cp-results">
         <div class="b-section"><div class="b-empty">Pick a product to see which blueprint copies to make.</div></div>
     </div>
+</div>
+
+<div id="cp-stepnav" class="cp-stepnav">
+    <button type="button" id="cp-step-back" class="b-btn" data-click="cpStepNav" data-dir="-1" disabled>Back</button>
+    <button type="button" id="cp-step-next" class="b-btn" data-click="cpStepNav" data-dir="1">Next: Skills</button>
 </div>
 </form>
 
@@ -195,6 +206,30 @@
         setProductState(st);
         replan();
     };
+    /* Phone steps. The four sections stay in the page (the plan response
+       swaps them in place); on a phone the CSS shows only the one named by
+       #cp-grid's data-step. Above 768px these controls are hidden. A reload
+       always starts at Setup. */
+    var STEP_NAMES = ['Setup', 'Skills', 'Tree', 'Results'];
+    var step = 1;
+    function setStep(n, quiet) {
+        step = Math.max(1, Math.min(STEP_NAMES.length, n));
+        el('cp-grid').dataset.step = String(step);
+        Array.prototype.forEach.call(document.querySelectorAll('#cp-steps [data-step]'), function (b) {
+            var on = b.dataset.step === String(step);
+            b.classList.toggle('cp-step-on', on);
+            b.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+        el('cp-step-back').disabled = step === 1;
+        var next = el('cp-step-next');
+        next.disabled = step === STEP_NAMES.length;
+        next.textContent = step === STEP_NAMES.length ? 'Done' : 'Next: ' + STEP_NAMES[step];
+        var bar = el('cp-steps');
+        if (!quiet && bar.scrollIntoView) bar.scrollIntoView();
+    }
+    window.cpStep = function () { setStep(parseInt(this.dataset.step, 10)); };
+    window.cpStepNav = function () { setStep(step + parseInt(this.dataset.dir, 10)); };
+
     window.cpReset = function () {
         try {
             Object.keys(localStorage).forEach(function (k) {
@@ -228,6 +263,7 @@
     });
 
     document.addEventListener('DOMContentLoaded', function () {
+        setStep(1, true);
         var s = load(KEY) || {};
         [['cp-quantity', 'quantity'], ['cp-character', 'character_id'],
          ['cp-structure', 'structure'], ['cp-rig', 'rig'], ['cp-security', 'security']

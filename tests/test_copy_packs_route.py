@@ -533,16 +533,6 @@ def test_bpo_picker_is_capped_so_a_long_location_name_cannot_widen_the_tree():
     assert src and "min-width: 0" in src.group(1) and "max-width: 100%" in src.group(1)
 
 
-def test_phone_layout_orders_setup_skills_tree_then_results():
-    css = (Path(__file__).resolve().parent.parent / "static/css/site.css").read_text()
-    order = {}
-    for sel, n in re.findall(r"^\s*(\.cp-left > \.b-section|#cp-skills|#cp-tree|\.cp-right)\s*\{[^}]*?order:\s*(\d+)",
-                             css, re.M):
-        order[sel] = int(n)
-    ranked = sorted(order, key=order.get)
-    assert ranked == [".cp-left > .b-section", "#cp-skills", "#cp-tree", ".cp-right"]
-
-
 PLATES_BPC = cp.OwnedBlueprint(7010, PLATES_BP, False, 9, 14, 40, owner_name="Builder",
                                location_id=None, location_label="Personal Hangar")
 
@@ -605,6 +595,52 @@ def test_pack_with_nothing_to_hand_over(monkeypatch):
         assert "Nothing to hand over yet." in text
     finally:
         teardown()
+
+
+def _site_css():
+    return (Path(__file__).resolve().parent.parent / "static/css/site.css").read_text()
+
+
+def _phone_css():
+    """(the Copy Packs phone @media block, everything before it)."""
+    css = _site_css()
+    start = css.rfind("@media (max-width: 768px)", 0, css.index('.cp-grid[data-step="1"]'))
+    depth, end = 0, None
+    for pos in range(css.index("{", start), len(css)):
+        depth += {"{": 1, "}": -1}.get(css[pos], 0)
+        if depth == 0:
+            end = pos
+            break
+    return css[start:end + 1], css[:start]
+
+
+def test_page_has_the_step_bar_and_footer():
+    teardown = _seeded_db()
+    try:
+        text = _client().get("/industry/copy-packs").text
+        assert 'id="cp-grid" data-step="1"' in text
+        assert 'id="cp-steps"' in text and 'id="cp-stepnav"' in text
+        for n in (1, 2, 3, 4):
+            assert re.search(r'data-click="cpStep" data-step="%d"' % n, text)
+        assert 'data-click="cpStepNav" data-dir="-1"' in text
+        assert 'data-click="cpStepNav" data-dir="1"' in text
+        assert "window.cpStep = " in text and "window.cpStepNav = " in text
+    finally:
+        teardown()
+
+
+def test_phone_shows_one_step_at_a_time():
+    phone, _base = _phone_css()
+    assert re.search(r"\.cp-left > \.b-section, #cp-skills, #cp-tree, \.cp-right \{[^}]*display: none", phone)
+    for n, sel in ((1, ".cp-left > .b-section"), (2, "#cp-skills"), (3, "#cp-tree"), (4, ".cp-right")):
+        assert re.search(r'\.cp-grid\[data-step="%d"\] %s \{[^}]*display: block' % (n, re.escape(sel)), phone)
+    assert "order:" not in phone.replace("border", "")      # no stacking order any more
+
+
+def test_step_bar_and_footer_exist_only_on_phones():
+    phone, base = _phone_css()
+    assert re.search(r"\.cp-steps, \.cp-stepnav, \.cp-tree-open, \.cp-tree-up \{ display: none; \}", base)
+    assert re.search(r"\.cp-steps, \.cp-stepnav \{ display: flex; \}", phone)
 
 
 # ── cache TTL ────────────────────────────────────────────────────────────────
