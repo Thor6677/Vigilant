@@ -453,6 +453,15 @@ document.addEventListener('DOMContentLoaded', function() {
     var qTypeId = params.get('type_id');
     var qSearch = params.get('search');
     if (qTypeId) {
+        /* Copy Packs links here with the copy's ME, TE and runs. */
+        [['me', 'inp-me', 'me-val', 0, 10], ['te', 'inp-te', 'te-val', 0, 20],
+         ['runs', 'inp-runs', null, 1, 1000]].forEach(function (p) {
+            var v = parseInt(params.get(p[0]), 10);
+            if (isNaN(v)) return;
+            v = Math.max(p[3], Math.min(p[4], v));
+            document.getElementById(p[1]).value = v;
+            if (p[2]) document.getElementById(p[2]).textContent = v;
+        });
         selectBlueprint(parseInt(qTypeId));
     } else if (qSearch) {
         var inp = document.getElementById('bp-search');

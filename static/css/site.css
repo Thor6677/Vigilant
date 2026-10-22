@@ -2974,6 +2974,50 @@
 }
 /* ── end R6 T7 ── */
 
+/* ── Copy Packs (/industry/copy-packs) ─────────────────────────────────── */
+.cp-grid { display: flex; gap: 1rem; align-items: flex-start; }
+.cp-left { flex: 0 0 38%; min-width: 0; }
+.cp-right { flex: 1; min-width: 0; }
+.cp-setup { padding: 0.75rem; display: flex; flex-direction: column; gap: 0.6rem; }
+.cp-field { display: flex; flex-direction: column; gap: 3px; }
+.cp-field-row { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.cp-input { padding: 0.35rem 0.5rem; background: var(--bg); border: 1px solid var(--border); color: var(--text); font-family: inherit; font-size: 11px; }
+.cp-num { width: 4.5rem; }
+.cp-product { font-size: 12px; color: var(--text); }
+.cp-notes { padding: 0.5rem 0.75rem; font-size: 11px; color: var(--muted); display: flex; flex-direction: column; gap: 0.25rem; }
+.cp-summary { padding: 0.6rem 0.75rem; display: flex; flex-wrap: wrap; gap: 0.4rem 1.25rem; font-size: 11px; }
+.cp-head > span { font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.cp-row { font-size: 11px; }
+.cp-skills { padding: 0.5rem 0.75rem; display: grid; grid-template-columns: 1fr; gap: 0.35rem; }
+.cp-skill { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; font-size: 11px; }
+.cp-tree-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--border); font-size: 11px; }
+.cp-tree-name { flex: 1; min-width: 0; }
+.cp-tree-runs { flex: none; color: var(--muted); }
+.cp-tree-src { flex: none; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 0.3rem; }
+.cp-tree-toggle { flex: none; }
+.cp-tree-src .cp-num { width: 3.2rem; }
+.cp-bpc-toggle { display: inline-flex; align-items: center; gap: 0.2rem; font-size: 10px; }
+.cp-chip { display: inline-block; padding: 0 0.45rem; border: 1px solid var(--border); background: none; color: var(--text); font-family: inherit; font-size: 10px; line-height: 1.6; }
+button.cp-chip { cursor: pointer; }
+.cp-chip--on { border-color: var(--success); color: var(--success); }
+.cp-chip--warn { border-color: var(--accent); color: var(--accent); }
+.cp-chip--bad { border-color: var(--danger); color: var(--danger); }
+.cp-search-row { cursor: pointer; }
+@media (max-width: 768px) {
+    /* One column, with the results straight after Setup: on a phone the
+       copy list matters more than the (long) build/buy tree. */
+    .cp-grid { flex-direction: column; }
+    .cp-left { display: contents; }
+    .cp-left > .b-section { order: 1; width: 100%; }
+    .cp-right { order: 2; flex: none; width: 100%; }
+    #cp-skills { order: 3; width: 100%; }
+    #cp-tree { order: 4; width: 100%; }
+    .cp-tree-row { flex-wrap: wrap; }
+    .cp-tree-name { flex-basis: 100%; }
+    .cp-input, button.cp-chip { min-height: 36px; }
+    .cp-row:not(.m-row) { flex-wrap: wrap; }
+}
+
 /* ── m-hide wins ties: keep this the last phone rule in the file ── */
 @media (max-width: 640px) {
     .m-hide, .m-tabs-desktop { display: none !important; }

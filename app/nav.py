@@ -129,6 +129,17 @@ NAV_GROUPS = [
                 ],
             ),
             _item(
+                "Copy Packs", "/industry/copy-packs",
+                [("prefix", "/industry/copy-packs")],
+                desc="Which blueprint copies to make for a build. Pick a product, a quantity and the character who will copy and build it, and get copies × runs from the BPOs you own, sized so that character's manufacturing slots build in parallel.",
+                features=[
+                    "ME/TE of your own BPOs at every level of the tree",
+                    "Owned BPCs used first; missing BPOs flagged",
+                    "Copies split to fill manufacturing slots",
+                    "Copy time from Science and Advanced Industry",
+                ],
+            ),
+            _item(
                 "Build Finder", "/industry/build-finder",
                 [("prefix", "/industry/build-finder")],
                 desc="What should you build? Pick a group and rank its buildable items by manufacturing margin — build cost per unit vs. reference price, at your ME / structure / rig / security assumptions. T2 rankings include expected invention cost (datacores, decryptors, failed attempts).",
