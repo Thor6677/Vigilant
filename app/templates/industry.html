@@ -459,8 +459,18 @@ document.addEventListener('DOMContentLoaded', function() {
             var v = parseInt(params.get(p[0]), 10);
             if (isNaN(v)) return;
             v = Math.max(p[3], Math.min(p[4], v));
-            document.getElementById(p[1]).value = v;
-            if (p[2]) document.getElementById(p[2]).textContent = v;
+            var el = document.getElementById(p[1]);
+            el.value = v;
+            if (p[2]) document.getElementById(p[2]).textContent = el.value;
+        });
+        /* Facility: only values that exist as an option are applied. */
+        [['structure', 'inp-structure'], ['rig', 'inp-rig'],
+         ['security', 'inp-security']].forEach(function (p) {
+            var v = params.get(p[0]);
+            var sel = document.getElementById(p[1]);
+            if (v === null || !sel) return;
+            var ok = Array.from(sel.options).some(function (o) { return o.value === v; });
+            if (ok) sel.value = v;
         });
         selectBlueprint(parseInt(qTypeId));
     } else if (qSearch) {

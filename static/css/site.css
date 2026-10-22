@@ -3006,7 +3006,7 @@ button.cp-chip { cursor: pointer; }
 @media (max-width: 768px) {
     /* One column, with the results straight after Setup: on a phone the
        copy list matters more than the (long) build/buy tree. */
-    .cp-grid { flex-direction: column; }
+    .cp-grid { flex-direction: column; gap: 0; }
     .cp-left { display: contents; }
     .cp-left > .b-section { order: 1; width: 100%; }
     .cp-right { order: 2; flex: none; width: 100%; }
@@ -3014,7 +3014,6 @@ button.cp-chip { cursor: pointer; }
     #cp-tree { order: 4; width: 100%; }
     .cp-tree-row { flex-wrap: wrap; }
     .cp-tree-name { flex-basis: 100%; }
-    .cp-input, button.cp-chip { min-height: 36px; }
     .cp-row:not(.m-row) { flex-wrap: wrap; }
 }
 
