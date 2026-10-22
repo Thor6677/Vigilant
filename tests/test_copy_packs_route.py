@@ -444,3 +444,38 @@ def test_corp_blueprints_cache_for_an_hour():
     assert _ttl_for_path("/corporations/98000001/blueprints/") == TTL["blueprints"] == 3600
     assert _ttl_for_path("/corporations/98000001/") == TTL["corporation"]
     assert _ttl_for_path("/characters/123/blueprints/") == 300      # unchanged
+
+
+def test_shared_build_item_gets_its_input_ids_once(monkeypatch):
+    """An item under two parents appears in two tree rows; only the first
+    (expanded) row may carry the ME/TE ids."""
+    teardown = _seeded_db()
+    try:
+        shared, shared_bp, mid, mid_bp = 99101, 99102, 99103, 99104
+
+        async def add():
+            async with teardown.session() as db:
+                db.add(SDEType(type_id=shared, type_name="Shared Part", published=True))
+                db.add(SDEType(type_id=mid, type_name="Mid Part", published=True))
+                for bp, prod in ((shared_bp, shared), (mid_bp, mid)):
+                    db.add(SDEBlueprintInfo(blueprint_type_id=bp, product_type_id=prod,
+                                            product_quantity=1, manufacturing_time=100,
+                                            max_production_limit=10, copying_time=100))
+                db.add(SDEBlueprintMaterial(blueprint_type_id=shared_bp, activity_id=1,
+                                            material_type_id=34, quantity=5))
+                db.add(SDEBlueprintMaterial(blueprint_type_id=mid_bp, activity_id=1,
+                                            material_type_id=shared, quantity=2))
+                db.add(SDEBlueprintMaterial(blueprint_type_id=HULL_BP, activity_id=1,
+                                            material_type_id=mid, quantity=3))
+                db.add(SDEBlueprintMaterial(blueprint_type_id=PLATES_BP, activity_id=1,
+                                            material_type_id=shared, quantity=1))
+                await db.commit()
+        _run(add())
+        _stub_esi(monkeypatch, bpos=[HULL_BPO])
+        state = {"build": {str(PLATES): True, str(mid): True, str(shared): True}}
+        r = _plan(_client(), state_json=json.dumps(state))
+        assert r.status_code == 200
+        assert r.text.count(f'id="cp-me-{shared}"') == 1
+        assert r.text.count(f'id="cp-te-{shared}"') == 1
+    finally:
+        teardown()
