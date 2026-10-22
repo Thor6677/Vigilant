@@ -10,6 +10,7 @@ anything unparseable in them is ignored, never an error.
 from __future__ import annotations
 
 import json
+from itertools import islice
 from dataclasses import dataclass, field
 
 from app.industry.copy_pack import PLANNER_SKILLS
@@ -18,6 +19,7 @@ from app.industry.manufacturing import RIGS, SEC_STATUS, STRUCTURES
 MAX_QUANTITY = 1000
 MAX_JSON_CHARS = 20_000
 MAX_OVERRIDES = 500
+MAX_ID = 2**62  # inside SQLite's signed 64-bit INTEGER
 
 _PLANNER_SKILL_IDS = {sid for sid, _label in PLANNER_SKILLS}
 
@@ -30,12 +32,12 @@ class PlanForm:
     structure: str = "npc_station"
     rig: str = "none"
     security: str = "highsec"
-    skill_overrides: dict = field(default_factory=dict)
-    build: dict = field(default_factory=dict)
-    bpo_choice: dict = field(default_factory=dict)
-    me_override: dict = field(default_factory=dict)
-    te_override: dict = field(default_factory=dict)
-    ignore_bpcs: frozenset = frozenset()
+    skill_overrides: dict = field(default_factory=dict)  # skill_id -> level 0-5
+    build: dict = field(default_factory=dict)            # product_type_id -> bool
+    bpo_choice: dict = field(default_factory=dict)       # product_type_id -> item_id
+    me_override: dict = field(default_factory=dict)      # product_type_id -> ME, no-BPO items
+    te_override: dict = field(default_factory=dict)      # product_type_id -> TE, no-BPO items
+    ignore_bpcs: frozenset = frozenset()                 # BPC item_ids to leave out
 
 
 def _int(value, default=None):
@@ -43,6 +45,12 @@ def _int(value, default=None):
         return int(str(value).strip())
     except (TypeError, ValueError):
         return default
+
+
+def _id(value) -> int:
+    """A positive id within SQLite's INTEGER range, else 0."""
+    n = _int(value, 0)
+    return n if 0 < n <= MAX_ID else 0
 
 
 def _clamp(value: int, lo: int, hi: int) -> int:
@@ -54,7 +62,7 @@ def _json_object(raw) -> dict:
         return {}
     try:
         data = json.loads(raw)
-    except ValueError:
+    except (ValueError, RecursionError):
         return {}
     return data if isinstance(data, dict) else {}
 
@@ -65,9 +73,9 @@ def _id_map(raw, cast) -> dict:
     out: dict = {}
     if not isinstance(raw, dict):
         return out
-    for key, value in list(raw.items())[:MAX_OVERRIDES]:
-        k = _int(key)
-        if k is None or k <= 0:
+    for key, value in islice(raw.items(), MAX_OVERRIDES):
+        k = _id(key)
+        if not k:
             continue
         try:
             out[k] = cast(value)
@@ -85,6 +93,13 @@ def _level(lo: int, hi: int):
     return cast
 
 
+def _item_id(value) -> int:
+    n = _id(value)
+    if not n:
+        raise ValueError(value)
+    return n
+
+
 def _flag(value) -> bool:
     if isinstance(value, bool):
         return value
@@ -95,22 +110,22 @@ def parse_plan_form(form) -> PlanForm:
     state = _json_object(form.get("state_json"))
     skills = _id_map(_json_object(form.get("skills_json")), _level(0, 5))
     ignore = state.get("ignore_bpc")
-    ignore_ids = {_int(x) for x in (ignore if isinstance(ignore, list) else [])[:MAX_OVERRIDES]}
+    ignore_ids = {_id(x) for x in islice(ignore if isinstance(ignore, list) else [], MAX_OVERRIDES)}
 
     structure = form.get("structure") or "npc_station"
     rig = form.get("rig") or "none"
     security = form.get("security") or "highsec"
     return PlanForm(
-        type_id=max(0, _int(form.get("type_id"), 0)),
+        type_id=_id(form.get("type_id")),
         quantity=_clamp(_int(form.get("quantity"), 1), 1, MAX_QUANTITY),
-        character_id=max(0, _int(form.get("character_id"), 0)),
+        character_id=_id(form.get("character_id")),
         structure=structure if structure in STRUCTURES else "npc_station",
         rig=rig if rig in RIGS else "none",
         security=security if security in SEC_STATUS else "highsec",
         skill_overrides={k: v for k, v in skills.items() if k in _PLANNER_SKILL_IDS},
         build=_id_map(state.get("build"), _flag),
-        bpo_choice=_id_map(state.get("bpo"), _level(1, 2**62)),
+        bpo_choice=_id_map(state.get("bpo"), _item_id),
         me_override=_id_map(state.get("me"), _level(0, 10)),
         te_override=_id_map(state.get("te"), _level(0, 20)),
-        ignore_bpcs=frozenset(i for i in ignore_ids if i is not None and i > 0),
+        ignore_bpcs=frozenset(i for i in ignore_ids if i > 0),
     )

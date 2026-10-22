@@ -5,7 +5,8 @@ hand-edited request could send and checks it is clamped or dropped."""
 import json
 
 from app.industry import copy_pack as cp
-from app.industry.copy_pack_form import MAX_QUANTITY, parse_plan_form
+from app.industry.copy_pack_form import (
+    MAX_JSON_CHARS, MAX_OVERRIDES, MAX_QUANTITY, parse_plan_form)
 
 
 def _form(**fields):
@@ -75,3 +76,38 @@ def test_missing_fields_get_defaults():
     f = parse_plan_form({})
     assert (f.type_id, f.quantity, f.character_id) == (0, 1, 0)
     assert f.structure == "npc_station" and f.skill_overrides == {}
+
+
+def test_override_maps_are_capped():
+    f = parse_plan_form(_form(state_json={"build": {str(i): True for i in range(1, 700)}}))
+    assert len(f.build) == MAX_OVERRIDES
+
+
+def test_deeply_nested_json_is_ignored():
+    # Exactly MAX_JSON_CHARS, so it passes the length check. json.loads raises
+    # RecursionError on it only on Python 3.12/3.13 (what CI uses); on 3.14 this
+    # passes even without the fix.
+    nested = "[" * 10000 + "]" * 10000
+    assert len(nested) == MAX_JSON_CHARS
+    f = parse_plan_form(_form(state_json=nested, skills_json=nested))
+    assert f.build == {} and f.skill_overrides == {} and f.ignore_bpcs == frozenset()
+
+
+def test_ids_beyond_sqlite_range_are_dropped():
+    f = parse_plan_form(_form(type_id="9" * 30, character_id=str(2**63)))
+    assert (f.type_id, f.character_id) == (0, 0)
+    f = parse_plan_form(_form(state_json={
+        "bpo": {"23757": 0, "21025": 2**63, "21017": 5},
+        "ignore_bpc": [2**63, 7]}))
+    assert f.bpo_choice == {21017: 5}
+    assert f.ignore_bpcs == frozenset({7})
+
+
+def test_json_length_limit_edge():
+    base = json.dumps({"build": {"21017": True}, "pad": ""})
+    pad = "x" * (MAX_JSON_CHARS - len(base))
+    ok = json.dumps({"build": {"21017": True}, "pad": pad})
+    assert len(ok) == MAX_JSON_CHARS
+    assert parse_plan_form(_form(state_json=ok)).build == {21017: True}
+    too_long = json.dumps({"build": {"21017": True}, "pad": pad + "x"})
+    assert parse_plan_form(_form(state_json=too_long)).build == {}
