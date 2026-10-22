@@ -1244,6 +1244,15 @@ async def get_market_group_items(
         .where(SDEModuleSlot.type_id.in_(type_ids))
     )).fetchall())
 
+    # Drones have no sde_module_slots row, so they came back as null and the
+    # fitting tool added them to the cargo hold. Ask the same classifier the
+    # EFT import uses; only its "drone" answers are kept, so charges and other
+    # cargo items stay null and show no slot badge (ISS-126).
+    unslotted = [t for t in type_ids if t not in slot_by_tid]
+    if unslotted:
+        fallback = await get_module_slot_types_bulk(db, unslotted)
+        slot_by_tid.update({t: s for t, s in fallback.items() if s == "drone"})
+
     return [
         {
             "type_id": r.type_id,
