@@ -79,7 +79,8 @@ async def copy_packs_search(
 
 
 _PLACE_FLAGS = frozenset({"Hangar", "Deliveries", "CorpDeliveries"})
-# Corp hangar divisions: location_id is the office's item id, not a structure.
+# Corp hangar divisions: location_id is the office's item id or, for some
+# structures, the structure id itself; either way it needs the office map.
 _OFFICE_FLAGS = frozenset(f"CorpSAG{n}" for n in range(1, 8))
 
 
@@ -143,7 +144,11 @@ async def _owned_blueprints(db: AsyncSession, chars: list[Character],
             if ob is None:
                 continue
             if row.get("location_flag") in _OFFICE_FLAGS and office_map:
-                structure_id = office_map.get(row.get("location_id"))
+                lid = row.get("location_id")
+                # ESI gives an office's item id for some hangars and the
+                # structure's own id for others.
+                structure_id = office_map.get(lid) or (
+                    lid if lid in office_map.values() else None)
                 if structure_id:
                     ob = dataclasses.replace(ob, location_id=structure_id)
             if ob.is_bpo:

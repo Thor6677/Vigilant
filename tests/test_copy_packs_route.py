@@ -456,6 +456,18 @@ def test_gather_resolves_a_corp_office_to_its_structure(monkeypatch):
     assert cands[9999] == [holder] and 4444 not in cands
 
 
+def test_gather_accepts_a_structure_id_where_esi_gives_one_instead_of_an_office(monkeypatch):
+    """ESI is inconsistent: a corp BPO in a player structure's hangar can carry the
+    structure id itself as location_id, while one in an NPC station carries the
+    office's item id. Both must resolve."""
+    holder = _mem(1, "Me", perms.CORP_BLUEPRINTS + " " + perms.CORP_ASSETS)
+    corp = ([_row(item_id=30, location_id=9999, location_flag="CorpSAG2")], None)
+    bpos, _c, _n, cands = _gather(monkeypatch, [holder], holder, corp=corp,
+                                  assets=([_office(4444, 9999)], None))
+    assert bpos[0].location_id == 9999 and cands[9999] == [holder]
+    assert bpos[0].location_label == "Corp Hangar 2"
+
+
 def test_gather_keeps_the_flag_label_when_the_office_cannot_be_mapped(monkeypatch):
     corp = ([_row(item_id=30, location_id=4444, location_flag="CorpSAG3")], None)
     no_scope = _mem(1, "Me", perms.CORP_BLUEPRINTS)
