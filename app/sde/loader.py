@@ -87,11 +87,12 @@ REFRESH_DAYS = 30
 # single boot forever, since the reimport can never make the check pass.
 EFFECTS_USAGE_CHANCE_MARKER = "effects_usage_chance_v1"
 
-# Copy packs need sde_blueprint_info.max_production_limit / copying_time and
-# sde_blueprint_mfg_skills. An install that imported before they existed has
-# the columns (main.py adds them) but every value NULL, and nothing in the
-# data says so reliably, so this marker makes needs_update() reimport exactly
-# once, the same way as EFFECTS_USAGE_CHANCE_MARKER.
+# Copy packs need sde_blueprint_info.max_production_limit / copying_time,
+# sde_blueprint_mfg_skills and sde_blueprint_invention_products. An install
+# that imported before they existed has the columns and tables (main.py and
+# create_all add them) but nothing in them, and nothing in the data says so
+# reliably, so this marker makes needs_update() reimport exactly once, the
+# same way as EFFECTS_USAGE_CHANCE_MARKER.
 BLUEPRINT_COPY_MARKER = "blueprint_copy_v1"
 
 
