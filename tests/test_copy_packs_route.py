@@ -9,6 +9,7 @@ import base64
 import json
 import os
 import tempfile
+from types import SimpleNamespace
 from datetime import datetime
 
 import itsdangerous
@@ -502,6 +503,22 @@ def test_gather_does_not_fetch_corp_assets_without_a_hangar_bpo(monkeypatch):
     monkeypatch.setattr(copy_packs, "_dead_token_ids", fake_dead)
     _run(copy_packs._owned_blueprints(None, [holder], holder))
     assert asked == ["blueprints"]
+
+
+def test_location_names_also_look_up_bpos_offered_only_in_the_picker(monkeypatch):
+    seen = {}
+
+    async def fake_resolve(db, ids, candidates):
+        seen["ids"] = set(ids)
+        return {}
+
+    monkeypatch.setattr(copy_packs, "_resolve_location_names", fake_resolve)
+    chosen = cp.OwnedBlueprint(1, HULL_BP, True, 10, 20, None, location_id=111)
+    other = cp.OwnedBlueprint(2, HULL_BP, True, 10, 20, None, location_id=222)
+    item = SimpleNamespace(bpo=chosen, bpo_options=[chosen, other], bpcs_used=[])
+    plan = SimpleNamespace(group=lambda g: [item], bpc_items=lambda: [], items={HULL: item})
+    _run(copy_packs._location_names(None, plan, {}))
+    assert seen["ids"] == {111, 222}
 
 
 # ── cache TTL ────────────────────────────────────────────────────────────────

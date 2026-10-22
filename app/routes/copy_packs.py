@@ -263,14 +263,18 @@ def _facility(form) -> cp.Facility:
 
 async def _location_names(db: AsyncSession, plan: cp.Plan,
                           candidates: dict[int, list[Character]]) -> dict[int, str]:
-    """Names for the locations the results show: the BPO of each Copy row and
-    each owned BPC used. Best effort; a failure just leaves flag labels."""
+    """Names for the locations the results show: the BPO of each Copy row, each
+    owned BPC used and each BPO in a picker. Best effort; a failure just leaves flag labels."""
     ids: set[int] = set()
     for ip in plan.group(cp.GROUP_COPY):
         if ip.bpo is not None and ip.bpo.location_id:
             ids.add(ip.bpo.location_id)
     for ip in plan.bpc_items():
         ids |= {o.location_id for o, _n in ip.bpcs_used if o.location_id}
+    # BPOs offered in a picker are told apart by where they sit.
+    for ip in plan.items.values():
+        if len(ip.bpo_options) > 1:
+            ids |= {o.location_id for o in ip.bpo_options if o.location_id}
     if not ids:
         return {}
     try:
