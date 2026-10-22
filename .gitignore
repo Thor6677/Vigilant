@@ -33,3 +33,6 @@ scripts/.sde_cache.zip
 # (probe library path, public /healthz URL, ops maintenance script). Keeps
 # deployment identity out of the committed tree.
 .health-env
+
+# Local project-tracking state — never published
+.story/
