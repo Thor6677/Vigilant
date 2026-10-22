@@ -280,13 +280,16 @@ function panel(corpId) {
 const A = panel(98000001), B = panel(98000002);
 const document = {
   body: { addEventListener() {} },
+  documentElement: {},
   querySelectorAll: sel => sel.indexOf('canvas.corp-wallet-chart') === 0 ? [A.canvas, B.canvas] : [],
 };
 const fetched = [];
 const fetch = url => { fetched.push(url);
   return Promise.resolve({ ok: true, json: () => Promise.resolve(series(5)) }); };
 const window = { matchMedia };
-const sandbox = { window, document, console, Chart, fetch, JSON, Object, String, Math };
+// The Total line reads --accent via getComputedStyle (ISS-115); '' falls back to the literal.
+const getComputedStyle = () => ({ getPropertyValue: () => '' });
+const sandbox = { window, document, console, Chart, fetch, JSON, Object, String, Math, getComputedStyle };
 vm.createContext(sandbox);
 vm.runInContext(src, sandbox);
 const snap = cs => cs.map(c => ({ canvas: c.canvas.id,
