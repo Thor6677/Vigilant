@@ -1645,6 +1645,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     section.dataset.group = newName;
                     section.querySelectorAll('[data-group]').forEach(function(el){el.dataset.group = newName;});
                     label.textContent = newName; label.dataset.group = newName; input.dataset.original = newName;
+                    // Done re-collapses force-expanded groups by name: follow the rename.
+                    var fx = forceExpandedGroups.indexOf(oldName);
+                    if (fx !== -1) forceExpandedGroups[fx] = newName;
                     // The toggle's title names the group: refresh it.
                     var groupToggle = section.querySelector('.dash-group-toggle');
                     var groupBody = section.querySelector('.sortable-group');
