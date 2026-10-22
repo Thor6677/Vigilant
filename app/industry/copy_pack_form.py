@@ -37,7 +37,7 @@ class PlanForm:
     bpo_choice: dict = field(default_factory=dict)       # product_type_id -> item_id
     me_override: dict = field(default_factory=dict)      # product_type_id -> ME, no-BPO items
     te_override: dict = field(default_factory=dict)      # product_type_id -> TE, no-BPO items
-    ignore_bpcs: frozenset = frozenset()                 # BPC item_ids to leave out
+    ignore_bpcs: frozenset = frozenset()                 # product type ids whose owned BPCs to leave out
 
 
 def _int(value, default=None):

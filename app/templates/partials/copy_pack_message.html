@@ -1,0 +1,6 @@
+{# Early-exit message for the planner (POST /industry/copy-packs/plan). Also
+   empties the left column, so a stale Skills panel and tree from a previous
+   plan don't sit beside it. Markup only. #}
+<div class="b-section"><div class="b-empty">{{ message }}</div></div>
+<div id="cp-skills" hx-swap-oob="true"></div>
+<div id="cp-tree" hx-swap-oob="true"></div>

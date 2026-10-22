@@ -46,7 +46,7 @@
             {#- #}<span data-m-label="From" style="flex:3;">{{ ip.bpo.me }}/{{ ip.bpo.te }} · {{ where(ip.bpo) }}</span>
             {#- #}<span data-m="key" style="flex:1;text-align:right;">{{ ip.copies }} × {{ ip.runs_per_copy }}{% if ip.spare_runs %} <span class="b-muted-sm">({{ ip.spare_runs }} spare)</span>{% endif %}</span>
             {#- #}<span data-m-label="Copy time" style="flex:1;text-align:right;">{{ ip.copy_seconds | duration }}</span>
-            {#- #}<span data-m-label="Build" style="flex:0 0 3.5rem;text-align:right;"><a href="/industry/manufacturing?type_id={{ blueprints[ip.product_type_id].blueprint_type_id }}&amp;me={{ ip.me }}&amp;te={{ ip.te }}&amp;runs={{ ip.runs_per_copy }}">Mfg ↗</a></span>
+            {#- #}<span data-m-label="Build" style="flex:0 0 3.5rem;text-align:right;"><a href="/industry/manufacturing?type_id={{ blueprints[ip.product_type_id].blueprint_type_id }}&amp;me={{ ip.me }}&amp;te={{ ip.te }}&amp;runs={{ ip.runs_per_copy }}&amp;structure={{ structure | urlencode }}&amp;rig={{ rig | urlencode }}&amp;security={{ security | urlencode }}">Mfg ↗</a></span>
         {#- #}</div>
         {%- endfor %}
         {% else %}
@@ -114,7 +114,7 @@
                 <input type="number" min="0" max="5" step="1"
                        value="{{ s.override if s.override is not none else '' }}"
                        placeholder="{{ s.placeholder }}"
-                       data-change="cpSkillChanged" data-skill-id="{{ s.id }}"
+                       id="cp-skill-{{ s.id }}" data-change="cpSkillChanged" data-skill-id="{{ s.id }}"
                        class="cp-input cp-num">
             </label>
             {% endfor %}
@@ -144,8 +144,8 @@
                     BPO {{ ip.bpo.me }}/{{ ip.bpo.te }}{% if not ip.bpo.reachable %} <span class="cp-chip cp-chip--bad">on {{ ip.bpo.owner_name }}</span>{% endif %}
                     {%- else %}
                     <span class="cp-chip cp-chip--warn">{% if ip.group == 'nocopy' %}Can't copy{% else %}No BPO{% endif %}</span>
-                    ME <input type="number" min="0" max="10" value="{{ ip.me }}" data-change="cpSetMeTe" data-type-id="{{ r.product_type_id }}" data-field="me" class="cp-input cp-num">
-                    TE <input type="number" min="0" max="20" step="2" value="{{ ip.te }}" data-change="cpSetMeTe" data-type-id="{{ r.product_type_id }}" data-field="te" class="cp-input cp-num">
+                    ME <input id="cp-me-{{ r.product_type_id }}" type="number" min="0" max="10" value="{{ ip.me }}" data-change="cpSetMeTe" data-type-id="{{ r.product_type_id }}" data-field="me" class="cp-input cp-num">
+                    TE <input id="cp-te-{{ r.product_type_id }}" type="number" min="0" max="20" step="2" value="{{ ip.te }}" data-change="cpSetMeTe" data-type-id="{{ r.product_type_id }}" data-field="te" class="cp-input cp-num">
                     {%- endif %}
                     {%- if ip.has_bpcs %}
                     <label class="cp-bpc-toggle"><input type="checkbox" data-change="cpToggleBpcs" data-type-id="{{ r.product_type_id }}"{% if r.product_type_id not in ignored %} checked{% endif %}> BPCs</label>

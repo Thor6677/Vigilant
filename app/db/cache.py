@@ -41,6 +41,7 @@ TTL = {
     "character_location": 5,
     "killmail":         86400,        # killmails are immutable — 24h
     "search":           300,          # search results — 5 min
+    "blueprints":      3600,          # corp blueprints: ESI's own cache time (was the 24h corp-info catch-all)
     "corp_contracts":   300,          # corp contracts list — 5 min
     "contract_items":   14400,        # contract items (stable while outstanding) — 4h
     "intel_kills_resolve_entity": 86400,  # autocomplete name resolves — 24h
@@ -115,6 +116,7 @@ def _ttl_for_path(path: str) -> int:
     # 5-min TTL gets a chance. Affected before the reorder: corp assets,
     # corp wallet, corp industry jobs, corp blueprints, corp contracts —
     # all silently cached for 24 hours, breaking refresh and alerts.
+    if path.startswith("/corporations/") and "/blueprints" in path: return TTL["blueprints"]
     if "/contracts/" in path and "/items" in path: return TTL["contract_items"]
     if "/contracts/" in path:            return TTL["corp_contracts"]
     if "/killmails/" in path:            return TTL["killmail"]

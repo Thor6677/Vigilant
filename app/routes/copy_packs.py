@@ -17,9 +17,9 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import scopes as perms
+from app.auth import scopes as perms, status as perm_status
 from app.character_skills import skill_levels, skill_summary
-from app.db.models import Character, CharacterDashboardCache, get_db
+from app.db.models import AsyncSessionLocal, Character, CharacterDashboardCache, get_db
 from app.esi import character as esi_char
 from app.esi import corporation as esi_corp
 from app.esi.client import ESIClient, refresh_token
@@ -63,7 +63,7 @@ async def copy_packs_page(request: Request, db: AsyncSession = Depends(get_db)):
 
 @router.get("/industry/copy-packs/search", response_class=HTMLResponse)
 async def copy_packs_search(
-    request: Request, q: str = Query(""), db: AsyncSession = Depends(get_db),
+    request: Request, q: str = Query("", max_length=100), db: AsyncSession = Depends(get_db),
 ):
     if not request.session.get("user_id"):
         return HTMLResponse("", status_code=401)
@@ -72,6 +72,9 @@ async def copy_packs_search(
     return templates.TemplateResponse(request, "partials/copy_pack_search.html", {
         "results": results, "q": q,
     })
+
+
+_PLACE_FLAGS = frozenset({"Hangar", "Deliveries", "CorpDeliveries"})
 
 
 def _owned(row: dict, owner_name: str, reachable: bool) -> cp.OwnedBlueprint | None:
@@ -88,9 +91,11 @@ def _owned(row: dict, owner_name: str, reachable: bool) -> cp.OwnedBlueprint | N
             te=int(row.get("time_efficiency") or 0),
             runs=int(row.get("runs") or 0) if is_bpc else None,
             owner_name=owner_name,
-            # A corp hangar item sits in an office, whose id is neither a
-            # station nor a structure, so it is labelled by division instead.
-            location_id=None if flag.startswith("CorpSAG") else row.get("location_id"),
+            # location_id is a station or structure only for these flags. A
+            # corp hangar item sits in an office, a container's id is an item
+            # id and a ship's cargo is the ship, so everything else is
+            # labelled by its flag instead of being sent for name lookup.
+            location_id=row.get("location_id") if flag in _PLACE_FLAGS else None,
             location_label=LOCATION_FLAGS.get(flag, flag),
             reachable=reachable,
         )
@@ -98,19 +103,34 @@ def _owned(row: dict, owner_name: str, reachable: bool) -> cp.OwnedBlueprint | N
         return None
 
 
-async def _owned_blueprints(db: AsyncSession, chars: list[Character],
-                            selected: Character) -> tuple[list, list, list]:
-    """(BPOs from every character and every readable corp, BPCs the selected
-    character can use, notes for the page).
+async def _dead_token_ids(chars: list[Character]) -> set[int]:
+    """Characters whose last sync found their authorization rejected. Own
+    short session, like corporations._rank_for_scope."""
+    try:
+        async with AsyncSessionLocal() as dead_db:
+            return await perm_status.dead_token_ids(
+                dead_db, [c.character_id for c in chars])
+    except Exception as exc:
+        logger.info("Copy packs: dead-token lookup failed: %s", exc)
+        return set()
 
-    Sequential on purpose: each ESIClient writes the response cache through
-    `db`, and one AsyncSession must never be shared by concurrent
-    coroutines. The response cache makes a re-plan cheap anyway."""
+
+async def _owned_blueprints(db: AsyncSession, chars: list[Character],
+                            selected: Character) -> tuple[list, list, list, dict]:
+    """(BPOs from every character and every readable corp, BPCs the selected
+    character can use, notes for the page, {location_id: [characters whose
+    token may resolve it]}).
+
+    Sequential on purpose: refresh_token(char, db) commits on the request's
+    session, which must never be shared by concurrent coroutines. (The ESI
+    response cache writes through its own session.) The response cache makes
+    a re-plan cheap anyway."""
     bpos: list[cp.OwnedBlueprint] = []
     bpcs: list[cp.OwnedBlueprint] = []
     notes: list[str] = []
+    candidates: dict[int, list[Character]] = {}
 
-    def add(raw: list, owner: str, own: bool) -> None:
+    def add(raw: list, owner: str, own: bool, resolvers: list[Character]) -> None:
         for row in raw or []:
             ob = _owned(row, owner, reachable=own)
             if ob is None:
@@ -119,13 +139,23 @@ async def _owned_blueprints(db: AsyncSession, chars: list[Character],
                 bpos.append(ob)
             elif own:
                 bpcs.append(ob)
+            else:
+                continue
+            if ob.location_id:
+                known = candidates.setdefault(ob.location_id, [])
+                known.extend(c for c in resolvers if c not in known)
 
+    dead = await _dead_token_ids(chars)
     for char in chars:
         own = char.character_id == selected.character_id
         if perms.BLUEPRINTS not in (char.scopes or ""):
             if own:
                 notes.append(f"{char.character_name} hasn't shared blueprints with "
                              "Vigilant, so their own BPOs and BPCs aren't counted.")
+            continue
+        if char.character_id in dead:
+            notes.append(f"{char.character_name} needs to sign in again, so "
+                         "their blueprints aren't counted.")
             continue
         try:
             token = await refresh_token(char, db)
@@ -136,7 +166,7 @@ async def _owned_blueprints(db: AsyncSession, chars: list[Character],
                            char.character_id, exc)
             notes.append(f"Couldn't load {char.character_name}'s blueprints.")
             continue
-        add(raw, char.character_name, own)
+        add(raw, char.character_name, own, [char])
 
     corps: dict[int, list[Character]] = {}
     for c in chars:
@@ -148,17 +178,19 @@ async def _owned_blueprints(db: AsyncSession, chars: list[Character],
 
     for corp_id, members in sorted(corps.items()):
         holders = [c for c in members if perms.CORP_BLUEPRINTS in (c.scopes or "")]
-        if not holders:
-            continue
         corp_name = members[0].corporation_name or f"Corp {corp_id}"
+        if not holders:
+            if corp_id == selected.corporation_id:
+                notes.append(f"No character in {corp_name} shares corp blueprints, "
+                             "so its hangars aren't counted.")
+            continue
         raw, _err = await _try_api_call_with_fallback(
             "blueprints", {"blueprints": holders}, fetch_corp, corp_id, db)
         if raw is None:
-            notes.append(f"{corp_name}'s blueprints couldn't be read by any of "
-                         "your characters there.")
+            notes.append(f"{corp_name}'s blueprints couldn't be loaded.")
             continue
-        add(raw, corp_name, corp_id == selected.corporation_id)
-    return bpos, bpcs, notes
+        add(raw, corp_name, corp_id == selected.corporation_id, holders)
+    return bpos, bpcs, notes, candidates
 
 
 async def _skills(db: AsyncSession, char: Character, overrides: dict):
@@ -189,21 +221,29 @@ def _facility(form) -> cp.Facility:
 
 
 async def _location_names(db: AsyncSession, plan: cp.Plan,
-                          chars: list[Character]) -> dict[int, str]:
-    """Names for the locations the results show: each Copy row's BPO and
+                          candidates: dict[int, list[Character]]) -> dict[int, str]:
+    """Names for the locations the results show: the BPO of each Copy row and
     each owned BPC used. Best effort; a failure just leaves flag labels."""
     ids: set[int] = set()
-    for ip in plan.items.values():
+    for ip in plan.group(cp.GROUP_COPY):
         if ip.bpo is not None and ip.bpo.location_id:
             ids.add(ip.bpo.location_id)
+    for ip in plan.bpc_items():
         ids |= {o.location_id for o, _n in ip.bpcs_used if o.location_id}
     if not ids:
         return {}
     try:
-        return await _resolve_location_names(db, ids, {i: list(chars) for i in ids})
+        return await _resolve_location_names(
+            db, ids, {i: list(candidates.get(i, [])) for i in ids})
     except Exception as exc:
         logger.info("Copy packs: location names failed: %s", exc)
         return {}
+
+
+def _message(request: Request, text: str):
+    """An early-exit message that also clears the left column."""
+    return templates.TemplateResponse(request, "partials/copy_pack_message.html",
+                                      {"message": text})
 
 
 @router.post("/industry/copy-packs/plan", response_class=HTMLResponse)
@@ -221,16 +261,14 @@ async def copy_packs_plan(request: Request, db: AsyncSession = Depends(get_db)):
     if selected is None:
         if form.character_id:
             return HTMLResponse("Character not found", status_code=404)
-        return HTMLResponse('<div class="b-section"><div class="b-empty">'
-                            'Pick a character.</div></div>')
+        return _message(request, "Pick a character.")
 
     rows = await sde.get_blueprint_tree(db, form.type_id, max_depth=cp.MAX_DEPTH)
     if form.type_id not in rows:
-        return HTMLResponse('<div class="b-section"><div class="b-empty">'
-                            'That item has no manufacturing blueprint.</div></div>')
+        return _message(request, "That item has no manufacturing blueprint.")
     blueprints = {t: cp.blueprint_from_row(r) for t, r in rows.items()}
 
-    bpos, bpcs, notes = await _owned_blueprints(db, chars, selected)
+    bpos, bpcs, notes, candidates = await _owned_blueprints(db, chars, selected)
     levels, trained, skill_rows = await _skills(db, selected, form.skill_overrides)
     if trained is None:
         notes.append("No synced skills for this character, so skill levels are "
@@ -260,12 +298,15 @@ async def copy_packs_plan(request: Request, db: AsyncSession = Depends(get_db)):
         "plan": plan,
         "blueprints": blueprints,
         "names": await sde.type_ids_to_names(db, sorted(type_ids)),
-        "location_names": await _location_names(db, plan, chars),
+        "location_names": await _location_names(db, plan, candidates),
         "copy_loaded": await sde.blueprint_copy_data_loaded(db),
         "notes": notes,
         "skill_rows": skill_rows,
         "ignored": form.ignore_bpcs,
         "product_id": form.type_id,
+        "structure": form.structure,
+        "rig": form.rig,
+        "security": form.security,
         "character_name": selected.character_name,
         "copy_items": plan.group(cp.GROUP_COPY),
         "elsewhere_items": plan.group(cp.GROUP_ELSEWHERE),

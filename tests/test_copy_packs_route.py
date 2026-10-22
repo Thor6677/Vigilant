@@ -13,11 +13,14 @@ from datetime import datetime
 
 import itsdangerous
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.main as main
 import app.routes.copy_packs as copy_packs
-from app.db.models import Base, Character, User, get_db
+from app.auth import scopes as perms
+from app.db.cache import TTL, _ttl_for_path
+from app.db.models import Base, Character, CharacterDashboardCache, User, get_db
 from app.db.sde_models import SDEBlueprintInfo, SDEBlueprintMaterial, SDEType
 from app.industry import copy_pack as cp
 from tests.conftest import ensure_user
@@ -98,14 +101,15 @@ def _seeded_db():
         _run(engine.dispose())
         os.unlink(tmp.name)
 
+    teardown.session = SessionLocal
     return teardown
 
 
 def _stub_esi(monkeypatch, bpos=(), bpcs=(), notes=()):
     async def fake_owned(db, chars, selected):
-        return list(bpos), list(bpcs), list(notes)
+        return list(bpos), list(bpcs), list(notes), {}
 
-    async def fake_locations(db, plan, chars):
+    async def fake_locations(db, plan, candidates):
         return {}
 
     monkeypatch.setattr(copy_packs, "_owned_blueprints", fake_owned)
@@ -212,3 +216,231 @@ def test_plan_without_a_product_prompts():
         assert r.status_code == 200 and "Pick a product" in r.text
     finally:
         teardown()
+
+
+def test_early_exit_clears_the_left_column(monkeypatch):
+    teardown = _seeded_db()
+    try:
+        _stub_esi(monkeypatch)
+        r = _plan(_client(), character_id="")
+        assert "Pick a character." in r.text
+        assert '<div id="cp-skills" hx-swap-oob="true"></div>' in r.text
+        assert '<div id="cp-tree" hx-swap-oob="true"></div>' in r.text
+    finally:
+        teardown()
+
+
+def test_mfg_link_carries_the_facility(monkeypatch):
+    teardown = _seeded_db()
+    try:
+        _stub_esi(monkeypatch, bpos=[HULL_BPO])
+        r = _plan(_client(), structure="azbel", rig="none", security="nullsec")
+        assert "&amp;structure=azbel&amp;rig=none&amp;security=nullsec" in r.text
+    finally:
+        teardown()
+
+
+def test_form_opts_out_of_the_global_error_pill():
+    teardown = _seeded_db()
+    try:
+        r = _client().get("/industry/copy-packs")
+        assert 'id="cp-form"' in r.text and 'data-htmx-no-error="1"' in r.text
+        assert "htmx:responseError" in r.text and "htmx:sendError" in r.text
+    finally:
+        teardown()
+
+
+def test_search_escapes_type_names():
+    teardown = _seeded_db()
+    try:
+        async def add():
+            async with teardown.session() as db:
+                db.add(SDEType(type_id=99001, type_name='Zq"<b>x', published=True))
+                db.add(SDEBlueprintInfo(blueprint_type_id=99002, product_type_id=99001,
+                                        product_quantity=1, manufacturing_time=10,
+                                        max_production_limit=1, copying_time=10))
+                db.add(SDEBlueprintMaterial(blueprint_type_id=99002, activity_id=1,
+                                            material_type_id=34, quantity=1))
+                await db.commit()
+        _run(add())
+        r = _client().get("/industry/copy-packs/search?q=Zq")
+        assert 'data-type-name="Zq&#34;&lt;b&gt;x"' in r.text
+        assert "<b>x" not in r.text
+    finally:
+        teardown()
+
+
+# ── _skills ──────────────────────────────────────────────────────────────────
+
+def test_synced_skills_are_labelled_from_esi_and_overrides_manual(monkeypatch):
+    teardown = _seeded_db()
+    try:
+        async def sync():
+            async with teardown.session() as db:
+                char = (await db.execute(select(Character).where(
+                    Character.character_id == CHAR_ID))).scalar_one()
+                char.scopes = perms.SKILLS
+                db.add(CharacterDashboardCache(character_id=CHAR_ID, skills_json=json.dumps(
+                    {"total_sp": 0, "unallocated_sp": 0,
+                     "levels": {str(cp.MASS_PRODUCTION): 4}})))
+                await db.commit()
+        _run(sync())
+        _stub_esi(monkeypatch, bpos=[HULL_BPO])
+        r = _plan(_client())
+        sid = cp.MASS_PRODUCTION
+        assert "from ESI" in r.text
+        assert f'placeholder="4"' in r.text and f'id="cp-skill-{sid}"' in r.text
+        assert "No synced skills" not in r.text
+        r = _plan(_client(), skills_json=json.dumps({str(sid): 2}))
+        assert 'value="2"' in r.text and "manual" in r.text
+    finally:
+        teardown()
+
+
+# ── _owned ───────────────────────────────────────────────────────────────────
+
+def _row(**kw):
+    row = {"item_id": 1, "type_id": HULL_BP, "quantity": -1, "location_flag": "Hangar",
+           "location_id": 60003760, "material_efficiency": 5, "time_efficiency": 10,
+           "runs": -1}
+    row.update(kw)
+    return row
+
+
+def test_owned_original_copy_and_stack():
+    bpo = copy_packs._owned(_row(), "A", True)
+    assert bpo.is_bpo and bpo.runs is None and (bpo.me, bpo.te) == (5, 10)
+    bpc = copy_packs._owned(_row(quantity=-2, runs=7), "A", True)
+    assert not bpc.is_bpo and bpc.runs == 7
+    assert copy_packs._owned(_row(quantity=3), "A", True).is_bpo
+
+
+def test_owned_keeps_location_id_only_for_station_flags():
+    assert copy_packs._owned(_row(), "A", True).location_id == 60003760
+    for flag in ("Deliveries", "CorpDeliveries"):
+        assert copy_packs._owned(_row(location_flag=flag), "A", True).location_id == 60003760
+    for flag in ("CorpSAG3", "Unlocked", "Locked", "Cargo"):
+        assert copy_packs._owned(_row(location_flag=flag), "A", True).location_id is None
+    assert copy_packs._owned(_row(location_flag="CorpSAG3"), "A", True).location_label == "Corp Hangar 3"
+
+
+def test_owned_malformed_row_is_none():
+    assert copy_packs._owned({"type_id": 1}, "A", True) is None
+    assert copy_packs._owned(_row(item_id="x"), "A", True) is None
+
+
+# ── _owned_blueprints ────────────────────────────────────────────────────────
+
+CORP_A, CORP_B = 98000001, 98000002
+
+
+def _mem(cid, name, scopes, corp=CORP_A, corp_name="Alpha"):
+    return Character(character_id=cid, character_name=name, user_id=USER_ID,
+                     scopes=scopes, corporation_id=corp, corporation_name=corp_name)
+
+
+def _gather(monkeypatch, chars, selected, personal=None, corp=None, dead=(), fail=()):
+    """Run _owned_blueprints with ESI faked. `personal` is {char_id: rows};
+    `corp` is the (result, err) the fallback returns, or {corp_id: (r, e)}."""
+    async def fake_refresh(char, db):
+        if char.character_id in fail:
+            raise RuntimeError("boom")
+        return "tok"
+
+    async def fake_pages(fn, client, char_id):
+        return (personal or {}).get(char_id, [])
+
+    async def fake_fallback(scope, scope_chars, fn, corp_id, db):
+        res = corp[corp_id] if isinstance(corp, dict) else corp
+        return res
+
+    async def fake_dead(cs):
+        return set(dead)
+
+    monkeypatch.setattr(copy_packs, "refresh_token", fake_refresh)
+    monkeypatch.setattr(copy_packs, "_fetch_all_pages", fake_pages)
+    monkeypatch.setattr(copy_packs, "_try_api_call_with_fallback", fake_fallback)
+    monkeypatch.setattr(copy_packs, "_dead_token_ids", fake_dead)
+    return _run(copy_packs._owned_blueprints(None, chars, selected))
+
+
+def test_gather_notes_for_missing_scope_and_failed_fetch(monkeypatch):
+    me = _mem(1, "Me", "")
+    other = _mem(2, "Other", perms.BLUEPRINTS)
+    _b, _c, notes, _l = _gather(monkeypatch, [me, other], me)
+    assert any("Me hasn't shared blueprints" in n for n in notes)
+    assert not any("Other" in n for n in notes)      # only the selected one is nagged
+    me2 = _mem(1, "Me", perms.BLUEPRINTS)
+    _b, _c, notes, _l = _gather(monkeypatch, [me2], me2, fail={1})
+    assert "Couldn't load Me's blueprints." in notes
+
+
+def test_gather_dead_token_is_skipped_with_a_note(monkeypatch):
+    me = _mem(1, "Me", perms.BLUEPRINTS)
+    bpos, _c, notes, _l = _gather(monkeypatch, [me], me, personal={1: [_row()]}, dead={1})
+    assert bpos == []
+    assert "Me needs to sign in again, so their blueprints aren't counted." in notes
+
+
+def test_gather_corp_failure_and_empty_corp(monkeypatch):
+    me = _mem(1, "Me", perms.BLUEPRINTS + " " + perms.CORP_BLUEPRINTS)
+    _b, _c, notes, _l = _gather(monkeypatch, [me], me, corp=(None, "403"))
+    assert "Alpha's blueprints couldn't be loaded." in notes
+    _b, _c, notes, _l = _gather(monkeypatch, [me], me, corp=([], None))
+    assert not any("couldn't be loaded" in n and "Alpha" in n for n in notes)
+
+
+def test_gather_note_when_nobody_in_the_corp_shares_corp_blueprints(monkeypatch):
+    me = _mem(1, "Me", perms.BLUEPRINTS)
+    _b, _c, notes, _l = _gather(monkeypatch, [me], me)
+    assert "No character in Alpha shares corp blueprints, so its hangars aren't counted." in notes
+    npc = _mem(1, "Me", perms.BLUEPRINTS, corp=1000001, corp_name="NPC")
+    _b, _c, notes, _l = _gather(monkeypatch, [npc], npc)
+    assert not any("shares corp blueprints" in n for n in notes)
+
+
+def test_gather_reachability_and_bpc_scope(monkeypatch):
+    me = _mem(1, "Me", perms.BLUEPRINTS)
+    alt = _mem(2, "Alt", perms.BLUEPRINTS, corp=CORP_B, corp_name="Beta")
+    personal = {
+        1: [_row(item_id=10), _row(item_id=11, quantity=-2, runs=3)],
+        2: [_row(item_id=20), _row(item_id=21, quantity=-2, runs=3)],
+    }
+    bpos, bpcs, _n, _l = _gather(monkeypatch, [me, alt], me, personal=personal)
+    by_id = {b.item_id: b for b in bpos}
+    assert by_id[10].reachable is True and by_id[20].reachable is False
+    assert [b.item_id for b in bpcs] == [11]           # the alt's BPC is excluded
+
+
+def test_gather_corp_blueprints_and_npc_corp(monkeypatch):
+    me = _mem(1, "Me", perms.CORP_BLUEPRINTS)
+    alt = _mem(2, "Alt", perms.CORP_BLUEPRINTS, corp=CORP_B, corp_name="Beta")
+    corp = {CORP_A: ([_row(item_id=30)], None), CORP_B: ([_row(item_id=40)], None)}
+    bpos, _c, _n, _l = _gather(monkeypatch, [me, alt], me, corp=corp)
+    by_id = {b.item_id: b for b in bpos}
+    assert by_id[30].reachable is True and by_id[40].reachable is False
+    npc = _mem(1, "Me", perms.CORP_BLUEPRINTS, corp=1000001, corp_name="NPC")
+    bpos, _c, _n, _l = _gather(monkeypatch, [npc], npc, corp={1000001: ([_row()], None)})
+    assert bpos == []
+
+
+def test_gather_location_candidates_are_per_owner(monkeypatch):
+    me = _mem(1, "Me", perms.BLUEPRINTS + " " + perms.CORP_BLUEPRINTS)
+    alt = _mem(2, "Alt", perms.BLUEPRINTS + " " + perms.CORP_BLUEPRINTS, corp=CORP_B,
+               corp_name="Beta")
+    personal = {1: [_row(item_id=10, location_id=1111)],
+                2: [_row(item_id=20, location_id=2222)]}
+    corp = {CORP_A: ([_row(item_id=30, location_id=3333, location_flag="CorpDeliveries"),
+                      _row(item_id=31, location_id=4444, location_flag="CorpSAG1")], None),
+            CORP_B: ([], None)}
+    _b, _c, _n, cands = _gather(monkeypatch, [me, alt], me, personal=personal, corp=corp)
+    assert cands[1111] == [me] and cands[2222] == [alt] and cands[3333] == [me]
+    assert 4444 not in cands                            # office id: never looked up
+
+
+# ── cache TTL ────────────────────────────────────────────────────────────────
+
+def test_corp_blueprints_cache_for_an_hour():
+    assert _ttl_for_path("/corporations/98000001/blueprints/") == TTL["blueprints"] == 3600
+    assert _ttl_for_path("/corporations/98000001/") == TTL["corporation"]
+    assert _ttl_for_path("/characters/123/blueprints/") == 300      # unchanged
