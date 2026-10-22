@@ -9,6 +9,7 @@ character's synced skills) and renders the result.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -27,7 +28,7 @@ from app.industry import copy_pack as cp
 from app.industry.copy_pack_form import parse_plan_form
 from app.industry.manufacturing import RIGS, SEC_STATUS, STRUCTURES, format_time
 from app.routes.blueprints import LOCATION_FLAGS, _fetch_all_pages
-from app.routes.corporations import _try_api_call_with_fallback
+from app.routes.corporations import _build_office_to_structure_map, _try_api_call_with_fallback
 from app.routes.industry_jobs import NPC_CORP_CEILING, _resolve_location_names
 from app.sde import lookup as sde
 
@@ -78,6 +79,8 @@ async def copy_packs_search(
 
 
 _PLACE_FLAGS = frozenset({"Hangar", "Deliveries", "CorpDeliveries"})
+# Corp hangar divisions: location_id is the office's item id, not a structure.
+_OFFICE_FLAGS = frozenset(f"CorpSAG{n}" for n in range(1, 8))
 
 
 def _owned(row: dict, owner_name: str, reachable: bool) -> cp.OwnedBlueprint | None:
@@ -133,11 +136,16 @@ async def _owned_blueprints(db: AsyncSession, chars: list[Character],
     notes: list[str] = []
     candidates: dict[int, list[Character]] = {}
 
-    def add(raw: list, owner: str, own: bool, resolvers: list[Character]) -> None:
+    def add(raw: list, owner: str, own: bool, resolvers: list[Character],
+            office_map: dict[int, int] | None = None) -> None:
         for row in raw or []:
             ob = _owned(row, owner, reachable=own)
             if ob is None:
                 continue
+            if row.get("location_flag") in _OFFICE_FLAGS and office_map:
+                structure_id = office_map.get(row.get("location_id"))
+                if structure_id:
+                    ob = dataclasses.replace(ob, location_id=structure_id)
             if ob.is_bpo:
                 bpos.append(ob)
             elif own:
@@ -198,8 +206,27 @@ async def _owned_blueprints(db: AsyncSession, chars: list[Character],
         if len(raw) >= _PAGE_CAP:
             notes.append(f"{corp_name}'s blueprint list may be incomplete "
                          "(over 10,000 blueprints).")
-        add(raw, corp_name, corp_id == selected.corporation_id, holders)
+        office_map, asset_holders = await _office_map(raw, members, corp_id, db)
+        add(raw, corp_name, corp_id == selected.corporation_id,
+            holders + [c for c in asset_holders if c not in holders], office_map)
     return bpos, bpcs, notes, candidates
+
+
+async def _office_map(raw: list, members: list[Character], corp_id: int,
+                      db: AsyncSession) -> tuple[dict[int, int], list[Character]]:
+    """({office item id: structure id}, characters that could read the corp's
+    assets) for a corp with BPOs sitting in hangar offices. Corp assets are
+    the only place an office is tied to its structure. Best effort: with no
+    asset scope or a failed fetch the BPOs keep their hangar-division label."""
+    if not any(r.get("quantity") != -2 and r.get("location_flag") in _OFFICE_FLAGS
+               for r in raw or []):
+        return {}, []
+    holders = [c for c in members if perms.CORP_ASSETS in (c.scopes or "")]
+    if not holders:
+        return {}, []
+    assets, _err = await _try_api_call_with_fallback(
+        "assets", {"assets": holders}, esi_corp.get_corporation_assets, corp_id, db)
+    return _build_office_to_structure_map(assets or []), holders
 
 
 async def _skills(db: AsyncSession, char: Character, overrides: dict):

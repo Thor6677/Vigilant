@@ -339,9 +339,11 @@ def _mem(cid, name, scopes, corp=CORP_A, corp_name="Alpha"):
                      scopes=scopes, corporation_id=corp, corporation_name=corp_name)
 
 
-def _gather(monkeypatch, chars, selected, personal=None, corp=None, dead=(), fail=()):
+def _gather(monkeypatch, chars, selected, personal=None, corp=None, dead=(), fail=(),
+            assets=(None, "no assets")):
     """Run _owned_blueprints with ESI faked. `personal` is {char_id: rows};
-    `corp` is the (result, err) the fallback returns, or {corp_id: (r, e)}."""
+    `corp` is the (result, err) the fallback returns, or {corp_id: (r, e)};
+    `assets` is what the corp-assets fallback returns (the office map source)."""
     async def fake_refresh(char, db):
         if char.character_id in fail:
             raise RuntimeError("boom")
@@ -351,6 +353,8 @@ def _gather(monkeypatch, chars, selected, personal=None, corp=None, dead=(), fai
         return (personal or {}).get(char_id, [])
 
     async def fake_fallback(scope, scope_chars, fn, corp_id, db):
+        if scope == "assets":
+            return assets
         res = corp[corp_id] if isinstance(corp, dict) else corp
         return res
 
@@ -438,6 +442,56 @@ def test_gather_location_candidates_are_per_owner(monkeypatch):
     assert 4444 not in cands                            # office id: never looked up
 
 
+def _office(item_id, structure_id):
+    return {"item_id": item_id, "location_id": structure_id, "location_flag": "OfficeFolder"}
+
+
+def test_gather_resolves_a_corp_office_to_its_structure(monkeypatch):
+    holder = _mem(1, "Me", perms.CORP_BLUEPRINTS + " " + perms.CORP_ASSETS)
+    corp = ([_row(item_id=30, location_id=4444, location_flag="CorpSAG3")], None)
+    bpos, _c, _n, cands = _gather(monkeypatch, [holder], holder, corp=corp,
+                                  assets=([_office(4444, 9999)], None))
+    assert bpos[0].location_id == 9999
+    assert bpos[0].location_label == "Corp Hangar 3"    # the division still shows
+    assert cands[9999] == [holder] and 4444 not in cands
+
+
+def test_gather_keeps_the_flag_label_when_the_office_cannot_be_mapped(monkeypatch):
+    corp = ([_row(item_id=30, location_id=4444, location_flag="CorpSAG3")], None)
+    no_scope = _mem(1, "Me", perms.CORP_BLUEPRINTS)
+    bpos, _c, _n, cands = _gather(monkeypatch, [no_scope], no_scope, corp=corp,
+                                  assets=([_office(4444, 9999)], None))
+    assert bpos[0].location_id is None and not cands     # assets scope never granted
+    holder = _mem(1, "Me", perms.CORP_BLUEPRINTS + " " + perms.CORP_ASSETS)
+    for assets in ((None, "403"), ([], None), ([_office(5555, 9999)], None)):
+        bpos, _c, notes, cands = _gather(monkeypatch, [holder], holder, corp=corp,
+                                         assets=assets)
+        assert bpos[0].location_id is None and not cands
+        assert bpos[0].location_label == "Corp Hangar 3"
+        assert not any("Traceback" in n for n in notes)
+
+
+def test_gather_does_not_fetch_corp_assets_without_a_hangar_bpo(monkeypatch):
+    holder = _mem(1, "Me", perms.CORP_BLUEPRINTS + " " + perms.CORP_ASSETS)
+    asked = []
+
+    async def boom(scope, scope_chars, fn, corp_id, db):
+        asked.append(scope)
+        return ([_row(item_id=30, location_id=3333, location_flag="CorpDeliveries")], None) \
+            if scope == "blueprints" else (None, "unexpected")
+
+    monkeypatch.setattr(copy_packs, "_try_api_call_with_fallback", boom)
+    # A delivery-hangar BPO already has a real location_id, so no office map is needed.
+    async def fake_refresh(char, db):
+        return "tok"
+    async def fake_dead(cs):
+        return set()
+    monkeypatch.setattr(copy_packs, "refresh_token", fake_refresh)
+    monkeypatch.setattr(copy_packs, "_dead_token_ids", fake_dead)
+    _run(copy_packs._owned_blueprints(None, [holder], holder))
+    assert asked == ["blueprints"]
+
+
 # ── cache TTL ────────────────────────────────────────────────────────────────
 
 def test_corp_blueprints_cache_for_an_hour():
@@ -500,5 +554,54 @@ def test_search_box_opts_out_of_the_error_pill(monkeypatch):
         assert 'id="cp-search"' in r.text
         assert "Search failed. Try again." in r.text
         assert r.text.count('data-htmx-no-error="1"') >= 2
+    finally:
+        teardown()
+
+
+def test_plan_shows_structure_and_division_for_a_corp_bpo(monkeypatch):
+    teardown = _seeded_db()
+    try:
+        corp_bpo = cp.OwnedBlueprint(7002, HULL_BP, True, 10, 20, None,
+                                     owner_name="Alpha Corp",
+                                     location_id=9999, location_label="Corp Hangar 3")
+        _stub_esi(monkeypatch, bpos=[corp_bpo])
+
+        async def fake_locations(db, plan, candidates):
+            return {9999: "Azbel Keepstar"}
+        monkeypatch.setattr(copy_packs, "_location_names", fake_locations)
+        r = _plan(_client())
+        assert "Alpha Corp, Azbel Keepstar, Corp Hangar 3" in r.text
+
+        personal_bpo = cp.OwnedBlueprint(7003, HULL_BP, True, 10, 20, None,
+                                         owner_name="Builder",
+                                         location_id=9999, location_label="Personal Hangar")
+        _stub_esi(monkeypatch, bpos=[personal_bpo])
+        monkeypatch.setattr(copy_packs, "_location_names", fake_locations)
+        r = _plan(_client())
+        assert "Builder, Azbel Keepstar" in r.text
+        assert "Azbel Keepstar, Personal Hangar" not in r.text
+    finally:
+        teardown()
+
+
+def test_plan_bpo_dropdown_options_include_the_location(monkeypatch):
+    teardown = _seeded_db()
+    try:
+        bpos = [
+            cp.OwnedBlueprint(7004, HULL_BP, True, 10, 20, None,
+                              owner_name="Alpha Corp",
+                              location_id=None, location_label="Corp Hangar 2"),
+            cp.OwnedBlueprint(7005, HULL_BP, True, 10, 20, None,
+                              owner_name="Alpha Corp",
+                              location_id=9999, location_label="Corp Hangar 3"),
+        ]
+        _stub_esi(monkeypatch, bpos=bpos)
+
+        async def fake_locations(db, plan, candidates):
+            return {9999: "Azbel Keepstar"}
+        monkeypatch.setattr(copy_packs, "_location_names", fake_locations)
+        r = _plan(_client())
+        assert "BPO 10/20 · Alpha Corp, Corp Hangar 2" in r.text
+        assert "BPO 10/20 · Alpha Corp, Azbel Keepstar, Corp Hangar 3" in r.text
     finally:
         teardown()

@@ -5,7 +5,8 @@
    left column. Markup only: the handlers named in data-* attributes live in
    copy_packs.html's nonced script (tests/test_csp_inline_handlers.py). #}
 {%- macro item_name(t) -%}{{ names.get(t, 'Type ' ~ t) }}{%- endmacro -%}
-{%- macro where(o) -%}{{ o.owner_name }}{% set loc = location_names.get(o.location_id) or o.location_label %}{% if loc %}, {{ loc }}{% endif %}{%- endmacro -%}
+{#- A resolved structure name replaces the flag label, except for a corp hangar, where the division (Corp Hangar 3) is worth keeping next to it. -#}
+{%- macro where(o) -%}{{ o.owner_name }}{% set named = location_names.get(o.location_id) %}{% set loc = (named ~ ', ' ~ o.location_label if named and o.location_label.startswith('Corp Hangar') else (named or o.location_label)) %}{% if loc %}, {{ loc }}{% endif %}{%- endmacro -%}
 {%- macro skill_chips(ip) -%}{% for sid, lvl in ip.missing_skills %} <span class="cp-chip cp-chip--warn">needs {{ item_name(sid) }} {{ lvl }}</span>{% endfor %}{%- endmacro -%}
 
 {% if notes or not copy_loaded %}
@@ -137,7 +138,7 @@
                     {%- if ip.bpo_options | length > 1 %}
                     <select data-change="cpPickBpo" data-type-id="{{ r.product_type_id }}" class="cp-input">
                         {% for o in ip.bpo_options %}
-                        <option value="{{ o.item_id }}"{% if ip.bpo and o.item_id == ip.bpo.item_id %} selected{% endif %}>BPO {{ o.me }}/{{ o.te }} · {{ o.owner_name }}</option>
+                        <option value="{{ o.item_id }}"{% if ip.bpo and o.item_id == ip.bpo.item_id %} selected{% endif %}>BPO {{ o.me }}/{{ o.te }} · {{ where(o) }}</option>
                         {% endfor %}
                     </select>
                     {%- elif ip.bpo %}
