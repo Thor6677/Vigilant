@@ -215,8 +215,11 @@
         if (typeof Chart === 'undefined' || !canvas) return;
         var key = canvas.closest('.corp-wallet-history').dataset.corpId;
         if (charts[key]) { charts[key].destroy(); delete charts[key]; }
+        /* Canvas can't resolve var(--accent): Chart.js drew the Total line
+           black. Read the computed value instead (ISS-115). */
+        var accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#c8a951';
         var datasets = [{
-            label: 'Total', data: data.total, borderColor: 'var(--accent)',
+            label: 'Total', data: data.total, borderColor: accent,
             borderWidth: 2, pointRadius: 0, tension: 0.15, spanGaps: false,
         }];
         Object.keys(data.series).sort().forEach(function(div, i) {
