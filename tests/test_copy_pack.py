@@ -106,6 +106,17 @@ def test_shared_item_lands_at_deepest_level_with_summed_demand():
     assert [r.depth for r in p.tree if r.product_type_id == 3] == [2, 1]
 
 
+def test_tree_rows_know_their_parent_row():
+    # 1 -> 2 -> 3 and 1 -> 3: item 3 is listed under both parents.
+    top = bp(1, 101, mats=[(2, 1), (3, 5)])
+    mid = bp(2, 202, mats=[(3, 7)])
+    leaf = bp(3, 303)
+    owned = (bpo(1, 101, me=0), bpo(2, 202, me=0), bpo(3, 303, me=0))
+    p = cp.plan(inp(1, 1, [top, mid, leaf], bpos=owned))
+    assert [(r.product_type_id, r.depth, r.parent) for r in p.tree] == [
+        (1, 0, None), (2, 1, 0), (3, 2, 1), (3, 1, 0)]
+
+
 def test_per_job_rounding_cascades_from_parent_copies():
     # Archon hull: max 1 run per copy, ME10, Azbel 0.99. Each 1-run job
     # needs ceil(6 x 0.9 x 0.99) = 6 plates, so 2 hulls need 12, not 11.

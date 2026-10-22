@@ -168,6 +168,7 @@ class TreeRow:
     units: int
     owned: bool          # a BPO or usable BPC exists
     expanded: bool       # its children follow (first appearance of a Build item)
+    parent: int | None = None   # index in Plan.tree of the row it is listed under
 
 
 @dataclass
@@ -272,17 +273,18 @@ def tree_rows(inp: PlanInput, demand: dict) -> list:
     rows: list[TreeRow] = []
     expanded: set[int] = set()
 
-    def walk(t: int, depth: int) -> None:
+    def walk(t: int, depth: int, parent: int | None) -> None:
         build = is_build(inp, t)
         expand = build and t not in expanded and depth < MAX_DEPTH
+        idx = len(rows)
         rows.append(TreeRow(t, depth, build, t in inp.blueprints,
-                            demand.get(t, 0), owns_blueprint(inp, t), expand))
+                            demand.get(t, 0), owns_blueprint(inp, t), expand, parent))
         if expand:
             expanded.add(t)
             for m, _q in inp.blueprints[t].materials:
-                walk(m, depth + 1)
+                walk(m, depth + 1, idx)
 
-    walk(inp.product_type_id, 0)
+    walk(inp.product_type_id, 0, None)
     return rows
 
 
