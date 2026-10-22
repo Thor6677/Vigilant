@@ -33,6 +33,9 @@ from app.sde import lookup as sde
 
 logger = logging.getLogger(__name__)
 
+# _fetch_all_pages stops after 10 pages of 1000; a list that long may be cut off.
+_PAGE_CAP = 10 * 1000
+
 router = APIRouter(tags=["copy-packs"])
 templates = Jinja2Templates(directory="app/templates")
 templates.env.filters["duration"] = format_time
@@ -166,6 +169,9 @@ async def _owned_blueprints(db: AsyncSession, chars: list[Character],
                            char.character_id, exc)
             notes.append(f"Couldn't load {char.character_name}'s blueprints.")
             continue
+        if len(raw) >= _PAGE_CAP:
+            notes.append(f"{char.character_name}'s blueprint list may be incomplete "
+                         "(over 10,000 blueprints).")
         add(raw, char.character_name, own, [char])
 
     corps: dict[int, list[Character]] = {}
@@ -189,6 +195,9 @@ async def _owned_blueprints(db: AsyncSession, chars: list[Character],
         if raw is None:
             notes.append(f"{corp_name}'s blueprints couldn't be loaded.")
             continue
+        if len(raw) >= _PAGE_CAP:
+            notes.append(f"{corp_name}'s blueprint list may be incomplete "
+                         "(over 10,000 blueprints).")
         add(raw, corp_name, corp_id == selected.corporation_id, holders)
     return bpos, bpcs, notes, candidates
 

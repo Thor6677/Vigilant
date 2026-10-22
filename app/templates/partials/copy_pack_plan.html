@@ -61,7 +61,7 @@
         <div class="b-panel-head"><span class="b-label">Use existing BPCs ({{ bpc_items | length }})</span></div>
         {%- for ip in bpc_items %}{% for o, n in ip.bpcs_used %}
         <div class="b-table-row cp-row">
-            <span style="flex:3;">{{ item_name(ip.product_type_id) }}</span>
+            <span style="flex:3;">{{ item_name(ip.product_type_id) }}{{ skill_chips(ip) }}</span>
             <span style="flex:3;">{{ o.me }}/{{ o.te }} · {{ where(o) }}</span>
             <span style="flex:2;text-align:right;">uses {{ n }} of {{ o.runs }} runs</span>
         </div>

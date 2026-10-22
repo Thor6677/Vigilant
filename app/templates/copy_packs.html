@@ -37,7 +37,7 @@
                                placeholder="Search items, e.g. Archon"
                                hx-get="/industry/copy-packs/search"
                                hx-trigger="input changed delay:300ms"
-                               hx-target="#cp-search-results"
+                               hx-target="#cp-search-results" data-htmx-no-error="1"
                                class="cp-input">
                     </label>
                     <div id="cp-search-results"></div>
@@ -182,7 +182,8 @@
     window.cpSetMeTe = function () {
         var st = productState(), field = this.dataset.field;
         st[field] = st[field] || {};
-        st[field][this.dataset.typeId] = parseInt(this.value, 10) || 0;
+        if (this.value === '') delete st[field][this.dataset.typeId];
+        else st[field][this.dataset.typeId] = parseInt(this.value, 10) || 0;
         setProductState(st);
         replan();
     };
@@ -204,8 +205,9 @@
     };
 
     function planFailed(e, text) {
-        if (!e.detail.elt || e.detail.elt.id !== 'cp-form') return;
-        var box = el('cp-results');
+        var id = e.detail.elt && e.detail.elt.id;
+        if (id !== 'cp-form' && id !== 'cp-search') return;
+        var box = el(id === 'cp-form' ? 'cp-results' : 'cp-search-results');
         box.innerHTML = '';
         var section = document.createElement('div');
         section.className = 'b-section';
@@ -216,10 +218,13 @@
         box.appendChild(section);
     }
     document.body.addEventListener('htmx:responseError', function (e) {
-        planFailed(e, "Couldn't plan (HTTP " + (e.detail.xhr ? e.detail.xhr.status : '?') + '). Try again.');
+        var code = e.detail.xhr ? e.detail.xhr.status : '?';
+        planFailed(e, e.detail.elt && e.detail.elt.id === 'cp-search'
+            ? 'Search failed. Try again.' : "Couldn't plan (HTTP " + code + '). Try again.');
     });
     document.body.addEventListener('htmx:sendError', function (e) {
-        planFailed(e, 'Network error. Try again.');
+        planFailed(e, e.detail.elt && e.detail.elt.id === 'cp-search'
+            ? 'Search failed. Try again.' : 'Network error. Try again.');
     });
 
     document.addEventListener('DOMContentLoaded', function () {

@@ -479,3 +479,26 @@ def test_shared_build_item_gets_its_input_ids_once(monkeypatch):
         assert r.text.count(f'id="cp-te-{shared}"') == 1
     finally:
         teardown()
+
+
+def test_gather_flags_lists_cut_off_at_the_page_cap(monkeypatch):
+    me = _mem(1, "Me", perms.BLUEPRINTS + " " + perms.CORP_BLUEPRINTS)
+    full = [_row(item_id=i) for i in range(10_000)]
+    _b, _c, notes, _l = _gather(monkeypatch, [me], me, personal={1: full},
+                                corp=(full, None))
+    assert "Me's blueprint list may be incomplete (over 10,000 blueprints)." in notes
+    assert "Alpha's blueprint list may be incomplete (over 10,000 blueprints)." in notes
+    _b, _c, notes, _l = _gather(monkeypatch, [me], me, personal={1: full[:9_999]},
+                                corp=(full[:9_999], None))
+    assert not any("incomplete" in n for n in notes)
+
+
+def test_search_box_opts_out_of_the_error_pill(monkeypatch):
+    teardown = _seeded_db()
+    try:
+        r = _client().get("/industry/copy-packs")
+        assert 'id="cp-search"' in r.text
+        assert "Search failed. Try again." in r.text
+        assert r.text.count('data-htmx-no-error="1"') >= 2
+    finally:
+        teardown()
