@@ -2993,7 +2993,8 @@
 .cp-tree-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--border); font-size: 11px; }
 .cp-tree-name { flex: 1; min-width: 0; }
 .cp-tree-runs { flex: none; color: var(--muted); }
-.cp-tree-src { flex: none; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 0.3rem; }
+.cp-tree-src { flex: none; min-width: 0; max-width: 100%; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 0.3rem; }
+.cp-tree-src select.cp-input { max-width: 100%; min-width: 0; text-overflow: ellipsis; }
 .cp-tree-toggle { flex: none; }
 .cp-tree-src .cp-num { width: 3.2rem; }
 .cp-bpc-toggle { display: inline-flex; align-items: center; gap: 0.2rem; font-size: 10px; }

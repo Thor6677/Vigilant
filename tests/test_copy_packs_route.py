@@ -8,7 +8,9 @@ import asyncio
 import base64
 import json
 import os
+import re
 import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 from datetime import datetime
 
@@ -519,6 +521,16 @@ def test_location_names_also_look_up_bpos_offered_only_in_the_picker(monkeypatch
     plan = SimpleNamespace(group=lambda g: [item], bpc_items=lambda: [], items={HULL: item})
     _run(copy_packs._location_names(None, plan, {}))
     assert seen["ids"] == {111, 222}
+
+
+def test_bpo_picker_is_capped_so_a_long_location_name_cannot_widen_the_tree():
+    """The picker's option labels carry a station or structure name, and a select
+    is as wide as its longest option: uncapped it ran past the panel on a phone."""
+    css = (Path(__file__).resolve().parent.parent / "static/css/site.css").read_text()
+    rule = re.search(r"\.cp-tree-src\s+select[^{]*\{([^}]*)\}", css)
+    assert rule and "max-width" in rule.group(1)
+    src = re.search(r"\.cp-tree-src\s*\{([^}]*)\}", css)
+    assert src and "min-width: 0" in src.group(1) and "max-width: 100%" in src.group(1)
 
 
 # ── cache TTL ────────────────────────────────────────────────────────────────
