@@ -37,6 +37,7 @@ from app.routes.character_tags import router as character_tags_router
 from app.routes.assets import router as assets_router
 from app.routes.corporations import router as corporations_router
 from app.routes.industry import router as industry_router
+from app.routes.copy_packs import router as copy_packs_router
 from app.routes.ambient import router as ambient_router
 from app.routes.industry_jobs import router as industry_jobs_router
 from app.routes.pi import router as pi_router
@@ -226,6 +227,7 @@ app.include_router(character_tags_router)
 app.include_router(assets_router)
 app.include_router(corporations_router)
 app.include_router(industry_router)
+app.include_router(copy_packs_router)
 app.include_router(industry_jobs_router)
 app.include_router(pi_router)
 app.include_router(journal_router)

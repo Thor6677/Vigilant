@@ -1,0 +1,170 @@
+{# Copy-pack planner fragment (POST /industry/copy-packs/plan).
+
+   The main body is the results column (the form's hx-target, #cp-results).
+   The Skills panel and the build/buy tree ride along out of band into the
+   left column. Markup only: the handlers named in data-* attributes live in
+   copy_packs.html's nonced script (tests/test_csp_inline_handlers.py). #}
+{%- macro item_name(t) -%}{{ names.get(t, 'Type ' ~ t) }}{%- endmacro -%}
+{%- macro where(o) -%}{{ o.owner_name }}{% set loc = location_names.get(o.location_id) or o.location_label %}{% if loc %}, {{ loc }}{% endif %}{%- endmacro -%}
+{%- macro skill_chips(ip) -%}{% for sid, lvl in ip.missing_skills %} <span class="cp-chip cp-chip--warn">needs {{ item_name(sid) }} {{ lvl }}</span>{% endfor %}{%- endmacro -%}
+
+{% if notes or not copy_loaded %}
+<div class="b-section">
+    <div class="b-panel cp-notes">
+        {% if not copy_loaded %}<div>Copy data hasn't been imported from the SDE yet, so every blueprint shows as "can't copy" until the next SDE import finishes.</div>{% endif %}
+        {% for n in notes %}<div>{{ n }}</div>{% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<div class="b-section">
+    <div class="b-panel cp-summary">
+        <span><b>{{ plan.copy_jobs }}</b> copy jobs <span class="b-muted-sm">/ {{ plan.lab_slots }} lab slots</span></span>
+        {% if plan.longest_copy %}
+        <span>Longest copy <b>{{ plan.longest_copy[1] | duration }}</b> <span class="b-muted-sm">({{ item_name(plan.longest_copy[0]) }})</span></span>
+        {% endif %}
+        <span>Est. build <b>{{ plan.build_seconds | duration }}</b>
+            <span class="b-muted-sm">on {{ plan.mfg_slots }} slot{{ 's' if plan.mfg_slots != 1 }}{% for lvl, secs in plan.level_seconds %} · {% if lvl == 0 %}{{ item_name(product_id) }}{% else %}level {{ lvl }}{% endif %} {{ secs | duration }}{% endfor %}</span>
+        </span>
+    </div>
+</div>
+
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head"><span class="b-label">Copy ({{ copy_items | length }})</span></div>
+        {% if copy_items %}
+        <div class="b-table-row m-head cp-head">
+            <span style="flex:3;">Blueprint</span>
+            <span style="flex:3;">From</span>
+            <span style="flex:1;text-align:right;">Copies × runs</span>
+            <span style="flex:1;text-align:right;">Copy time</span>
+            <span style="flex:0 0 3.5rem;"></span>
+        </div>
+        {%- for ip in copy_items %}
+        <div class="b-table-row m-row cp-row" data-click="toggleMRow">
+            {#- #}<span data-m="key" style="flex:3;">{{ item_name(ip.product_type_id) }}{% if not ip.bpo.reachable %} <span class="cp-chip cp-chip--bad" title="Move it to {{ character_name }} or copy it there">on {{ ip.bpo.owner_name }}</span>{% endif %}{{ skill_chips(ip) }}</span>
+            {#- #}<span data-m-label="From" style="flex:3;">{{ ip.bpo.me }}/{{ ip.bpo.te }} · {{ where(ip.bpo) }}</span>
+            {#- #}<span data-m="key" style="flex:1;text-align:right;">{{ ip.copies }} × {{ ip.runs_per_copy }}{% if ip.spare_runs %} <span class="b-muted-sm">({{ ip.spare_runs }} spare)</span>{% endif %}</span>
+            {#- #}<span data-m-label="Copy time" style="flex:1;text-align:right;">{{ ip.copy_seconds | duration }}</span>
+            {#- #}<span data-m-label="Build" style="flex:0 0 3.5rem;text-align:right;"><a href="/industry/manufacturing?type_id={{ blueprints[ip.product_type_id].blueprint_type_id }}&amp;me={{ ip.me }}&amp;te={{ ip.te }}&amp;runs={{ ip.runs_per_copy }}">Mfg ↗</a></span>
+        {#- #}</div>
+        {%- endfor %}
+        {% else %}
+        <div class="b-empty">Nothing to copy.</div>
+        {% endif %}
+    </div>
+</div>
+
+{% if bpc_items %}
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head"><span class="b-label">Use existing BPCs ({{ bpc_items | length }})</span></div>
+        {%- for ip in bpc_items %}{% for o, n in ip.bpcs_used %}
+        <div class="b-table-row cp-row">
+            <span style="flex:3;">{{ item_name(ip.product_type_id) }}</span>
+            <span style="flex:3;">{{ o.me }}/{{ o.te }} · {{ where(o) }}</span>
+            <span style="flex:2;text-align:right;">uses {{ n }} of {{ o.runs }} runs</span>
+        </div>
+        {%- endfor %}{% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head"><span class="b-label">Source elsewhere: no BPO ({{ elsewhere_items | length }})</span></div>
+        {%- for ip in elsewhere_items %}
+        <div class="b-table-row cp-row">
+            <span style="flex:3;">{{ item_name(ip.product_type_id) }}{{ skill_chips(ip) }}</span>
+            <span style="flex:2;">needs {{ ip.copies }} × {{ ip.runs_per_copy }} runs</span>
+            <span style="flex:2;text-align:right;" class="b-muted-sm">assumed ME {{ ip.me }} / TE {{ ip.te }}</span>
+        </div>
+        {%- else %}
+        <div class="b-empty">You own a BPO for everything you're building.</div>
+        {%- endfor %}
+    </div>
+</div>
+
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head"><span class="b-label">Can't copy: buy or source ({{ nocopy_items | length }})</span></div>
+        {%- if nocopy_items | selectattr("bpo", "none") | list %}
+        <div class="cp-notes">Runs per BPC assume no decryptor and the best invention source (or the blueprint's max runs per copy).</div>
+        {%- endif %}
+        {%- for ip in nocopy_items %}
+        <div class="b-table-row cp-row">
+            <span style="flex:3;">{{ item_name(ip.product_type_id) }}{{ skill_chips(ip) }}</span>
+            <span style="flex:2;">{{ ip.copy_runs }} runs{% if not ip.bpo and ip.copies > 1 %} · {{ ip.copies }} BPCs of up to {{ ip.runs_per_copy }}{% endif %}</span>
+            <span style="flex:2;text-align:right;" class="b-muted-sm">{% if blueprints[ip.product_type_id].invented %}invented (T2){% else %}no copying{% endif %} · ME {{ ip.me }} / TE {{ ip.te }}</span>
+        </div>
+        {%- else %}
+        <div class="b-empty">T2, faction and other uncopyable items you set to Build land here.</div>
+        {%- endfor %}
+    </div>
+</div>
+
+<div id="cp-skills" hx-swap-oob="true">
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head"><span class="b-label">Skills · {{ character_name }}</span></div>
+        <div class="cp-skills">
+            {% for s in skill_rows %}
+            <label class="cp-skill">
+                <span>{{ s.label }} <span class="b-muted-sm">{{ s.source }}</span></span>
+                <input type="number" min="0" max="5" step="1"
+                       value="{{ s.override if s.override is not none else '' }}"
+                       placeholder="{{ s.placeholder }}"
+                       data-change="cpSkillChanged" data-skill-id="{{ s.id }}"
+                       class="cp-input cp-num">
+            </label>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+</div>
+
+<div id="cp-tree" hx-swap-oob="true">
+<div class="b-section">
+    <div class="b-panel">
+        <div class="b-panel-head"><span class="b-label">Tree: build / buy</span></div>
+        {%- for r in plan.tree %}
+        {%- set ip = plan.items.get(r.product_type_id) if r.build else none %}
+        <div class="cp-tree-row" style="padding-left:{{ 0.5 + r.depth * 0.9 }}rem;">
+            <span class="cp-tree-name">{{ item_name(r.product_type_id) }}</span>
+            <span class="cp-tree-runs">{% if ip %}{{ ip.runs }} runs{% else %}× {{ "{:,}".format(r.units) }}{% endif %}</span>
+            <span class="cp-tree-src">
+                {%- if ip %}
+                    {%- if ip.bpo_options | length > 1 %}
+                    <select data-change="cpPickBpo" data-type-id="{{ r.product_type_id }}" class="cp-input">
+                        {% for o in ip.bpo_options %}
+                        <option value="{{ o.item_id }}"{% if ip.bpo and o.item_id == ip.bpo.item_id %} selected{% endif %}>BPO {{ o.me }}/{{ o.te }} · {{ o.owner_name }}</option>
+                        {% endfor %}
+                    </select>
+                    {%- elif ip.bpo %}
+                    BPO {{ ip.bpo.me }}/{{ ip.bpo.te }}{% if not ip.bpo.reachable %} <span class="cp-chip cp-chip--bad">on {{ ip.bpo.owner_name }}</span>{% endif %}
+                    {%- else %}
+                    <span class="cp-chip cp-chip--warn">{% if ip.group == 'nocopy' %}Can't copy{% else %}No BPO{% endif %}</span>
+                    ME <input type="number" min="0" max="10" value="{{ ip.me }}" data-change="cpSetMeTe" data-type-id="{{ r.product_type_id }}" data-field="me" class="cp-input cp-num">
+                    TE <input type="number" min="0" max="20" step="2" value="{{ ip.te }}" data-change="cpSetMeTe" data-type-id="{{ r.product_type_id }}" data-field="te" class="cp-input cp-num">
+                    {%- endif %}
+                    {%- if ip.has_bpcs %}
+                    <label class="cp-bpc-toggle"><input type="checkbox" data-change="cpToggleBpcs" data-type-id="{{ r.product_type_id }}"{% if r.product_type_id not in ignored %} checked{% endif %}> BPCs</label>
+                    {%- endif %}
+                {%- elif r.buildable %}
+                    <span class="b-muted-sm">{% if r.owned %}owned{% else %}no BPO{% endif %}</span>
+                {%- endif %}
+            </span>
+            <span class="cp-tree-toggle">
+                {%- if r.depth == 0 %}
+                <span class="cp-chip cp-chip--on">Build</span>
+                {%- elif r.buildable %}
+                <button type="button" class="cp-chip{% if r.build %} cp-chip--on{% endif %}" data-click="cpToggleBuild" data-type-id="{{ r.product_type_id }}" data-build="{{ 1 if r.build else 0 }}">{{ 'Build' if r.build else 'Buy' }}</button>
+                {%- else %}
+                <span class="cp-chip">Buy</span>
+                {%- endif %}
+            </span>
+        </div>
+        {%- endfor %}
+    </div>
+</div>
+</div>

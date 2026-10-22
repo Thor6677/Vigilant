@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs"><a href="/industry">Industry</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">Copy Packs</span></div>
+{% endblock %}
+{% block title %}COPY PACKS — VIGILANT{% endblock %}
+{% block content %}
+
+<div class="b-page-header">
+    <h1 class="b-page-title">Copy Packs</h1>
+    <button type="button" data-click="cpReset" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Reset</button>
+</div>
+
+{# Every control below fires a data-change/data-click handler that updates the
+   hidden JSON fields and then triggers `cp-plan`; the form posts only on that
+   event, so a request never races a handler that hasn't run yet. The plan
+   response fills #cp-results and swaps #cp-skills and #cp-tree out of band.
+   hx-trigger replaces htmx's own submit handling, so cpSubmit stops Enter (or
+   a phone keyboard's Go) from doing a native POST to this GET-only page. #}
+<form id="cp-form" hx-post="/industry/copy-packs/plan" hx-target="#cp-results" hx-swap="innerHTML" hx-trigger="cp-plan" data-submit="cpSubmit">
+<input type="hidden" name="type_id" id="cp-type-id" value="">
+<input type="hidden" name="state_json" id="cp-state" value="{}">
+<input type="hidden" name="skills_json" id="cp-skills-json" value="{}">
+
+<div class="cp-grid">
+    <div class="cp-left">
+        <div class="b-section">
+            <div class="b-panel">
+                <div class="b-panel-head"><span class="b-label">Setup</span></div>
+                <div class="cp-setup">
+                    <label class="cp-field">
+                        <span class="b-eyebrow">Product</span>
+                        <input type="text" id="cp-search" name="q" autocomplete="off"
+                               placeholder="Search items, e.g. Archon"
+                               hx-get="/industry/copy-packs/search"
+                               hx-trigger="input changed delay:300ms"
+                               hx-target="#cp-search-results"
+                               class="cp-input">
+                    </label>
+                    <div id="cp-search-results"></div>
+                    <div id="cp-product" class="cp-product" data-name="">No product picked.</div>
+
+                    <label class="cp-field">
+                        <span class="b-eyebrow">Quantity</span>
+                        <input type="number" name="quantity" id="cp-quantity" value="1" min="1" max="1000"
+                               data-change="cpSetupChanged" class="cp-input cp-num">
+                    </label>
+
+                    <label class="cp-field">
+                        <span class="b-eyebrow">Character (copies and builds)</span>
+                        <select name="character_id" id="cp-character" data-change="cpCharacterChanged" class="cp-input">
+                            {% for c in characters %}
+                            <option value="{{ c.id }}">{{ c.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+
+                    <div class="cp-field-row">
+                        <label class="cp-field">
+                            <span class="b-eyebrow">Structure</span>
+                            <select name="structure" id="cp-structure" data-change="cpSetupChanged" class="cp-input">
+                                {% for key, s in structures.items() %}
+                                <option value="{{ key }}">{{ s['label'] }}</option>
+                                {% endfor %}
+                            </select>
+                        </label>
+                        <label class="cp-field">
+                            <span class="b-eyebrow">Rig</span>
+                            <select name="rig" id="cp-rig" data-change="cpSetupChanged" class="cp-input">
+                                {% for key, r in rigs.items() %}
+                                <option value="{{ key }}">{{ r['label'] }}</option>
+                                {% endfor %}
+                            </select>
+                        </label>
+                        <label class="cp-field">
+                            <span class="b-eyebrow">Security</span>
+                            <select name="security" id="cp-security" data-change="cpSetupChanged" class="cp-input">
+                                {% for key, sec in sec_statuses.items() %}
+                                <option value="{{ key }}">{{ sec['label'] }}</option>
+                                {% endfor %}
+                            </select>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div id="cp-skills"></div>
+        <div id="cp-tree"></div>
+    </div>
+
+    <div class="cp-right" id="cp-results">
+        <div class="b-section"><div class="b-empty">Pick a product to see which blueprint copies to make.</div></div>
+    </div>
+</div>
+</form>
+
+<script nonce="{{ request.state.csp_nonce }}">
+/* Copy Packs: page state and the handlers the fragments bind to.
+   localStorage keys: vigilant_copy_packs (setup), vigilant_copy_packs_p_<typeId>
+   (that product's toggles, posted as state_json) and vigilant_copy_packs_s_<charId>
+   (that character's manual skill levels, posted as skills_json). */
+(function () {
+    var KEY = 'vigilant_copy_packs';
+
+    function load(k) {
+        try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; }
+    }
+    function save(k, v) {
+        try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* private mode */ }
+    }
+    function el(id) { return document.getElementById(id); }
+    function typeId() { return el('cp-type-id').value; }
+    function charId() { return el('cp-character').value; }
+
+    function productState() {
+        try { return JSON.parse(el('cp-state').value || '{}') || {}; } catch (e) { return {}; }
+    }
+    function setProductState(st) {
+        el('cp-state').value = JSON.stringify(st);
+        if (typeId()) save(KEY + '_p_' + typeId(), st);
+    }
+    function loadSkills() {
+        el('cp-skills-json').value = JSON.stringify(load(KEY + '_s_' + charId()) || {});
+    }
+    function showProduct(name) {
+        var p = el('cp-product');
+        p.dataset.name = name || '';
+        p.textContent = name || 'No product picked.';
+    }
+    function saveSetup() {
+        save(KEY, {
+            type_id: typeId(),
+            type_name: el('cp-product').dataset.name || '',
+            quantity: el('cp-quantity').value,
+            character_id: charId(),
+            structure: el('cp-structure').value,
+            rig: el('cp-rig').value,
+            security: el('cp-security').value
+        });
+    }
+    function replan() {
+        saveSetup();
+        if (typeId()) htmx.trigger(el('cp-form'), 'cp-plan');
+    }
+
+    window.cpSelectProduct = function () {
+        el('cp-type-id').value = this.dataset.typeId;
+        showProduct(this.dataset.typeName);
+        el('cp-search').value = '';
+        el('cp-search-results').innerHTML = '';
+        el('cp-state').value = JSON.stringify(load(KEY + '_p_' + this.dataset.typeId) || {});
+        replan();
+    };
+    window.cpSubmit = function (e) { e.preventDefault(); replan(); };
+    window.cpSetupChanged = function () { replan(); };
+    window.cpCharacterChanged = function () { loadSkills(); replan(); };
+    window.cpSkillChanged = function () {
+        var saved = load(KEY + '_s_' + charId()) || {};
+        if (this.value === '') delete saved[this.dataset.skillId];
+        else saved[this.dataset.skillId] = parseInt(this.value, 10) || 0;
+        save(KEY + '_s_' + charId(), saved);
+        el('cp-skills-json').value = JSON.stringify(saved);
+        replan();
+    };
+    window.cpToggleBuild = function () {
+        var st = productState();
+        st.build = st.build || {};
+        st.build[this.dataset.typeId] = this.dataset.build !== '1';
+        setProductState(st);
+        replan();
+    };
+    window.cpPickBpo = function () {
+        var st = productState();
+        st.bpo = st.bpo || {};
+        st.bpo[this.dataset.typeId] = parseInt(this.value, 10);
+        setProductState(st);
+        replan();
+    };
+    window.cpSetMeTe = function () {
+        var st = productState(), field = this.dataset.field;
+        st[field] = st[field] || {};
+        st[field][this.dataset.typeId] = parseInt(this.value, 10) || 0;
+        setProductState(st);
+        replan();
+    };
+    window.cpToggleBpcs = function () {
+        var st = productState(), id = parseInt(this.dataset.typeId, 10);
+        var ignored = (st.ignore_bpc || []).filter(function (x) { return x !== id; });
+        if (!this.checked) ignored.push(id);
+        st.ignore_bpc = ignored;
+        setProductState(st);
+        replan();
+    };
+    window.cpReset = function () {
+        try {
+            Object.keys(localStorage).forEach(function (k) {
+                if (k.indexOf(KEY) === 0) localStorage.removeItem(k);
+            });
+        } catch (e) { /* private mode */ }
+        window.location.href = '/industry/copy-packs';
+    };
+
+    document.addEventListener('DOMContentLoaded', function () {
+        var s = load(KEY) || {};
+        [['cp-quantity', 'quantity'], ['cp-character', 'character_id'],
+         ['cp-structure', 'structure'], ['cp-rig', 'rig'], ['cp-security', 'security']
+        ].forEach(function (pair) {
+            var field = el(pair[0]);
+            if (!field || !s[pair[1]]) return;
+            /* A select keeps its first option when the saved value is gone
+               (e.g. a removed character). */
+            field.value = s[pair[1]];
+            if (field.tagName === 'SELECT' && field.selectedIndex < 0) field.selectedIndex = 0;
+        });
+        loadSkills();
+        if (s.type_id) {
+            el('cp-type-id').value = s.type_id;
+            showProduct(s.type_name);
+            el('cp-state').value = JSON.stringify(load(KEY + '_p_' + s.type_id) || {});
+            /* After every other DOMContentLoaded handler, htmx's included. */
+            setTimeout(replan, 0);
+        }
+    });
+})();
+</script>
+
+{% endblock %}

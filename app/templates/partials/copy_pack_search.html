@@ -1,0 +1,12 @@
+{# Product search results for /industry/copy-packs. A pick, not an
+   expand-on-tap row; cpSelectProduct lives in copy_packs.html. #}
+{% if results %}
+{% for r in results %}
+<div class="b-table-row mfg-pick cp-search-row" data-click="cpSelectProduct" data-type-id="{{ r.type_id }}" data-type-name="{{ r.type_name }}">
+    <img src="https://images.evetech.net/types/{{ r.type_id }}/icon?size=32" alt="" style="width:24px;height:24px;border:1px solid var(--border);flex-shrink:0;" data-on-error="hide">
+    <span style="font-size:11px;color:var(--text);">{{ r.type_name }}</span>
+</div>
+{% endfor %}
+{% elif q | length >= 2 %}
+<div class="b-empty">No manufacturable items match "{{ q }}".</div>
+{% endif %}
