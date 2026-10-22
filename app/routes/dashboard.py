@@ -164,70 +164,73 @@ _STRUCTURE_ALERT_LABELS = {
 }
 
 
-async def _detect_notifications(char: 'Character', old_cache: dict, new_cache: dict, db):
+async def _detect_notifications(char: 'Character', old_cache: dict, new_cache: dict, db,
+                                skillqueue_synced_at: 'datetime | None' = None):
     """Compare old vs new cached data and emit notification events.
-    Skills are resolved to names via SDE. Only fires once per skill completion."""
+    Skills are resolved to names via SDE. Only fires once per skill completion.
+    skillqueue_synced_at is when old_cache's skill queue was fetched: a skill
+    only counts as finished if its finish_date fell after that (ISS-107)."""
     user_id = char.user_id
     char_name = char.character_name
     cid = char.character_id
     portrait = f"https://images.evetech.net/characters/{cid}/portrait?size=64"
 
-    # 1. Skill training complete
-    # Compare the currently-training skill between old and new queue.
-    # If the old active skill is different from the new one, the old one finished.
+    # 1. Skill training complete.
+    # A skill is complete when its scheduled finish_date fell after the previous
+    # sync and no later than now. "No skill is active now" is not enough: ESI
+    # drops start/finish dates from a paused queue, so a pause used to announce
+    # a finish that never happened and the real one was then swallowed. ESI also
+    # keeps finished skills listed for offline pilots, so a bare "finish_date has
+    # passed" would re-announce them after every restart; the lower bound stops
+    # that. With no known previous sync time we stay silent rather than guess
+    # (ISS-107).
     old_sq = old_cache.get("skillqueue")
     new_sq = new_cache.get("skillqueue")
-    if old_sq and new_sq and isinstance(old_sq, list) and isinstance(new_sq, list):
+    if old_sq and isinstance(old_sq, list) and isinstance(new_sq, list) and skillqueue_synced_at:
         now = datetime.now(timezone.utc)
-        if cid not in _notified_skills:
-            _notified_skills[cid] = set()
+        notified = _notified_skills.setdefault(cid, set())
 
-        def _find_active(queue):
-            """Find the currently training skill (start <= now < finish)."""
-            for entry in queue:
-                start_raw = entry.get("start_date")
-                finish_raw = entry.get("finish_date")
-                if not start_raw or not finish_raw:
-                    continue
-                try:
-                    start_dt = datetime.fromisoformat(start_raw.replace("Z", "+00:00"))
-                    finish_dt = datetime.fromisoformat(finish_raw.replace("Z", "+00:00"))
-                    if start_dt <= now and finish_dt > now:
-                        return entry
-                except Exception:
-                    continue
-            return None
+        def _key(entry):
+            return f"{entry.get('skill_id')}_{entry.get('finished_level')}"
 
-        old_active = _find_active(old_sq)
-        new_active = _find_active(new_sq)
+        def _when(raw):
+            if not raw:
+                return None
+            try:
+                dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            except (ValueError, AttributeError):
+                return None
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
-        # The old active skill finished if: there WAS an active skill before,
-        # and now either there's a different one or none at all
-        if old_active:
-            old_sid = old_active.get("skill_id")
-            old_level = old_active.get("finished_level")
-            old_key = f"{old_sid}_{old_level}"
-            new_sid = new_active.get("skill_id") if new_active else None
+        # Listed now without dates = the queue is paused: the old schedule is void.
+        paused_now = {_key(e) for e in new_sq if e.get("skill_id") and not e.get("finish_date")}
+        finished = []
+        for entry in old_sq:
+            finish = _when(entry.get("finish_date"))
+            if not entry.get("skill_id") or not entry.get("start_date") or finish is None:
+                continue  # undated in the old snapshot: paused, so nothing was scheduled
+            key = _key(entry)
+            if skillqueue_synced_at < finish <= now and key not in paused_now and key not in notified:
+                finished.append((entry["skill_id"], entry.get("finished_level"), key))
 
-            if old_sid != new_sid and old_key not in _notified_skills[cid]:
-                # Old skill is no longer active — it completed
-                _notified_skills[cid].add(old_key)
-                skill_name = f"Skill {old_sid}"
-                try:
-                    names = await sde.type_ids_to_names(db, [old_sid])
-                    skill_name = names.get(old_sid, skill_name)
-                except Exception:
-                    pass
+        if finished:
+            names = {}
+            try:
+                names = await sde.type_ids_to_names(db, [sid for sid, _, _ in finished])
+            except Exception:
+                pass
+            for sid, level, key in finished:
+                notified.add(key)
                 _emit_notification(user_id, {
                     "type": "skill_complete",
                     "title": "Skill Complete",
-                    "body": f"{char_name} — {skill_name} {old_level} finished",
+                    "body": f"{char_name} — {names.get(sid, f'Skill {sid}')} {level} finished",
                     "icon": portrait,
                 })
 
-        # Clean up notified set when skills leave the queue entirely
-        current_keys = {f"{e.get('skill_id')}_{e.get('finished_level')}" for e in new_sq if e.get("skill_id")}
-        _notified_skills[cid] = _notified_skills[cid] & current_keys
+        # Forget skills that have left the queue entirely.
+        current_keys = {_key(e) for e in new_sq if e.get("skill_id")}
+        _notified_skills[cid] = notified & current_keys
 
     # 3. PI extractors expiring
     old_pi = old_cache.get("pi")
@@ -1845,6 +1848,15 @@ async def _sync_fields(character_id: int, char, cache, asset_cache, db):
 
     # Snapshot old data for notification detection
     _old_cache = {}
+    _old_skillqueue_at = None
+    try:
+        _raw_at = field_synced.get("skillqueue")
+        if _raw_at:
+            _old_skillqueue_at = datetime.fromisoformat(_raw_at)
+            if _old_skillqueue_at.tzinfo is None:
+                _old_skillqueue_at = _old_skillqueue_at.replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        _old_skillqueue_at = None
     if stale_fields:
         for sf in stale_fields:
             col = _FIELD_DB_COLUMN.get(sf)
@@ -2010,7 +2022,8 @@ async def _sync_fields(character_id: int, char, cache, asset_cache, db):
                 except (json.JSONDecodeError, TypeError) as e:
                     logger.warning("Corrupt %s cache for char %s: %s", field, character_id, e)
         try:
-            await _detect_notifications(char, _old_cache, _new_cache, db)
+            await _detect_notifications(char, _old_cache, _new_cache, db,
+                                        skillqueue_synced_at=_old_skillqueue_at)
         except Exception as notif_err:
             logger.debug("Notification detection error for char %s: %s", character_id, notif_err)
 
