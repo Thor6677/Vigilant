@@ -153,14 +153,16 @@
 </div>
 </div>
 
-<div id="cp-tree" hx-swap-oob="true">
+<div id="cp-tree" class="cp-drill" hx-swap-oob="true">
 <div class="b-section">
     <div class="b-panel">
         <div class="b-panel-head"><span class="b-label">Tree: build / buy</span></div>
+        <button type="button" id="cp-tree-up" class="cp-tree-up" data-click="cpTreeUp" hidden></button>
         {%- for r in plan.tree %}
         {%- set ip = plan.items.get(r.product_type_id) if r.build else none %}
-        <div class="cp-tree-row" style="padding-left:{{ 0.5 + r.depth * 0.9 }}rem;">
-            <span class="cp-tree-name">{{ item_name(r.product_type_id) }}</span>
+        {%- set has_kids = loop.nextitem is defined and loop.nextitem.depth > r.depth %}
+        <div class="cp-tree-row" data-idx="{{ loop.index0 }}" data-parent="{{ '' if r.parent is none else r.parent }}" data-type="{{ r.product_type_id }}"{% if has_kids %} data-has-kids="1"{% endif %} style="padding-left:{{ 0.5 + r.depth * 0.9 }}rem;">
+            <span class="cp-tree-name">{{ item_name(r.product_type_id) }}{% if has_kids %} <button type="button" class="cp-tree-open" data-click="cpTreeOpen" aria-label="Show what goes into {{ item_name(r.product_type_id) }}">▸</button>{% endif %}</span>
             <span class="cp-tree-runs">{% if ip %}{{ ip.runs }} runs{% else %}× {{ "{:,}".format(r.units) }}{% endif %}</span>
             <span class="cp-tree-src">
                 {%- if ip %}

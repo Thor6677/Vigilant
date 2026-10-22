@@ -230,6 +230,58 @@
     window.cpStep = function () { setStep(parseInt(this.dataset.step, 10)); };
     window.cpStepNav = function () { setStep(step + parseInt(this.dataset.dir, 10)); };
 
+    /* Phone tree: one level at a time. Every row is in the page; `cp-vis`
+       marks the ones to show (the focused row and its direct children) and is
+       inert above 768px. Row positions shift between plans, so focus is kept
+       only while the row at its index is still the same item. */
+    var focus = {idx: '0', type: ''};
+    function treeRows() {
+        return Array.prototype.slice.call(document.querySelectorAll('#cp-tree .cp-tree-row'));
+    }
+    function rowAt(rows, idx) {
+        return rows.filter(function (r) { return r.dataset.idx === idx; })[0];
+    }
+    function setFocus(row) {
+        focus = row ? {idx: row.dataset.idx, type: row.dataset.type} : {idx: '0', type: ''};
+    }
+    function applyTreeFocus() {
+        var rows = treeRows();
+        if (!rows.length) return;
+        var cur = rowAt(rows, focus.idx);
+        if (!cur || (focus.type && cur.dataset.type !== focus.type)) {
+            setFocus(null);
+            cur = rows[0];
+        }
+        /* An item switched to Buy has no inputs to show: step back up. */
+        if (cur.dataset.parent !== '' && !cur.dataset.hasKids) {
+            setFocus(rowAt(rows, cur.dataset.parent));
+            cur = rowAt(rows, focus.idx) || rows[0];
+        }
+        rows.forEach(function (r) {
+            r.classList.toggle('cp-tree-focus', r === cur);
+            r.classList.toggle('cp-vis', r === cur || r.dataset.parent === focus.idx);
+        });
+        var up = el('cp-tree-up');
+        if (!up) return;
+        var parent = cur.dataset.parent === '' ? null : rowAt(rows, cur.dataset.parent);
+        up.hidden = !parent;
+        if (parent) {
+            up.textContent = '\u2039 Back to ' +
+                parent.querySelector('.cp-tree-name').firstChild.textContent.trim();
+        }
+    }
+    window.cpTreeOpen = function () {
+        setFocus(this.closest('.cp-tree-row'));
+        applyTreeFocus();
+        el('cp-tree').scrollIntoView();
+    };
+    window.cpTreeUp = function () {
+        var rows = treeRows(), cur = rowAt(rows, focus.idx);
+        setFocus(cur && cur.dataset.parent !== '' ? rowAt(rows, cur.dataset.parent) : null);
+        applyTreeFocus();
+        el('cp-tree').scrollIntoView();
+    };
+
     window.cpReset = function () {
         try {
             Object.keys(localStorage).forEach(function (k) {
@@ -264,6 +316,10 @@
 
     document.addEventListener('DOMContentLoaded', function () {
         setStep(1, true);
+        /* The plan response replaces #cp-tree itself (out of band), a child of
+           .cp-left, so a childList observer there re-applies the focus. */
+        new MutationObserver(applyTreeFocus).observe(document.querySelector('.cp-left'),
+                                                     {childList: true});
         var s = load(KEY) || {};
         [['cp-quantity', 'quantity'], ['cp-character', 'character_id'],
          ['cp-structure', 'structure'], ['cp-rig', 'rig'], ['cp-security', 'security']

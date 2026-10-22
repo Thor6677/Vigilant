@@ -194,7 +194,7 @@ def test_plan_renders_groups_tree_and_skills(monkeypatch):
         assert "2 × 1" in text                         # 2 copies of 1 run
         assert "Source elsewhere: no BPO (1)" in text  # plates: no BPO owned
         assert "Can&#39;t copy: buy or source (0)" in text or "Can't copy: buy or source (0)" in text
-        assert 'id="cp-tree" hx-swap-oob="true"' in text
+        assert 'id="cp-tree" class="cp-drill" hx-swap-oob="true"' in text
         assert 'id="cp-skills" hx-swap-oob="true"' in text
         assert "manual" in text                        # no synced skills
         assert "type_id=23758&amp;me=10&amp;te=20&amp;runs=1" in text
@@ -641,6 +641,49 @@ def test_step_bar_and_footer_exist_only_on_phones():
     phone, base = _phone_css()
     assert re.search(r"\.cp-steps, \.cp-stepnav, \.cp-tree-open, \.cp-tree-up \{ display: none; \}", base)
     assert re.search(r"\.cp-steps, \.cp-stepnav \{ display: flex; \}", phone)
+
+
+def test_tree_rows_carry_the_attributes_the_phone_drill_down_uses(monkeypatch):
+    teardown = _seeded_db()
+    try:
+        _stub_esi(monkeypatch, bpos=[HULL_BPO])
+        text = _plan(_client(), state_json=json.dumps({"build": {str(PLATES): True}})).text
+        assert f'data-idx="0" data-parent="" data-type="{HULL}"' in text
+        assert f'data-idx="1" data-parent="0" data-type="{PLATES}"' in text
+        assert 'data-idx="2" data-parent="1" data-type="34"' in text
+        assert text.count('data-has-kids="1"') == 2          # the hull and the plates, not Tritanium
+        assert 'id="cp-tree" class="cp-drill" hx-swap-oob="true"' in text
+        assert 'id="cp-tree-up"' in text and text.count('data-click="cpTreeOpen"') == 2
+    finally:
+        teardown()
+
+
+def test_tree_without_children_has_no_open_controls(monkeypatch):
+    teardown = _seeded_db()
+    try:
+        _stub_esi(monkeypatch, bpos=[HULL_BPO])
+        text = _plan(_client()).text                         # plates left on Buy
+        assert text.count('data-has-kids="1"') == 1          # only the hull
+    finally:
+        teardown()
+
+
+def test_phone_tree_shows_only_the_focused_row_and_its_children():
+    phone, base = _phone_css()
+    assert re.search(r"#cp-tree\.cp-drill \.cp-tree-row:not\(\.cp-vis\) \{[^}]*display: none", phone)
+    assert re.search(r"\.cp-tree-open \{[^}]*display: inline-block", phone)
+    assert re.search(r"\.cp-tree-up:not\(\[hidden\]\) \{[^}]*display: block", phone)
+    assert re.search(r"#cp-tree \.cp-tree-row \{[^}]*padding-left: 0\.5rem !important", phone)
+
+
+def test_page_script_has_the_tree_handlers():
+    teardown = _seeded_db()
+    try:
+        text = _client().get("/industry/copy-packs").text
+        assert "window.cpTreeOpen = " in text and "window.cpTreeUp = " in text
+        assert "new MutationObserver(applyTreeFocus)" in text
+    finally:
+        teardown()
 
 
 # ── cache TTL ────────────────────────────────────────────────────────────────

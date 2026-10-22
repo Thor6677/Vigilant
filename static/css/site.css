@@ -3015,6 +3015,8 @@ button.cp-chip { cursor: pointer; }
 .cp-stepnav { gap: 0.5rem; margin-top: 0.75rem; }
 .cp-stepnav .b-btn { flex: 1; min-height: 44px; border: 1px solid var(--border); }
 .cp-stepnav .b-btn:disabled { opacity: 0.4; cursor: default; }
+.cp-tree-up { width: 100%; padding: 0.5rem; text-align: left; background: none; border: none; border-bottom: 1px solid var(--border); color: var(--accent); font-family: inherit; font-size: 11px; cursor: pointer; }
+.cp-tree-open { margin-left: 0.3rem; padding: 0 0.5rem; background: none; border: 1px solid var(--accent); color: var(--accent); font-family: inherit; cursor: pointer; }
 @media (max-width: 768px) {
     /* One step at a time: Setup, Skills, Tree, Results. #cp-grid's data-step
        (set by the page script) picks which section shows. */
@@ -3027,6 +3029,11 @@ button.cp-chip { cursor: pointer; }
     .cp-grid[data-step="2"] #cp-skills { display: block; }
     .cp-grid[data-step="3"] #cp-tree { display: block; }
     .cp-grid[data-step="4"] .cp-right { display: block; }
+    .cp-tree-open { display: inline-block; }
+    .cp-tree-up:not([hidden]) { display: block; }
+    #cp-tree.cp-drill .cp-tree-row:not(.cp-vis) { display: none; }
+    #cp-tree .cp-tree-row { padding-left: 0.5rem !important; }
+    #cp-tree .cp-tree-focus { font-weight: bold; }
     .cp-tree-row { flex-wrap: wrap; }
     .cp-tree-name { flex-basis: 100%; }
     .cp-row:not(.m-row) { flex-wrap: wrap; }
