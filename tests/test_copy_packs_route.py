@@ -533,6 +533,16 @@ def test_bpo_picker_is_capped_so_a_long_location_name_cannot_widen_the_tree():
     assert src and "min-width: 0" in src.group(1) and "max-width: 100%" in src.group(1)
 
 
+def test_phone_layout_orders_setup_skills_tree_then_results():
+    css = (Path(__file__).resolve().parent.parent / "static/css/site.css").read_text()
+    order = {}
+    for sel, n in re.findall(r"^\s*(\.cp-left > \.b-section|#cp-skills|#cp-tree|\.cp-right)\s*\{[^}]*?order:\s*(\d+)",
+                             css, re.M):
+        order[sel] = int(n)
+    ranked = sorted(order, key=order.get)
+    assert ranked == [".cp-left > .b-section", "#cp-skills", "#cp-tree", ".cp-right"]
+
+
 # ── cache TTL ────────────────────────────────────────────────────────────────
 
 def test_corp_blueprints_cache_for_an_hour():
