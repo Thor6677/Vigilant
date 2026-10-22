@@ -333,11 +333,11 @@ function copyLocalComp() {
     lines.push('Local Scan — {{ summary.resolved }} pilots');
     lines.push('');
     {% for alliance_name, count in summary.by_alliance.items() %}
-    lines.push('{{ count }}x {{ alliance_name }}');
+    lines.push({{ (count ~ 'x ' ~ alliance_name) | tojson }});
     {% endfor %}
     {% for corp_name, count in summary.by_corp.items() %}
     {% if not summary.corp_to_alliance.get(corp_name) %}
-    lines.push('{{ count }}x {{ corp_name }} (no alliance)');
+    lines.push({{ (count ~ 'x ' ~ corp_name ~ ' (no alliance)') | tojson }});
     {% endif %}
     {% endfor %}
     copyText(lines.join('\n'), function() {

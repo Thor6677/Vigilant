@@ -253,7 +253,7 @@ function copyShipClasses() {
     var btn = this;
     var lines = [];
     {% for cls, count in summary.ship_classes.items() %}
-    lines.push('{{ count }}x {{ cls }}');
+    lines.push({{ (count ~ 'x ' ~ cls) | tojson }});
     {% endfor %}
     lines.push('');
     lines.push('Total: {{ summary.ships }} ships');
@@ -266,9 +266,9 @@ function copyByType() {
     var btn = this;
     var lines = [];
     {% for group in summary.ships_grouped %}
-    lines.push('{{ group.group }} ({{ group.total }}):');
+    lines.push({{ (group.group ~ ' (' ~ group.total ~ '):') | tojson }});
     {% for ship in group.ships %}
-    lines.push('  {{ ship.count }}x {{ ship.name }} [{{ ship.class }}]');
+    lines.push({{ ('  ' ~ ship.count ~ 'x ' ~ ship.name ~ ' [' ~ ship['class'] ~ ']') | tojson }});
     {% endfor %}
     lines.push('');
     {% endfor %}

@@ -7,6 +7,13 @@
     var LOCK_KEY = 'vigilant_notif_lock';
     var PREFS_KEY = 'vigilant_notif_prefs';
 
+    /* localStorage throws SecurityError in private mode or with site data
+       blocked. Every access goes through these so the bell degrades to
+       "disabled" instead of logging an uncaught error (ISS-109). */
+    function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+    function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+    function lsRemove(k) { try { localStorage.removeItem(k); } catch (e) {} }
+
     /* HTML-escape any server-derived string before innerHTML concatenation.
        VVP-2026-021 defense-in-depth: ev.title/body/type currently come from
        char names (EVE filters <>"'&), SDE values (server-controlled), and
@@ -92,7 +99,7 @@
 
     function loadPrefs() {
         try {
-            var raw = localStorage.getItem(PREFS_KEY);
+            var raw = lsGet(PREFS_KEY);
             if (raw) {
                 var prefs = JSON.parse(raw);
                 for (var k in DEFAULT_PREFS) {
@@ -130,7 +137,7 @@
        so a user who turned notifications off, or muted this type, is never
        pinged by a side path. */
     window.vigilantNotifAllows = function(type) {
-        if (localStorage.getItem(STORAGE_KEY) !== 'true') return false;
+        if (lsGet(STORAGE_KEY) !== 'true') return false;
         if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return false;
         return isTypeEnabled(type);
     };
@@ -158,12 +165,12 @@
     }
 
     function saveEvents() {
-        try { localStorage.setItem(EVENTS_KEY, JSON.stringify(storedEvents.slice(-50))); } catch(e) {}
+        try { lsSet(EVENTS_KEY, JSON.stringify(storedEvents.slice(-50))); } catch(e) {}
     }
 
     function loadEvents() {
         try {
-            var raw = localStorage.getItem(EVENTS_KEY);
+            var raw = lsGet(EVENTS_KEY);
             if (raw) storedEvents = JSON.parse(raw);
         } catch(e) { storedEvents = []; }
     }
@@ -277,7 +284,7 @@
         } else {
             badge.textContent = '0';
             badge.style.display = 'none';
-            var enabled = localStorage.getItem(STORAGE_KEY) === 'true';
+            var enabled = lsGet(STORAGE_KEY) === 'true';
             setBellState(enabled ? 'enabled' : 'disabled');
         }
     }
@@ -285,12 +292,12 @@
     /* Tab lock */
     function acquireLock() {
         var now = Date.now();
-        var lock = localStorage.getItem(LOCK_KEY);
+        var lock = lsGet(LOCK_KEY);
         if (lock && (now - parseInt(lock, 10)) < POLL_INTERVAL + 5000) return false;
-        localStorage.setItem(LOCK_KEY, now.toString());
+        lsSet(LOCK_KEY, now.toString());
         return true;
     }
-    function releaseLock() { localStorage.removeItem(LOCK_KEY); }
+    function releaseLock() { lsRemove(LOCK_KEY); }
 
     function showNotification(event) {
         if (Notification.permission !== 'granted') return;
@@ -359,7 +366,7 @@
         boxes.forEach(function(cb) {
             prefs[cb.getAttribute('data-notif-type')] = cb.checked;
         });
-        try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch(e) {}
+        try { lsSet(PREFS_KEY, JSON.stringify(prefs)); } catch(e) {}
         updateBadge();
         renderList();
     };
@@ -371,7 +378,7 @@
         /* Legacy structure_alert maps to structure_attack */
         if (key === 'structure_alert') key = 'structure_attack';
         prefs[key] = false;
-        try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch(e) {}
+        try { lsSet(PREFS_KEY, JSON.stringify(prefs)); } catch(e) {}
         /* Also update the settings panel checkbox if visible */
         var cb = document.querySelector('input[data-notif-type="' + key + '"]');
         if (cb) cb.checked = false;
@@ -396,12 +403,12 @@
 
     /* Bell click handler */
     window.onBellClick = function() {
-        var enabled = localStorage.getItem(STORAGE_KEY) === 'true';
+        var enabled = lsGet(STORAGE_KEY) === 'true';
         if (!enabled) {
             if (!('Notification' in window)) { alert('Your browser does not support notifications.'); return; }
             Notification.requestPermission().then(function(perm) {
                 if (perm === 'granted') {
-                    localStorage.setItem(STORAGE_KEY, 'true');
+                    lsSet(STORAGE_KEY, 'true');
                     setBellState('enabled');
                     startPolling();
                 }
@@ -425,9 +432,9 @@
     };
 
     window.toggleVigilantNotifications = function() {
-        var enabled = localStorage.getItem(STORAGE_KEY) === 'true';
+        var enabled = lsGet(STORAGE_KEY) === 'true';
         if (enabled) {
-            localStorage.setItem(STORAGE_KEY, 'false');
+            lsSet(STORAGE_KEY, 'false');
             stopPolling();
             storedEvents = [];
             saveEvents();
@@ -450,7 +457,7 @@
     /* Init */
     document.addEventListener('DOMContentLoaded', function() {
         loadEvents();
-        var enabled = localStorage.getItem(STORAGE_KEY) === 'true';
+        var enabled = lsGet(STORAGE_KEY) === 'true';
         if (enabled && Notification.permission === 'granted') {
             setBellState(storedEvents.length > 0 ? 'alert' : 'enabled');
             updateBadge();
@@ -472,10 +479,10 @@
         if (!form || form.tagName !== 'FORM') return;
         if ((form.getAttribute('action') || '').indexOf('/auth/logout') === -1) return;
         try {
-            localStorage.removeItem(EVENTS_KEY);
-            localStorage.removeItem(STORAGE_KEY);
-            localStorage.removeItem(PREFS_KEY);
-            localStorage.removeItem(LOCK_KEY);
+            lsRemove(EVENTS_KEY);
+            lsRemove(STORAGE_KEY);
+            lsRemove(PREFS_KEY);
+            lsRemove(LOCK_KEY);
         } catch (e) {}
     }, true);
 })();

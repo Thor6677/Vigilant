@@ -1748,13 +1748,11 @@ async def _sync_task_inner(character_id: int):
                     await _record_sync_failure(db, character_id, f"{type(e).__name__}: {str(e)[:300]}")
             except Exception:
                 pass
-            if isinstance(e, asyncio.CancelledError):
-                raise  # re-raise so asyncio cancellation propagates
-        except Exception as e:
-            try:
-                await _record_sync_failure(db, character_id, str(e)[:500])
-            except Exception:
-                pass
+            if not isinstance(e, Exception):
+                # CancelledError, SystemExit, KeyboardInterrupt: record the
+                # status above, then let them propagate. Only ordinary
+                # errors are absorbed here (ISS-086).
+                raise
         finally:
             # Last-resort guard: if we exited by any path that didn't
             # explicitly set a terminal status, force it to idle so the
