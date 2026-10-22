@@ -104,13 +104,16 @@ class SDECompressible(Base):
 
 
 class SDEBlueprintInfo(Base):
-    """Blueprint manufacturing time and product mapping."""
+    """Blueprint manufacturing time and product mapping, plus the two
+    copy-planning fields (max runs per copy, copy time per run)."""
     __tablename__ = "sde_blueprint_info"
 
     blueprint_type_id = Column(Integer, primary_key=True)
     product_type_id = Column(Integer, nullable=True, index=True)
     manufacturing_time = Column(Integer, nullable=True)  # seconds
     product_quantity = Column(Integer, nullable=True, default=1)
+    max_production_limit = Column(Integer, nullable=True)  # most runs one copy can have
+    copying_time = Column(Integer, nullable=True)  # seconds per run; NULL = can't be copied
 
 
 class SDEBlueprintInvention(Base):
@@ -134,6 +137,19 @@ class SDEBlueprintInventionMaterial(Base):
     quantity = Column(Integer, nullable=False)
 
 
+class SDEBlueprintInventionProduct(Base):
+    """Every blueprint an invention job can produce. sde_blueprint_invention
+    keeps one product per T1 blueprint (its first), but many T1 blueprints
+    invent several (Rifter: Jaguar and Wolf), so copy packs read this table
+    to tell whether a blueprint is invented and how many runs its BPC has."""
+    __tablename__ = "sde_blueprint_invention_products"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    blueprint_type_id = Column(Integer, nullable=False, index=True)  # T1 blueprint invented FROM
+    product_blueprint_type_id = Column(Integer, nullable=False, index=True)  # blueprint invented
+    base_runs = Column(Integer, nullable=True)  # runs on the invented BPC (no decryptor)
+
+
 class SDEBlueprintInventionSkill(Base):
     """Skills (encryption + science) required for an invention attempt."""
     __tablename__ = "sde_blueprint_invention_skills"
@@ -141,6 +157,16 @@ class SDEBlueprintInventionSkill(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     blueprint_type_id = Column(Integer, nullable=False, index=True)
     skill_type_id = Column(Integer, nullable=False)
+
+
+class SDEBlueprintMfgSkill(Base):
+    """Skills a blueprint's manufacturing job needs, with the level."""
+    __tablename__ = "sde_blueprint_mfg_skills"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    blueprint_type_id = Column(Integer, nullable=False, index=True)
+    skill_type_id = Column(Integer, nullable=False)
+    level = Column(Integer, nullable=False)
 
 
 # ── Skill planning SDE tables ───────────────────────────────────────────────

@@ -56,7 +56,7 @@ from app.fitting.engine import (
     calculate_fitting_stats, normalise_resist_phasing, rah_total_resist_points,
     suggest_rah_phasing,
 )
-from app.sde.loader import EFFECTS_USAGE_CHANCE_MARKER, needs_update
+from app.sde.loader import BLUEPRINT_COPY_MARKER, EFFECTS_USAGE_CHANCE_MARKER, needs_update
 
 # ── dogma constants this fixture needs that constants.py has no name for ────
 ATTR_OVERLOAD_HARDENING_BONUS = 1208   # overloadHardeningBonus
@@ -533,7 +533,7 @@ def _one_placeholder_row(table_name):
     return table.insert().values(**values)
 
 
-def _needs_update_with(effect_rows, marker=True):
+def _needs_update_with(effect_rows, marker=True, copy_marker=True):
     """Seed every table needs_update() checks, plus the given effect rows.
 
     The empty-table loop in needs_update() returns True if ANY of a dozen
@@ -551,6 +551,9 @@ def _needs_update_with(effect_rows, marker=True):
     that turns this False to prove the "install predates the marker" path.
     Defaults True so every other caller here, which is testing something
     else entirely, gets the healthy baseline it's assuming.
+
+    `copy_marker` likewise seeds (or omits) BLUEPRINT_COPY_MARKER;
+    tests/test_sde_blueprint_info_parse.py is the file that turns it False.
     """
     tables = (
         "sde_types", "sde_planets", "sde_planet_schematics",
@@ -571,6 +574,11 @@ def _needs_update_with(effect_rows, marker=True):
             await db.execute(
                 text("INSERT INTO sde_meta (key, value) VALUES (:k, '1')"),
                 {"k": EFFECTS_USAGE_CHANCE_MARKER},
+            )
+        if copy_marker:
+            await db.execute(
+                text("INSERT INTO sde_meta (key, value) VALUES (:k, '1')"),
+                {"k": BLUEPRINT_COPY_MARKER},
             )
         for table in tables:
             await db.execute(_one_placeholder_row(table))

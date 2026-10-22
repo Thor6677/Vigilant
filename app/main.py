@@ -37,6 +37,7 @@ from app.routes.character_tags import router as character_tags_router
 from app.routes.assets import router as assets_router
 from app.routes.corporations import router as corporations_router
 from app.routes.industry import router as industry_router
+from app.routes.copy_packs import router as copy_packs_router
 from app.routes.ambient import router as ambient_router
 from app.routes.industry_jobs import router as industry_jobs_router
 from app.routes.pi import router as pi_router
@@ -226,6 +227,7 @@ app.include_router(character_tags_router)
 app.include_router(assets_router)
 app.include_router(corporations_router)
 app.include_router(industry_router)
+app.include_router(copy_packs_router)
 app.include_router(industry_jobs_router)
 app.include_router(pi_router)
 app.include_router(journal_router)
@@ -360,6 +362,9 @@ async def startup():
             # Fitting engine: mass and capacity from invTypes
             "ALTER TABLE sde_types ADD COLUMN mass REAL",
             "ALTER TABLE sde_types ADD COLUMN capacity REAL",
+            # Copy packs: max runs per copy + copy time per run
+            "ALTER TABLE sde_blueprint_info ADD COLUMN max_production_limit INTEGER",
+            "ALTER TABLE sde_blueprint_info ADD COLUMN copying_time INTEGER",
             # Fitting tool: nested folders for saved fits
             "ALTER TABLE user_fittings ADD COLUMN folder_id INTEGER REFERENCES user_fitting_folders(id) ON DELETE SET NULL",
             # Fitting tool: implant loadout persisted with saved fits (ISS-016)
@@ -566,7 +571,8 @@ async def startup():
     import asyncio
     # NOT gated by BACKGROUND_JOBS_ENABLED: every page that renders a type or
     # system name needs the SDE tables, and on a seeded dev DB this no-ops
-    # immediately because the tables are already populated.
+    # immediately once the DB carries every sde_meta marker (a dev DB seeded
+    # from a prod DB that predates a marker reimports once).
     asyncio.create_task(ensure_sde_loaded())
 
     # T-080: ix_wallet_snapshots_char_recorded, off the blocking startup

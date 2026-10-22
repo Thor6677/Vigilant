@@ -1,0 +1,350 @@
+{% extends "base.html" %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs"><a href="/industry">Industry</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">Copy Packs</span></div>
+{% endblock %}
+{% block title %}COPY PACKS — VIGILANT{% endblock %}
+{% block content %}
+
+<div class="b-page-header">
+    <h1 class="b-page-title">Copy Packs</h1>
+    <button type="button" data-click="cpReset" class="b-btn" style="flex:none;padding:0.35rem 0.75rem;border:1px solid var(--border);font-size:10px;">Reset</button>
+</div>
+
+{# Every control below fires a data-change/data-click handler that updates the
+   hidden JSON fields and then triggers `cp-plan`; the form posts only on that
+   event, so a request never races a handler that hasn't run yet. The plan
+   response fills #cp-results and swaps #cp-skills and #cp-tree out of band.
+   hx-trigger replaces htmx's own submit handling, so cpSubmit stops Enter (or
+   a phone keyboard's Go) from a native submit, which with no method on the
+   form would be a GET that reloads this page and drops the typed state.
+   data-htmx-no-error opts the form out of base.html's error pill (which
+   would replace the whole form); the listeners below write the error into
+   #cp-results only. #}
+<form id="cp-form" hx-post="/industry/copy-packs/plan" hx-target="#cp-results" hx-swap="innerHTML" hx-trigger="cp-plan" data-htmx-no-error="1" data-submit="cpSubmit">
+<input type="hidden" name="type_id" id="cp-type-id" value="">
+<input type="hidden" name="state_json" id="cp-state" value="{}">
+<input type="hidden" name="skills_json" id="cp-skills-json" value="{}">
+
+<div id="cp-steps" class="cp-steps" role="tablist">
+    {% for n, label in [(1, 'Setup'), (2, 'Skills'), (3, 'Tree'), (4, 'Results')] %}
+    <button type="button" role="tab" class="cp-step{% if n == 1 %} cp-step-on{% endif %}" data-click="cpStep" data-step="{{ n }}" aria-selected="{{ 'true' if n == 1 else 'false' }}">{{ n }} {{ label }}</button>
+    {% endfor %}
+</div>
+
+<div class="cp-grid" id="cp-grid" data-step="1">
+    <div class="cp-left">
+        <div class="b-section">
+            <div class="b-panel">
+                <div class="b-panel-head"><span class="b-label">Setup</span></div>
+                <div class="cp-setup">
+                    <label class="cp-field">
+                        <span class="b-eyebrow">Product</span>
+                        <input type="text" id="cp-search" name="q" autocomplete="off"
+                               placeholder="Search items, e.g. Archon"
+                               hx-get="/industry/copy-packs/search"
+                               hx-trigger="input changed delay:300ms"
+                               hx-target="#cp-search-results" data-htmx-no-error="1"
+                               class="cp-input">
+                    </label>
+                    <div id="cp-search-results"></div>
+                    <div id="cp-product" class="cp-product" data-name="">No product picked.</div>
+
+                    <label class="cp-field">
+                        <span class="b-eyebrow">Quantity</span>
+                        <input type="number" name="quantity" id="cp-quantity" value="1" min="1" max="1000"
+                               data-change="cpSetupChanged" class="cp-input cp-num">
+                    </label>
+
+                    <label class="cp-field">
+                        <span class="b-eyebrow">Character (copies and builds)</span>
+                        <select name="character_id" id="cp-character" data-change="cpCharacterChanged" class="cp-input">
+                            {% for c in characters %}
+                            <option value="{{ c.id }}">{{ c.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+
+                    <div class="cp-field-row">
+                        <label class="cp-field">
+                            <span class="b-eyebrow">Structure</span>
+                            <select name="structure" id="cp-structure" data-change="cpSetupChanged" class="cp-input">
+                                {% for key, s in structures.items() %}
+                                <option value="{{ key }}">{{ s['label'] }}</option>
+                                {% endfor %}
+                            </select>
+                        </label>
+                        <label class="cp-field">
+                            <span class="b-eyebrow">Rig</span>
+                            <select name="rig" id="cp-rig" data-change="cpSetupChanged" class="cp-input">
+                                {% for key, r in rigs.items() %}
+                                <option value="{{ key }}">{{ r['label'] }}</option>
+                                {% endfor %}
+                            </select>
+                        </label>
+                        <label class="cp-field">
+                            <span class="b-eyebrow">Security</span>
+                            <select name="security" id="cp-security" data-change="cpSetupChanged" class="cp-input">
+                                {% for key, sec in sec_statuses.items() %}
+                                <option value="{{ key }}">{{ sec['label'] }}</option>
+                                {% endfor %}
+                            </select>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div id="cp-skills"><div class="b-section cp-phone-only"><div class="b-empty">Pick a product first.</div></div></div>
+        <div id="cp-tree" class="cp-drill"><div class="b-section cp-phone-only"><div class="b-empty">Pick a product first.</div></div></div>
+    </div>
+
+    <div class="cp-right" id="cp-results">
+        <div class="b-section"><div class="b-empty">Pick a product to see which blueprint copies to make.</div></div>
+    </div>
+</div>
+
+<div id="cp-stepnav" class="cp-stepnav">
+    <button type="button" id="cp-step-back" class="b-btn" data-click="cpStepNav" data-dir="-1" disabled>Back</button>
+    <button type="button" id="cp-step-next" class="b-btn" data-click="cpStepNav" data-dir="1">Next: Skills</button>
+</div>
+</form>
+
+<script nonce="{{ request.state.csp_nonce }}">
+/* Copy Packs: page state and the handlers the fragments bind to.
+   localStorage keys: vigilant_copy_packs (setup), vigilant_copy_packs_p_<typeId>
+   (that product's toggles, posted as state_json) and vigilant_copy_packs_s_<charId>
+   (that character's manual skill levels, posted as skills_json). */
+(function () {
+    var KEY = 'vigilant_copy_packs';
+
+    function load(k) {
+        try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; }
+    }
+    function save(k, v) {
+        try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* private mode */ }
+    }
+    function el(id) { return document.getElementById(id); }
+    function typeId() { return el('cp-type-id').value; }
+    function charId() { return el('cp-character').value; }
+
+    function productState() {
+        try { return JSON.parse(el('cp-state').value || '{}') || {}; } catch (e) { return {}; }
+    }
+    function setProductState(st) {
+        el('cp-state').value = JSON.stringify(st);
+        if (typeId()) save(KEY + '_p_' + typeId(), st);
+    }
+    function loadSkills() {
+        el('cp-skills-json').value = JSON.stringify(load(KEY + '_s_' + charId()) || {});
+    }
+    function showProduct(name) {
+        var p = el('cp-product');
+        p.dataset.name = name || '';
+        p.textContent = name || 'No product picked.';
+    }
+    function saveSetup() {
+        save(KEY, {
+            type_id: typeId(),
+            type_name: el('cp-product').dataset.name || '',
+            quantity: el('cp-quantity').value,
+            character_id: charId(),
+            structure: el('cp-structure').value,
+            rig: el('cp-rig').value,
+            security: el('cp-security').value
+        });
+    }
+    function replan() {
+        saveSetup();
+        if (typeId()) htmx.trigger(el('cp-form'), 'cp-plan');
+    }
+
+    window.cpSelectProduct = function () {
+        el('cp-type-id').value = this.dataset.typeId;
+        showProduct(this.dataset.typeName);
+        el('cp-search').value = '';
+        el('cp-search-results').innerHTML = '';
+        el('cp-state').value = JSON.stringify(load(KEY + '_p_' + this.dataset.typeId) || {});
+        replan();
+    };
+    window.cpSubmit = function (e) { e.preventDefault(); replan(); };
+    window.cpSetupChanged = function () { replan(); };
+    window.cpCharacterChanged = function () { loadSkills(); replan(); };
+    window.cpSkillChanged = function () {
+        var saved = load(KEY + '_s_' + charId()) || {};
+        if (this.value === '') delete saved[this.dataset.skillId];
+        else saved[this.dataset.skillId] = parseInt(this.value, 10) || 0;
+        save(KEY + '_s_' + charId(), saved);
+        el('cp-skills-json').value = JSON.stringify(saved);
+        replan();
+    };
+    window.cpToggleBuild = function () {
+        var st = productState();
+        st.build = st.build || {};
+        st.build[this.dataset.typeId] = this.dataset.build !== '1';
+        setProductState(st);
+        replan();
+    };
+    window.cpPickBpo = function () {
+        var st = productState();
+        st.bpo = st.bpo || {};
+        st.bpo[this.dataset.typeId] = parseInt(this.value, 10);
+        setProductState(st);
+        replan();
+    };
+    window.cpSetMeTe = function () {
+        var st = productState(), field = this.dataset.field;
+        st[field] = st[field] || {};
+        if (this.value === '') delete st[field][this.dataset.typeId];
+        else st[field][this.dataset.typeId] = parseInt(this.value, 10) || 0;
+        setProductState(st);
+        replan();
+    };
+    window.cpToggleBpcs = function () {
+        var st = productState(), id = parseInt(this.dataset.typeId, 10);
+        var ignored = (st.ignore_bpc || []).filter(function (x) { return x !== id; });
+        if (!this.checked) ignored.push(id);
+        st.ignore_bpc = ignored;
+        setProductState(st);
+        replan();
+    };
+    /* Phone steps. The four sections stay in the page (the plan response
+       swaps them in place); on a phone the CSS shows only the one named by
+       #cp-grid's data-step. Above 768px these controls are hidden. A reload
+       always starts at Setup. */
+    var STEP_NAMES = ['Setup', 'Skills', 'Tree', 'Results'];
+    var step = 1;
+    function setStep(n, quiet) {
+        step = Math.max(1, Math.min(STEP_NAMES.length, n));
+        el('cp-grid').dataset.step = String(step);
+        Array.prototype.forEach.call(document.querySelectorAll('#cp-steps [data-step]'), function (b) {
+            var on = b.dataset.step === String(step);
+            b.classList.toggle('cp-step-on', on);
+            b.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+        el('cp-step-back').disabled = step === 1;
+        var next = el('cp-step-next');
+        next.disabled = step === STEP_NAMES.length;
+        next.textContent = step === STEP_NAMES.length ? 'Done' : 'Next: ' + STEP_NAMES[step];
+        var bar = el('cp-steps');
+        if (!quiet && bar.scrollIntoView) bar.scrollIntoView();
+    }
+    window.cpStep = function () { setStep(parseInt(this.dataset.step, 10)); };
+    window.cpStepNav = function () { setStep(step + parseInt(this.dataset.dir, 10)); };
+
+    /* Phone tree: one level at a time. Every row is in the page; `cp-vis`
+       marks the ones to show (the focused row and its direct children) and is
+       inert above 768px. Row positions shift between plans, so focus is kept
+       only while the row at its index is still the same item. */
+    var focus = {idx: '0', type: ''};
+    function treeRows() {
+        return Array.prototype.slice.call(document.querySelectorAll('#cp-tree .cp-tree-row'));
+    }
+    function rowAt(rows, idx) {
+        return rows.filter(function (r) { return r.dataset.idx === idx; })[0];
+    }
+    function setFocus(row) {
+        focus = row ? {idx: row.dataset.idx, type: row.dataset.type} : {idx: '0', type: ''};
+    }
+    function applyTreeFocus() {
+        var rows = treeRows();
+        if (!rows.length) return;
+        var cur = rowAt(rows, focus.idx);
+        if (!cur || (focus.type && cur.dataset.type !== focus.type)) {
+            setFocus(null);
+            cur = rows[0];
+        }
+        /* An item switched to Buy has no inputs to show: step back up. */
+        if (cur.dataset.parent !== '' && !cur.dataset.hasKids) {
+            setFocus(rowAt(rows, cur.dataset.parent));
+            cur = rowAt(rows, focus.idx) || rows[0];
+        }
+        rows.forEach(function (r) {
+            r.classList.toggle('cp-tree-focus', r === cur);
+            r.classList.toggle('cp-vis', r === cur || r.dataset.parent === focus.idx);
+        });
+        var up = el('cp-tree-up');
+        if (!up) return;
+        var parent = cur.dataset.parent === '' ? null : rowAt(rows, cur.dataset.parent);
+        up.hidden = !parent;
+        if (parent) {
+            var nameEl = parent.querySelector('.cp-tree-name');
+            var label = nameEl.cloneNode(true);
+            Array.prototype.forEach.call(label.querySelectorAll('button'), function (b) { b.remove(); });
+            up.textContent = '\u2039 Back to ' + label.textContent.trim();
+        }
+    }
+    window.cpTreeOpen = function () {
+        setFocus(this.closest('.cp-tree-row'));
+        applyTreeFocus();
+        el('cp-tree').scrollIntoView();
+    };
+    window.cpTreeUp = function () {
+        var rows = treeRows(), cur = rowAt(rows, focus.idx);
+        setFocus(cur && cur.dataset.parent !== '' ? rowAt(rows, cur.dataset.parent) : null);
+        applyTreeFocus();
+        el('cp-tree').scrollIntoView();
+    };
+
+    window.cpReset = function () {
+        try {
+            Object.keys(localStorage).forEach(function (k) {
+                if (k.indexOf(KEY) === 0) localStorage.removeItem(k);
+            });
+        } catch (e) { /* private mode */ }
+        window.location.href = '/industry/copy-packs';
+    };
+
+    function planFailed(e, text) {
+        var id = e.detail.elt && e.detail.elt.id;
+        if (id !== 'cp-form' && id !== 'cp-search') return;
+        var box = el(id === 'cp-form' ? 'cp-results' : 'cp-search-results');
+        box.innerHTML = '';
+        var section = document.createElement('div');
+        section.className = 'b-section';
+        var msg = document.createElement('div');
+        msg.className = 'b-empty';
+        msg.textContent = text;
+        section.appendChild(msg);
+        box.appendChild(section);
+        /* Results are hidden on phone steps 1-3: show where the message is. */
+        if (id === 'cp-form') setStep(4);
+    }
+    document.body.addEventListener('htmx:responseError', function (e) {
+        var code = e.detail.xhr ? e.detail.xhr.status : '?';
+        planFailed(e, e.detail.elt && e.detail.elt.id === 'cp-search'
+            ? 'Search failed. Try again.' : "Couldn't plan (HTTP " + code + '). Try again.');
+    });
+    document.body.addEventListener('htmx:sendError', function (e) {
+        planFailed(e, e.detail.elt && e.detail.elt.id === 'cp-search'
+            ? 'Search failed. Try again.' : 'Network error. Try again.');
+    });
+
+    document.addEventListener('DOMContentLoaded', function () {
+        setStep(1, true);
+        /* The plan response replaces #cp-tree itself (out of band), a child of
+           .cp-left, so a childList observer there re-applies the focus. */
+        new MutationObserver(applyTreeFocus).observe(document.querySelector('.cp-left'),
+                                                     {childList: true});
+        var s = load(KEY) || {};
+        [['cp-quantity', 'quantity'], ['cp-character', 'character_id'],
+         ['cp-structure', 'structure'], ['cp-rig', 'rig'], ['cp-security', 'security']
+        ].forEach(function (pair) {
+            var field = el(pair[0]);
+            if (!field || !s[pair[1]]) return;
+            /* A select keeps its first option when the saved value is gone
+               (e.g. a removed character). */
+            field.value = s[pair[1]];
+            if (field.tagName === 'SELECT' && field.selectedIndex < 0) field.selectedIndex = 0;
+        });
+        loadSkills();
+        if (s.type_id) {
+            el('cp-type-id').value = s.type_id;
+            showProduct(s.type_name);
+            el('cp-state').value = JSON.stringify(load(KEY + '_p_' + s.type_id) || {});
+            /* After every other DOMContentLoaded handler, htmx's included. */
+            setTimeout(replan, 0);
+        }
+    });
+})();
+</script>
+
+{% endblock %}

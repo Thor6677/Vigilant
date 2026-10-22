@@ -19,6 +19,8 @@ from app.db.sde_models import (
     SDEType, SDESystem, SDEJump, SDEStation, SDERegion, SDEConstellation, SDEMeta,
     SDEBlueprintMaterial, SDETypeMaterial, SDECompressible, SDEBlueprintInfo,
     SDEBlueprintInvention, SDEBlueprintInventionMaterial, SDEBlueprintInventionSkill,
+    SDEBlueprintInventionProduct,
+    SDEBlueprintMfgSkill,
     SDEGroup, SDETypeSkillReq, SDESkillInfo, SDECertificate, SDECertificateSkill,
     SDEShipMastery,
     SDEPlanet, SDEPlanetSchematic, SDEPlanetSchematicMaterial,
@@ -85,6 +87,14 @@ REFRESH_DAYS = 30
 # single boot forever, since the reimport can never make the check pass.
 EFFECTS_USAGE_CHANCE_MARKER = "effects_usage_chance_v1"
 
+# Copy packs need sde_blueprint_info.max_production_limit / copying_time,
+# sde_blueprint_mfg_skills and sde_blueprint_invention_products. An install
+# that imported before they existed has the columns and tables (main.py and
+# create_all add them) but nothing in them, and nothing in the data says so
+# reliably, so this marker makes needs_update() reimport exactly once, the
+# same way as EFFECTS_USAGE_CHANCE_MARKER.
+BLUEPRINT_COPY_MARKER = "blueprint_copy_v1"
+
 
 async def _get_meta(db: AsyncSession, key: str) -> str | None:
     result = await db.execute(text("SELECT value FROM sde_meta WHERE key = :key"), {"key": key})
@@ -128,6 +138,14 @@ async def needs_update(db: AsyncSession) -> bool:
             "sde_meta has no %r marker — this install predates T-049's "
             "fittingUsageChanceAttributeID column. Forcing SDE reimport.",
             EFFECTS_USAGE_CHANCE_MARKER,
+        )
+        return True
+
+    if not await _get_meta(db, BLUEPRINT_COPY_MARKER):
+        log.warning(
+            "sde_meta has no %r marker — this install predates the copy-pack "
+            "blueprint fields. Forcing SDE reimport.",
+            BLUEPRINT_COPY_MARKER,
         )
         return True
 
@@ -204,6 +222,91 @@ async def _bulk_insert(db: AsyncSession, table, rows: list[dict]):
     if rows:
         await db.execute(table.insert(), rows)
         await db.commit()
+
+
+def _positive_int_or_none(value):
+    """int(value) when it parses to a positive integer, else None."""
+    try:
+        n = int(value)
+    except (ValueError, TypeError):
+        return None
+    return n if n > 0 else None
+
+
+def _parse_blueprint_info_item(item: dict):
+    """(info_row | None, mfg_skill_rows) for one blueprints.jsonl entry.
+
+    info_row is the sde_blueprint_info row: manufacturing time and product,
+    plus the two copy-planning fields — `maxProductionLimit` (top level; the
+    most runs one copy can have) and `activities.copying.time` (seconds per
+    run). Each copy field is parsed on its own and is None when missing,
+    malformed or not positive (a copying activity with no time is None, never
+    0), so a bad copy field never drops the row. Only the manufacturing
+    fields can reject an entry: no manufacturing activity (reaction
+    formulas), a bad key, or a bad product give (None, []).
+
+    mfg_skill_rows are the skills the manufacturing job needs; a malformed
+    skill entry is skipped on its own, a missing level defaults to 1."""
+    acts = item.get("activities", {})
+    mfg = acts.get("manufacturing")
+    if not mfg:
+        return None, []
+    try:
+        bp_type_id = int(item["_key"])
+        time_secs = mfg.get("time")
+        products = mfg.get("products", [])
+        product_type_id, product_qty = None, 1
+        if products:
+            product_type_id = int(products[0].get("typeID", 0)) or None
+            product_qty = int(products[0].get("quantity", 1))
+    except (KeyError, ValueError, TypeError, AttributeError):
+        return None, []
+    if not (time_secs or product_type_id):
+        return None, []
+    copying = acts.get("copying")
+    info = {
+        "blueprint_type_id": bp_type_id,
+        "product_type_id": product_type_id,
+        "manufacturing_time": time_secs,
+        "product_quantity": product_qty,
+        "max_production_limit": _positive_int_or_none(item.get("maxProductionLimit")),
+        "copying_time": _positive_int_or_none(
+            copying.get("time") if isinstance(copying, dict) else None),
+    }
+    skills = []
+    raw_skills = mfg.get("skills")
+    for s in raw_skills if isinstance(raw_skills, list) else []:
+        if not isinstance(s, dict) or not s.get("typeID"):
+            continue
+        try:
+            skills.append({"blueprint_type_id": bp_type_id,
+                           "skill_type_id": int(s["typeID"]),
+                           "level": int(s.get("level") or 1)})
+        except (ValueError, TypeError):
+            continue
+    return info, skills
+
+
+def _parse_invention_products(item: dict) -> list[dict]:
+    """One sde_blueprint_invention_products row per product of a
+    blueprints.jsonl entry's invention activity. `_parse_invention_item`
+    keeps only the first product; this keeps every one."""
+    inv = item.get("activities", {}).get("invention")
+    if not isinstance(inv, dict):
+        return []
+    try:
+        bp_id = int(item["_key"])
+    except (KeyError, ValueError, TypeError):
+        return []
+    rows = []
+    for p in inv.get("products") or []:
+        try:
+            rows.append({"blueprint_type_id": bp_id,
+                         "product_blueprint_type_id": int(p["typeID"]),
+                         "base_runs": int(p.get("quantity") or 1)})
+        except (KeyError, ValueError, TypeError, AttributeError):
+            continue
+    return rows
 
 
 def _parse_invention_item(item: dict):
@@ -534,47 +637,48 @@ async def download_and_import(db: AsyncSession):
     count += len(batch)
     log.info(f"Imported {count} blueprint material rows")
 
-    # --- blueprint info (manufacturing time + product mapping) ---
-    log.info("Importing blueprint info (time + products)...")
+    # --- blueprint info (manufacturing time + product mapping + the
+    # copy-pack fields) and manufacturing skill requirements ---
+    log.info("Importing blueprint info (time + products + copying) and manufacturing skills...")
     await db.execute(text("DELETE FROM sde_blueprint_info"))
+    await db.execute(text("DELETE FROM sde_blueprint_mfg_skills"))
     await db.commit()
-    count, batch = 0, []
+    count, skill_count, batch, skill_batch = 0, 0, [], []
     for item in _iter_jsonl(zf, "blueprints.jsonl"):
-        mfg = item.get("activities", {}).get("manufacturing")
-        if not mfg:
+        info, skills = _parse_blueprint_info_item(item)
+        if info is None:
             continue
-        bp_type_id = int(item["_key"])
-        time_secs = mfg.get("time")
-        products = mfg.get("products", [])
-        product_type_id = None
-        product_qty = 1
-        if products:
-            product_type_id = int(products[0].get("typeID", 0)) or None
-            product_qty = int(products[0].get("quantity", 1))
-        if time_secs or product_type_id:
-            batch.append({
-                "blueprint_type_id": bp_type_id,
-                "product_type_id": product_type_id,
-                "manufacturing_time": time_secs,
-                "product_quantity": product_qty,
-            })
-            if len(batch) >= 500:
-                await _bulk_insert(db, SDEBlueprintInfo.__table__, batch)
-                count += len(batch)
-                batch = []
+        batch.append(info)
+        skill_batch.extend(skills)
+        if len(batch) >= 500:
+            await _bulk_insert(db, SDEBlueprintInfo.__table__, batch)
+            count += len(batch)
+            batch = []
+        if len(skill_batch) >= 500:
+            await _bulk_insert(db, SDEBlueprintMfgSkill.__table__, skill_batch)
+            skill_count += len(skill_batch)
+            skill_batch = []
     await _bulk_insert(db, SDEBlueprintInfo.__table__, batch)
     count += len(batch)
-    log.info(f"Imported {count} blueprint info rows")
+    await _bulk_insert(db, SDEBlueprintMfgSkill.__table__, skill_batch)
+    skill_count += len(skill_batch)
+    log.info(f"Imported {count} blueprint info rows, {skill_count} manufacturing skill rows")
 
     # --- blueprint invention (T1 -> T2 datacores/decryptor/skills) ---
     log.info("Importing blueprint invention activities...")
     await db.execute(text("DELETE FROM sde_blueprint_invention"))
     await db.execute(text("DELETE FROM sde_blueprint_invention_materials"))
     await db.execute(text("DELETE FROM sde_blueprint_invention_skills"))
+    await db.execute(text("DELETE FROM sde_blueprint_invention_products"))
     await db.commit()
-    info_count, mat_count, skill_count = 0, 0, 0
-    info_batch, mat_batch, skill_batch = [], [], []
+    info_count, mat_count, skill_count, product_count = 0, 0, 0, 0
+    info_batch, mat_batch, skill_batch, product_batch = [], [], [], []
     for item in _iter_jsonl(zf, "blueprints.jsonl"):
+        product_batch.extend(_parse_invention_products(item))
+        if len(product_batch) >= 500:
+            await _bulk_insert(db, SDEBlueprintInventionProduct.__table__, product_batch)
+            product_count += len(product_batch)
+            product_batch = []
         info, mats, skills = _parse_invention_item(item)
         if info is None:
             continue
@@ -599,7 +703,10 @@ async def download_and_import(db: AsyncSession):
     mat_count += len(mat_batch)
     await _bulk_insert(db, SDEBlueprintInventionSkill.__table__, skill_batch)
     skill_count += len(skill_batch)
-    log.info(f"Imported {info_count} invention activities, {mat_count} invention materials, {skill_count} invention skills")
+    await _bulk_insert(db, SDEBlueprintInventionProduct.__table__, product_batch)
+    product_count += len(product_batch)
+    log.info(f"Imported {info_count} invention activities, {mat_count} invention materials, "
+             f"{skill_count} invention skills, {product_count} invention products")
 
     # --- npcCorporations (LP faction mapping: corp -> owning NPC faction,
     # NOT ESI's per-corp `faction_id`, which means FW enlistment — see
@@ -1327,6 +1434,8 @@ async def download_and_import(db: AsyncSession):
     # fittingUsageChanceAttributeID, so needs_update() never has to force
     # another reimport just to check for it again.
     await _set_meta(db, EFFECTS_USAGE_CHANCE_MARKER, "1")
+    # Copy packs: this run filled the copy fields and manufacturing skills.
+    await _set_meta(db, BLUEPRINT_COPY_MARKER, "1")
     await _set_meta(db, "last_updated", datetime.now(timezone.utc).isoformat())
     await _set_meta(db, "import_in_progress", "0")
     log.info("SDE import complete.")
