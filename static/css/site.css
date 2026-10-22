@@ -3009,6 +3009,7 @@ button.cp-chip { cursor: pointer; }
 .cp-place { padding: 0.5rem 0.5rem 0.2rem; font-size: 10px; letter-spacing: 0.05em; color: var(--accent); border-bottom: 1px solid var(--border); }
 .cp-pack-row > span:last-child > div { padding: 1px 0; }
 .cp-steps, .cp-stepnav, .cp-tree-open, .cp-tree-up { display: none; }
+.cp-phone-only { display: none; }
 .cp-steps { gap: 0.3rem; margin-bottom: 0.75rem; }
 .cp-step { flex: 1; min-height: 40px; padding: 0 0.2rem; background: none; border: 1px solid var(--border); color: var(--muted); font-family: inherit; font-size: 10px; letter-spacing: 0.04em; cursor: pointer; }
 .cp-step-on { border-color: var(--accent); color: var(--accent); }
@@ -3016,11 +3017,12 @@ button.cp-chip { cursor: pointer; }
 .cp-stepnav .b-btn { flex: 1; min-height: 44px; border: 1px solid var(--border); }
 .cp-stepnav .b-btn:disabled { opacity: 0.4; cursor: default; }
 .cp-tree-up { width: 100%; padding: 0.5rem; text-align: left; background: none; border: none; border-bottom: 1px solid var(--border); color: var(--accent); font-family: inherit; font-size: 11px; cursor: pointer; }
-.cp-tree-open { margin-left: 0.3rem; padding: 0 0.5rem; background: none; border: 1px solid var(--accent); color: var(--accent); font-family: inherit; cursor: pointer; }
+.cp-tree-open { margin-left: 0.3rem; min-height: 32px; padding: 0 0.7rem; background: none; border: 1px solid var(--accent); color: var(--accent); font-family: inherit; cursor: pointer; }
 @media (max-width: 768px) {
     /* One step at a time: Setup, Skills, Tree, Results. #cp-grid's data-step
        (set by the page script) picks which section shows. */
     .cp-steps, .cp-stepnav { display: flex; }
+    .cp-phone-only { display: block; }
     .cp-grid { flex-direction: column; gap: 0; }
     .cp-left { display: contents; }
     .cp-left > .b-section, #cp-skills, #cp-tree, .cp-right { display: none; width: 100%; }

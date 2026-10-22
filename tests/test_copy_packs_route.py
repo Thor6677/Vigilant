@@ -686,6 +686,27 @@ def test_page_script_has_the_tree_handlers():
         teardown()
 
 
+def test_phone_edge_cases_found_in_review():
+    teardown = _seeded_db()
+    try:
+        text = _client().get("/industry/copy-packs").text
+        # A failed plan lands in Results, which is hidden on steps 1-3: go there.
+        assert "if (id === 'cp-form') setStep(4);" in text
+        # Steps 2 and 3 are not blank before a product is picked.
+        assert '<div id="cp-skills"><div class="b-section cp-phone-only"><div class="b-empty">Pick a product first.' in text
+        # The placeholder already has the drill class, so the first plan does not flash the full tree.
+        assert '<div id="cp-tree" class="cp-drill"><div class="b-section cp-phone-only"><div class="b-empty">Pick a product first.' in text
+        # No throw if a tree row has no name text.
+        assert "firstChild.textContent" not in text
+    finally:
+        teardown()
+    _phone, base = _phone_css()
+    assert re.search(r"\.cp-tree-open \{[^}]*min-height: 32px", base)
+    phone, base = _phone_css()                      # the placeholders are for phones only
+    assert re.search(r"\.cp-phone-only \{ display: none; \}", base)
+    assert re.search(r"\.cp-phone-only \{ display: block; \}", phone)
+
+
 # ── cache TTL ────────────────────────────────────────────────────────────────
 
 def test_corp_blueprints_cache_for_an_hour():

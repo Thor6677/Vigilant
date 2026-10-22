@@ -93,8 +93,8 @@
                 </div>
             </div>
         </div>
-        <div id="cp-skills"></div>
-        <div id="cp-tree"></div>
+        <div id="cp-skills"><div class="b-section cp-phone-only"><div class="b-empty">Pick a product first.</div></div></div>
+        <div id="cp-tree" class="cp-drill"><div class="b-section cp-phone-only"><div class="b-empty">Pick a product first.</div></div></div>
     </div>
 
     <div class="cp-right" id="cp-results">
@@ -266,8 +266,10 @@
         var parent = cur.dataset.parent === '' ? null : rowAt(rows, cur.dataset.parent);
         up.hidden = !parent;
         if (parent) {
-            up.textContent = '\u2039 Back to ' +
-                parent.querySelector('.cp-tree-name').firstChild.textContent.trim();
+            var nameEl = parent.querySelector('.cp-tree-name');
+            var label = nameEl.cloneNode(true);
+            Array.prototype.forEach.call(label.querySelectorAll('button'), function (b) { b.remove(); });
+            up.textContent = '\u2039 Back to ' + label.textContent.trim();
         }
     }
     window.cpTreeOpen = function () {
@@ -303,6 +305,8 @@
         msg.textContent = text;
         section.appendChild(msg);
         box.appendChild(section);
+        /* Results are hidden on phone steps 1-3: show where the message is. */
+        if (id === 'cp-form') setStep(4);
     }
     document.body.addEventListener('htmx:responseError', function (e) {
         var code = e.detail.xhr ? e.detail.xhr.status : '?';
