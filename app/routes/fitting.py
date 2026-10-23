@@ -695,6 +695,7 @@ async def ship_slots(
         ATTR_RIG_SLOTS, ATTR_TURRET_SLOTS, ATTR_LAUNCHER_SLOTS,
         ATTR_HI_SLOT_MODIFIER, ATTR_MED_SLOT_MODIFIER, ATTR_LOW_SLOT_MODIFIER,
         ATTR_TURRET_HARDPOINT_MODIFIER, ATTR_LAUNCHER_HARDPOINT_MODIFIER,
+        ATTR_DRONE_CAPACITY, ATTR_DRONE_BANDWIDTH,
     )
     hi = attrs.get(ATTR_HI_SLOTS, 0)
     med = attrs.get(ATTR_MED_SLOTS, 0)
@@ -729,6 +730,11 @@ async def ship_slots(
         "turret": int(turret),
         "launcher": int(launcher),
         "subsystem": subsystem_slots,
+        # Carriers and supercarriers have no drone bay (0 in the SDE): they
+        # field fighters instead. The page uses these to refuse a drone that
+        # cannot be carried (ISS-135).
+        "drone_bay": float(attrs.get(ATTR_DRONE_CAPACITY, 0)),
+        "drone_bandwidth": float(attrs.get(ATTR_DRONE_BANDWIDTH, 0)),
     }
 
 

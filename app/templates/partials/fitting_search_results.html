@@ -27,7 +27,7 @@
          style="width:20px;height:20px;border:1px solid var(--border);flex-shrink:0;"
          data-on-error="hide">
     <span style="font-size:11px;color:var(--text);flex:1;cursor:pointer;"
-          data-click="addDrone" data-type-id="{{ r.type_id }}" data-type-name="{{ r.type_name }}">{{ r.type_name }}</span>
+          data-click="addDrone" data-type-id="{{ r.type_id }}" data-type-name="{{ r.type_name }}" data-volume="{{ r.volume }}">{{ r.type_name }}</span>
     <button data-click="showModuleInfo" data-type-id="{{ r.type_id }}" data-stop style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.2rem;font-style:italic;font-family:serif;" title="Show info">i</button>
 </div>
 {% elif search_type == 'charge' %}

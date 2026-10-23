@@ -129,6 +129,7 @@
                     style="background:none;border:1px solid var(--border);color:var(--muted);font-size:14px;line-height:1;padding:2px 8px;cursor:pointer;">×</button>
         </div>
         <div id="browse-breadcrumbs" style="font-size:9px;color:var(--muted);display:flex;gap:0.2rem;flex-wrap:wrap;min-height:14px;"></div>
+        <div id="fit-limit-note" class="fit-limit-note" role="status" aria-live="polite" hidden></div>
     </div>
     {# Two-pane: tree + items #}
     <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
@@ -285,6 +286,7 @@
         <span class="b-label">Drones</span>
         <span id="drone-summary" class="b-muted-sm"></span>
     </div>
+    <div id="drone-limit-note" class="fit-limit-note" role="status" aria-live="polite" hidden></div>
     <div id="slots-drone"></div>
     <div style="padding:0.25rem 0;">
         <div style="position:relative;">
@@ -392,7 +394,7 @@ var state = {
 };
 
 /* Ship slot limits — populated from stats response */
-var shipSlots = {high: 8, med: 8, low: 8, rig: 3, subsystem: 0};
+var shipSlots = {high: 8, med: 8, low: 8, rig: 3, subsystem: 0, drone_bay: null, drone_bandwidth: null};
 var overheatCache = {};  // type_id -> bool
 
 function getSlotCount(slot) {
@@ -696,6 +698,9 @@ function fetchShipSlots(typeId) {
             shipSlots.subsystem = data.subsystem || 0;
             shipSlots.turret = data.turret || 0;
             shipSlots.launcher = data.launcher || 0;
+            // null = not known yet, so nothing is refused before the answer lands.
+            shipSlots.drone_bay = data.drone_bay == null ? null : data.drone_bay;
+            shipSlots.drone_bandwidth = data.drone_bandwidth == null ? null : data.drone_bandwidth;
             renderSlots();
         });
 }
@@ -768,14 +773,18 @@ function addModule(typeId, typeName, slot) {
     results.forEach(function(el) { el.style.display = 'none'; });
 }
 
-function addDrone(typeId, typeName) {
+function addDrone(typeId, typeName, volume) {
     // ISS-020: dispatcher invokes as fn.call(el, event). Detect via dataset.
     // addModuleFromBrowser (Browse panel) still calls this positionally, so
     // that path must keep working when dataset is absent.
     if (this && this.dataset && this.dataset.typeId !== undefined) {
         typeId = parseInt(this.dataset.typeId, 10);
         typeName = this.dataset.typeName;
+        if (this.dataset.volume !== undefined) volume = parseFloat(this.dataset.volume);
     }
+    if (volume != null && !isNaN(volume)) droneVolumes[typeId] = volume;
+    var why = droneRoomProblem(typeId, 1);
+    if (why) { _limitNote(why); return false; }
     // Check if drone already exists, increment quantity
     for (var i = 0; i < state.items.length; i++) {
         if (state.items[i].type_id === typeId && state.items[i].slot === 'drone') {
@@ -783,7 +792,7 @@ function addDrone(typeId, typeName) {
             saveState();
             renderSlots();
             recalcStats();
-            return;
+            return true;
         }
     }
     state.items.push({
@@ -799,6 +808,7 @@ function addDrone(typeId, typeName) {
     inputs.forEach(function(el) { el.value = ''; });
     var results = document.querySelectorAll('.module-results[data-slot="drone"]');
     results.forEach(function(el) { el.style.display = 'none'; });
+    return true;
 }
 
 function removeItem(index) {
@@ -841,10 +851,69 @@ function toggleOnline(index) {
     recalcStats();
 }
 
+/* ── Drone bay limit (ISS-135) ─────────────────────────────────────────────
+   The bay is a hard limit in game, so a drone that does not fit is refused.
+   Bandwidth is not: it only limits how many drones can be launched (the
+   engine already caps drone DPS by it), so going over it is flagged in the
+   stats panel instead. Volumes come from the browse and search results and,
+   for drones that arrived by import or restore, from the stats response. */
+var droneVolumes = {};
+var _limitNoteTimer = null;
+
+function _fmtM3(v) {
+    return (Math.round(v * 10) / 10).toString();
+}
+
+function _limitNote(text) {
+    ['fit-limit-note', 'drone-limit-note'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = text;
+        el.hidden = !text;
+    });
+    clearTimeout(_limitNoteTimer);
+    if (text) _limitNoteTimer = setTimeout(function() { _limitNote(''); }, 4000);
+}
+
+function _droneBayUsed() {
+    var used = 0;
+    state.items.forEach(function(i) {
+        if (i.slot === 'drone') used += (droneVolumes[i.type_id] || 0) * i.quantity;
+    });
+    return used;
+}
+
+/* '' when `qty` more of this drone can be carried, otherwise the reason. */
+function droneRoomProblem(typeId, qty) {
+    var bay = shipSlots.drone_bay;
+    if (!state.shipTypeId || bay == null) return '';
+    if (bay <= 0) return 'Not added \u00b7 this ship has no drone bay';
+    var vol = droneVolumes[typeId];
+    if (vol == null) return '';
+    var used = _droneBayUsed();
+    if (used + vol * qty > bay + 1e-9) {
+        return 'Not added \u00b7 drone bay full (' + _fmtM3(used) + ' / ' + _fmtM3(bay) + ' m\u00b3)';
+    }
+    return '';
+}
+
+function _syncDroneVolumes() {
+    var src = document.querySelector('#stats-panel [data-drone-vols]');
+    if (!src) return;
+    try {
+        var vols = JSON.parse(src.getAttribute('data-drone-vols') || '{}');
+        Object.keys(vols).forEach(function(k) { droneVolumes[parseInt(k, 10)] = vols[k]; });
+    } catch (e) { /* keep what we have */ }
+}
+
 function changeDroneQty(index, delta) {
     if (this && this.dataset && this.dataset.itemIdx !== undefined) {
         index = parseInt(this.dataset.itemIdx, 10);
         delta = parseInt(this.dataset.delta, 10);
+    }
+    if (delta > 0) {
+        var why = droneRoomProblem(state.items[index].type_id, delta);
+        if (why) { _limitNote(why); return; }
     }
     state.items[index].quantity += delta;
     if (state.items[index].quantity <= 0) {
@@ -1417,6 +1486,7 @@ function recalcStats() {
     .then(function(r) { return r.text(); })
     .then(function(html) {
         document.getElementById('stats-panel').innerHTML = html;
+        _syncDroneVolumes();
         _fitSumBarUpdate();
     })
     .catch(function(e) {
@@ -2163,7 +2233,7 @@ function renderBrowseItems(items) {
         // fit-brow: a 40px row on phones (mobile R6 T4).
         var rowClass = (canFit ? 'b-hover-accent ' : '') + 'fit-brow';
         var clickAttrs = canFit
-            ? ' data-click="addModuleFromBrowser" data-type-id="' + item.type_id + '" data-type-name="' + escapeHtml(item.type_name) + '" data-slot-type="' + (item.slot_type || 'cargo') + '"'
+            ? ' data-click="addModuleFromBrowser" data-type-id="' + item.type_id + '" data-type-name="' + escapeHtml(item.type_name) + '" data-slot-type="' + (item.slot_type || 'cargo') + '" data-volume="' + (item.volume || 0) + '"'
             : '';
         html += '<div class="' + rowClass + '" style="padding:0.35rem 0.75rem;cursor:' + cursor + ';display:flex;align-items:center;gap:0.5rem;border-bottom:1px solid var(--border);opacity:' + opacity + ';"' +
                 clickAttrs + '>' +
@@ -2174,11 +2244,18 @@ function renderBrowseItems(items) {
     container.innerHTML = html;
 }
 
-function addModuleFromBrowser(typeId, typeName, slotType) {
+function addModuleFromBrowser(typeId, typeName, slotType, volume) {
     if (this && this.dataset && this.dataset.typeId !== undefined) {
         typeId = parseInt(this.dataset.typeId, 10);
         typeName = this.dataset.typeName;
         slotType = this.dataset.slotType;
+        if (this.dataset.volume !== undefined) volume = parseFloat(this.dataset.volume);
+    }
+    if (slotType === 'fighter') {
+        // ISS-136: fighters are not modelled yet. Say so rather than adding
+        // nothing, or filing them under cargo where they would do nothing.
+        _limitNote('Not added \u00b7 fighters are not supported in the fitting tool yet');
+        return;
     }
     if (slotType !== 'drone' && slotType !== 'cargo' && isSlotFull(slotType)) {
         // On a phone the rack is out of sight behind the overlay, so say why
@@ -2188,7 +2265,7 @@ function addModuleFromBrowser(typeId, typeName, slotType) {
     }
     // Browser already checked fit restrictions, skip the wrapper
     if (slotType === 'drone') {
-        addDrone(typeId, typeName);
+        if (!addDrone(typeId, typeName, volume)) return;
     } else {
         _origAddModule(typeId, typeName, slotType);
     }
