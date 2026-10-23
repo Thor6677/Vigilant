@@ -137,6 +137,7 @@ An EVE Online companion dashboard that gives you a unified view of all your char
 - **Full fitting builder** — three-column layout with module browser (market-group tree), slot layout (high/mid/low/rig/subsystem/drone), and live stats
 - **Dogma-accurate engine** — DPS, EHP, capacitor simulation, offense/defense/navigation/targeting/drones, stacking penalties, module-to-module bonuses (Bastion/Siege), Triglavian spool-up, T3C subsystems with per-level scaling
 - **Character-accurate stats** — dropdown picks any of your characters; DPS/EHP/CPU/PG recompute against that character's actual trained skills (falls back to All V when no character selected)
+- **Fighters** — carriers and supercarriers fit fighter squadrons: launch tubes, light/support/heavy squadron limits, fighter hangar capacity, fighter DPS (attack plus missile ability, as pyfa shows by default), and EFT import/export with the fighter block
 - **Skill-requirement warnings** — ⚠ pip + red row highlight on any ship/module/drone the selected character can't use; hover tooltip lists missing skills with need/have levels
 - **Module overheating** — toggle per module with correct per-type overload bonuses
 - **Module info popup** — click any fitted module, drone, or search result for icon, description, and formatted dogma attributes

@@ -264,7 +264,8 @@ def test_to_eft_output_shape_including_fighters():
     )
 
 
-def test_to_eft_singular_quantity_has_no_suffix():
+def test_to_eft_singular_quantity_still_writes_xn():
+    """pyfa silently drops a bare drone/fighter line, so x1 is always written."""
     raw = {
         "fitting_id": 8, "name": "Test Fit", "description": "",
         "ship_type_id": 90008,
@@ -272,8 +273,31 @@ def test_to_eft_singular_quantity_has_no_suffix():
     }
     fit = _parse_fitting(raw, _names((90131, "Test Drone")), "Test Ship", {})
     eft = _to_eft(fit)
-    assert "Test Drone" in eft.split("\n")
-    assert "Test Drone x1" not in eft
+    assert "Test Drone x1" in eft.split("\n")
+    assert "Test Drone" not in eft.split("\n")
+
+
+def test_to_eft_splits_fighter_totals_into_squadrons_in_their_own_block():
+    raw = {
+        "fitting_id": 10, "name": "Test Fit", "description": "", "ship_type_id": 90010,
+        "items": [
+            _item(90141, "DroneBay", qty=1),
+            _item(90142, "FighterBay", qty=8),
+            _item(90143, "Cargo", qty=1),
+        ],
+    }
+    type_names = _names((90141, "Test Drone"), (90142, "Test Fighter"), (90143, "Test Charge"))
+    fit = _parse_fitting(raw, type_names, "Test Ship", {})
+    eft = _to_eft(fit, {90142: {"class": "light", "max_size": 6}})
+    assert eft.endswith("Test Drone x1\n\nTest Fighter x6\nTest Fighter x2\n\nTest Charge x1")
+    # No sizes known: the total is written as-is.
+    assert "Test Fighter x8" in _to_eft(fit).split("\n")
+
+
+def test_category_for_flag_maps_fighter_tubes_as_fighters():
+    for flag in ("FighterBay", "FighterTube0", "FighterTube4", 158, 159, 163):
+        assert _category_for_flag(flag) == "fighter", flag
+    assert _category_for_flag(164) == "cargo"
 
 
 # ── Round trip through the fitting tool's own EFT import parser ────────────
@@ -366,12 +390,11 @@ def test_to_eft_round_trips_through_the_fitting_tools_import_parser():
     box both use — and check the modules land in the slots that parser
     itself resolves them to.
 
-    Fighters and service modules get no dedicated slot in the fitting tool's
-    item model (only ships get fitted there — no carriers, no structures),
-    so the import parser's own fallback treats an unrecognized item
-    category as cargo. `_to_eft` must not drop those lines outright the way
-    it used to for fighters — they round-trip as cargo entries, which is
-    what the parser itself does with them.
+    Fighters import as slot "fighter" (ISS-136). Service modules get no
+    dedicated slot in the fitting tool's item model, so the import parser's
+    own fallback treats that category as cargo. `_to_eft` must not drop
+    either kind of line — they round-trip as fighter and cargo entries,
+    which is what the parser itself does with them.
     """
     teardown = _seeded_sde_db()
     try:
@@ -414,10 +437,11 @@ def test_to_eft_round_trips_through_the_fitting_tools_import_parser():
         assert by_name["Test Rig"]["slot"] == "rig"
         assert by_name["Test Roundtrip Drone"]["slot"] == "drone"
         assert by_name["Test Roundtrip Drone"]["quantity"] == 3
-        # No dedicated fighter or service slot in the fitting tool's own
-        # model — the parser's fallback puts an unrecognized category in
+        # Fighters have their own slot ("fighter"); the fixture fighter has no
+        # squadron size, so the quantity is not split. A service module has no
+        # slot in the fitting tool's model, so the parser's fallback puts it in
         # cargo. What matters is neither line is lost.
-        assert by_name["Test Roundtrip Fighter"]["slot"] == "cargo"
+        assert by_name["Test Roundtrip Fighter"]["slot"] == "fighter"
         assert by_name["Test Roundtrip Fighter"]["quantity"] == 2
         assert by_name["Test Roundtrip Service Module"]["slot"] == "cargo"
         assert by_name["Test Roundtrip Charge"]["slot"] == "cargo"

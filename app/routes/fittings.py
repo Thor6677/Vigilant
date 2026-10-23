@@ -15,6 +15,7 @@ from app.esi.client import ESIClient, refresh_token
 from app.esi import character as esi_char
 from app.esi import universe as esi_universe
 from app.sde import lookup as sde
+from app.fitting.fighters import fighter_order_key, split_quantity
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ for f in range(125, 129): SLOT_CATEGORY[f] = "subsystem"
 SLOT_CATEGORY[87] = "drone"
 SLOT_CATEGORY[5] = "cargo"
 SLOT_CATEGORY[158] = "fighter"
+for f in range(159, 164): SLOT_CATEGORY[f] = "fighter"  # FighterTube0-4 (assets only, never in fittings)
 
 # String flag → category. Exact matches for the bay-style flags, prefix
 # matches for the numbered slot flags (HiSlot0-7, MedSlot0-7, ...) since the
@@ -52,6 +54,7 @@ _STRING_FLAG_PREFIXES = [
     ("RigSlot", "rig"),
     ("ServiceSlot", "service"),
     ("SubSystemSlot", "subsystem"),
+    ("FighterTube", "fighter"),
 ]
 
 
@@ -138,8 +141,14 @@ def _parse_fitting(raw: dict, type_names: dict, ship_name: str, ship_slots: dict
     }
 
 
-def _to_eft(fit: dict) -> str:
-    """Convert a parsed fitting to EFT text format."""
+def _to_eft(fit: dict, fighter_info: dict | None = None) -> str:
+    """Convert a parsed fitting to EFT text format.
+
+    `fighter_info` (get_fighter_info_bulk's map) splits ESI's per-type fighter
+    totals into one line per squadron, as pyfa would clamp a bigger "xN" to a
+    single squadron, and orders them as Save does (damage squadrons first).
+    Without it a total is written as-is, in name order.
+    """
     lines = [f"[{fit['ship_name']}, {fit['name']}]"]
 
     for cat in ["low", "med", "high", "rig", "subsystem"]:
@@ -159,21 +168,29 @@ def _to_eft(fit: dict) -> str:
         lines.append("")
 
     # Drones, fighters and cargo carry stack quantities ("Name xN") rather
-    # than one line per unit — the fitting tool's own EFT import expects the
-    # same "xN" suffix for these bay-style groups. The import parser has no
-    # dedicated fighter slot (it falls back to treating an unrecognized item
-    # category as cargo), so a fighter line round-trips as a cargo item
-    # rather than vanishing, which is what dropping it outright used to do.
+    # than one line per unit, and always write the suffix even for 1: pyfa
+    # drops a bare drone/fighter line. Fighters are their own block (blank
+    # line on both sides), split into squadrons when sizes are known.
     for cat in ["drone", "fighter", "cargo"]:
         items = fit["groups"].get(cat, [])
-        if not items:
-            continue
+        if cat == "fighter" and fighter_info:
+            items = sorted(items, key=lambda i: fighter_order_key(
+                fighter_info.get(i["type_id"]), i["name"]))
+        wrote = False
         for item in items:
-            if item["quantity"] > 1:
-                lines.append(f"{item['name']} x{item['quantity']}")
+            qty = item["quantity"] or 1
+            if cat == "fighter":
+                parts = split_quantity(
+                    qty, int((fighter_info or {}).get(item["type_id"], {}).get("max_size", 0)))
             else:
-                lines.append(item["name"])
-        lines.append("")
+                parts = [qty]
+            for part in parts:
+                if part < 1:
+                    continue
+                lines.append(f"{item['name']} x{part}")
+                wrote = True
+        if wrote:
+            lines.append("")
 
     return "\n".join(lines).rstrip()
 
@@ -332,6 +349,8 @@ async def fitting_eft(
         type_names = await sde.type_ids_to_names(db, list(all_ids))
         ship_name = type_names.get(raw["ship_type_id"], f"Ship {raw['ship_type_id']}")
         fit = _parse_fitting(raw, type_names, ship_name, {})
-        return PlainTextResponse(_to_eft(fit))
+        fighter_ids = [i["type_id"] for i in fit["groups"].get("fighter", [])]
+        fighter_info = await sde.get_fighter_info_bulk(db, fighter_ids) if fighter_ids else {}
+        return PlainTextResponse(_to_eft(fit, fighter_info))
     except Exception:
         return PlainTextResponse("Error generating EFT")

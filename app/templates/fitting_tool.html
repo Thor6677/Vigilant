@@ -301,6 +301,20 @@
     </div>
 </div>
 
+{# Fighters (ISS-136). Shown when the hull has launch tubes or the fit holds
+   any fighter, so squadrons never disappear. Added from the module browser
+   (Drones > Fighters); each squadron is its own row. #}
+<div class="b-section" id="section-fighter" style="display:none;">
+    <div class="b-section-head">
+        <span class="b-label">Fighters</span>
+    </div>
+    <div id="fighter-summary" class="b-muted-sm" style="padding:0.2rem 0.75rem;"></div>
+    <div id="fighter-warn" class="fit-limit-note" role="status" hidden></div>
+    <div id="fighter-limit-note" class="fit-limit-note" role="status" aria-live="polite" hidden></div>
+    <div id="slots-fighter"></div>
+    <div class="b-muted-sm" style="padding:0.25rem 0.75rem;">Add squadrons from the module browser (Drones &gt; Fighters). The dot launches a squadron or returns it to the hangar.</div>
+</div>
+
 </div>
 </div>
 
@@ -394,7 +408,8 @@ var state = {
 };
 
 /* Ship slot limits — populated from stats response */
-var shipSlots = {high: 8, med: 8, low: 8, rig: 3, subsystem: 0, drone_bay: null, drone_bandwidth: null};
+var shipSlots = {high: 8, med: 8, low: 8, rig: 3, subsystem: 0, drone_bay: null, drone_bandwidth: null,
+                 fighter_tubes: null, fighter_light: null, fighter_support: null, fighter_heavy: null};
 var overheatCache = {};  // type_id -> bool
 
 function getSlotCount(slot) {
@@ -406,7 +421,7 @@ function getSlotLimit(slot) {
 }
 
 function isSlotFull(slot) {
-    if (slot === 'drone' || slot === 'cargo') return false;
+    if (slot === 'drone' || slot === 'cargo' || slot === 'fighter') return false;
     return getSlotCount(slot) >= getSlotLimit(slot);
 }
 
@@ -470,6 +485,7 @@ function applyState() {
     document.getElementById('section-implant').style.display = '';
     document.getElementById('section-booster').style.display = '';
 
+    _resetFighterShipData();
     fetchShipSlots(state.shipTypeId);
     renderSlots();
     renderImplantSlots();
@@ -531,6 +547,9 @@ function _browserAddNoteText(typeId, typeName, slot) {
         where = 'drones ×' + (stack ? stack.quantity : 1);
     } else if (slot === 'cargo') {
         where = 'cargo';
+    } else if (slot === 'fighter') {
+        var sq = state.items[state.items.length - 1];
+        where = 'squadron ×' + (sq ? sq.quantity : 1) + (sq && sq.online === false ? ' (hangar)' : ' (launched)');
     } else {
         where = _rackFill(slot);
     }
@@ -674,10 +693,21 @@ function selectShip(typeId, typeName) {
     state.fittingId = null;
     state.fittingName = 'Unnamed';
     saveState();
+    _resetFighterShipData();
     fetchShipSlots(typeId);
     applyState();
     document.getElementById('ship-results').style.display = 'none';
     if (currentBrowseGroup !== null) loadBrowseItems(currentBrowseGroup);
+}
+
+/* Launch limits and the hangar total belong to one hull: forget them when
+   the hull changes, so nothing is judged against the previous ship. */
+function _resetFighterShipData() {
+    shipSlots.fighter_tubes = null;
+    shipSlots.fighter_light = null;
+    shipSlots.fighter_support = null;
+    shipSlots.fighter_heavy = null;
+    fighterHangarTotal = null;
 }
 
 function fetchShipSlots(typeId) {
@@ -691,6 +721,7 @@ function fetchShipSlots(typeId) {
     fetch(url)
         .then(function(r) { return r.json(); })
         .then(function(data) {
+            if (typeId !== state.shipTypeId) return;   // answer for a ship no longer picked
             shipSlots.high = data.high || 0;
             shipSlots.med = data.med || 0;
             shipSlots.low = data.low || 0;
@@ -701,6 +732,10 @@ function fetchShipSlots(typeId) {
             // null = not known yet, so nothing is refused before the answer lands.
             shipSlots.drone_bay = data.drone_bay == null ? null : data.drone_bay;
             shipSlots.drone_bandwidth = data.drone_bandwidth == null ? null : data.drone_bandwidth;
+            shipSlots.fighter_tubes = data.fighter_tubes == null ? null : data.fighter_tubes;
+            shipSlots.fighter_light = data.fighter_light == null ? null : data.fighter_light;
+            shipSlots.fighter_support = data.fighter_support == null ? null : data.fighter_support;
+            shipSlots.fighter_heavy = data.fighter_heavy == null ? null : data.fighter_heavy;
             renderSlots();
         });
 }
@@ -865,7 +900,7 @@ function _fmtM3(v) {
 }
 
 function _limitNote(text) {
-    ['fit-limit-note', 'drone-limit-note'].forEach(function(id) {
+    ['fit-limit-note', 'drone-limit-note', 'fighter-limit-note'].forEach(function(id) {
         var el = document.getElementById(id);
         if (!el) return;
         el.textContent = text;
@@ -922,6 +957,287 @@ function changeDroneQty(index, delta) {
     saveState();
     renderSlots();
     recalcStats();
+}
+
+/* ── Fighters (ISS-136) ─────────────────────────────────────────────────────
+   One item per squadron, never merged by type: quantity is the squadron size
+   (1..max_size) and online is whether it sits in a launch tube (false = a
+   reserve in the hangar). Launching needs a free tube and a free slot of its
+   class; the hangar is a volume limit over launched and reserve squadrons
+   alike. Class, size and volume come from the browse rows and, for fighters
+   that arrived by import or restore, from the stats response. The hangar
+   total is the stats-reported one (Fighter Hangar Management raises it), so
+   nothing is refused on volume until the first answer lands. */
+var fighterInfo = {};          // type_id -> {class, max_size, volume}
+var fighterHangarTotal = null; // m3, from the stats response
+var FIGHTER_CLASSES = ['light', 'support', 'heavy'];
+var NOT_LAUNCHABLE = 'not a launchable fighter';
+
+function _fighterClass(typeId) {
+    var info = fighterInfo[typeId];
+    return info ? info['class'] : undefined;
+}
+
+/* Reasons a fighter can never launch from this ship, whatever else is
+   fitted: '' when nothing rules it out. Unknown limits (null) rule nothing
+   out, and neither does having no ship picked. */
+function _fighterHardProblem(typeId) {
+    var cls = _fighterClass(typeId);
+    if (cls === 'standup') return 'structure fighters only launch from Upwell structures';
+    if (!state.shipTypeId) return '';
+    // The engine's order: a class-less fighter is "not launchable" before the tube checks.
+    if (cls !== undefined && FIGHTER_CLASSES.indexOf(cls) < 0) return NOT_LAUNCHABLE;
+    if (shipSlots.fighter_tubes != null && shipSlots.fighter_tubes <= 0) return 'this ship has no fighter tubes';
+    if (FIGHTER_CLASSES.indexOf(cls) >= 0) {
+        var lim = shipSlots['fighter_' + cls];
+        if (lim != null && lim <= 0) return 'this ship cannot launch ' + cls + ' fighters';
+    }
+    return '';
+}
+
+/* '' when one more squadron of this type can launch given `used` (launched
+   counts: tubes and one per class), otherwise the reason. */
+function _fighterFit(typeId, used) {
+    var why = _fighterHardProblem(typeId);
+    if (why) return why;
+    if (!state.shipTypeId) return '';
+    var cls = _fighterClass(typeId);
+    if (shipSlots.fighter_tubes != null && used.tubes >= shipSlots.fighter_tubes) return 'no free launch tube';
+    if (cls) {
+        var lim = shipSlots['fighter_' + cls];
+        if (lim != null && used[cls] >= lim) return 'no free ' + cls + ' squadron slot';
+    }
+    return '';
+}
+
+/* Whether the engine would try to launch this item: a missing flag means
+   launched, any falsy one a reserve. */
+function _fighterWanted(item) {
+    return !('online' in item) || !!item.online;
+}
+
+/* The engine's launch accounting, replayed in request order: each wanted
+   squadron takes a tube and a class slot only if it passes _fighterFit, so
+   counts never include a squadron the engine would drop (over the limits,
+   structure fighters, unknown classes). `forceIdx` treats that item as
+   launched whatever its flag says (the launch toggle); `extraType` appends a
+   hypothetical new squadron (adding one). Returns {used, status, extra}:
+   status[idx] is null for a reserve, '' when counted, else the reason. */
+function _fighterWalk(forceIdx, extraType) {
+    var used = {tubes: 0, light: 0, support: 0, heavy: 0};
+    var status = {};
+    function take(typeId) {
+        var why = _fighterFit(typeId, used);
+        if (!why) {
+            used.tubes++;
+            var cls = _fighterClass(typeId);
+            if (used[cls] !== undefined) used[cls]++;
+        }
+        return why;
+    }
+    state.items.forEach(function(i, idx) {
+        if (i.slot !== 'fighter') return;
+        // Like the engine, an empty squadron is skipped, never counted.
+        if (!((parseInt(i.quantity, 10) || 0) >= 1)) { status[idx] = null; return; }
+        status[idx] = (idx === forceIdx || _fighterWanted(i)) ? take(i.type_id) : null;
+    });
+    return {used: used, status: status, extra: extraType == null ? null : take(extraType)};
+}
+
+/* '' when the squadron at `index` can be launched now, otherwise the reason. */
+function fighterLaunchProblem(index) {
+    var item = state.items[index];
+    if (!item) return '';
+    return _fighterWalk(index).status[index] || '';
+}
+
+function _fighterHangarUsed() {
+    var used = 0;
+    state.items.forEach(function(i) {
+        if (i.slot !== 'fighter') return;
+        var info = fighterInfo[i.type_id];
+        // The engine clamps a squadron to its maximum, and so does this.
+        var q = info && info.max_size > 0 ? Math.min(i.quantity, info.max_size) : i.quantity;
+        used += (info && info.volume ? info.volume : 0) * q;
+    });
+    return used;
+}
+
+/* '' when `qty` more fighters of this type fit in the hangar, otherwise the
+   reason. Reserves count: the hangar holds every squadron. */
+function fighterRoomProblem(typeId, qty) {
+    var total = fighterHangarTotal;
+    if (!state.shipTypeId || total == null) return '';
+    var info = fighterInfo[typeId];
+    if (!info || !info.volume) return '';
+    var used = _fighterHangarUsed();
+    if (used + info.volume * qty > total + 1e-9) {
+        return 'Not added \u00b7 fighter hangar full (' + _fmtM3(used) + ' / ' + _fmtM3(total) + ' m\u00b3)';
+    }
+    return '';
+}
+
+function addFighter(typeId, typeName, info) {
+    if (info) {
+        var cur = fighterInfo[typeId] || {};
+        if (info['class'] !== undefined) cur['class'] = info['class'];
+        if (info.max_size !== undefined) cur.max_size = info.max_size;
+        if (info.volume != null && !isNaN(info.volume)) cur.volume = info.volume;
+        fighterInfo[typeId] = cur;
+    }
+    var hard = _fighterHardProblem(typeId);
+    // A class-less fighter is kept in the hangar (with the reason), not refused.
+    if (hard && hard !== NOT_LAUNCHABLE) { _limitNote('Not added \u00b7 ' + hard); return false; }
+    var max = fighterInfo[typeId] && fighterInfo[typeId].max_size > 0 ? fighterInfo[typeId].max_size : 1;
+    var why = fighterRoomProblem(typeId, max);
+    if (why) { _limitNote(why); return false; }
+    // Launched when a tube and a slot of its class are free, otherwise a
+    // reserve in the hangar.
+    var noRoom = _fighterWalk(-1, typeId).extra;
+    state.items.push({
+        type_id: typeId,
+        type_name: typeName,
+        slot: 'fighter',
+        quantity: max,
+        online: !noRoom
+    });
+    if (noRoom) _limitNote('Added to the hangar \u00b7 ' + noRoom);
+    saveState();
+    renderSlots();
+    recalcStats();
+    return true;
+}
+
+function changeFighterQty(index, delta) {
+    if (this && this.dataset && this.dataset.itemIdx !== undefined) {
+        index = parseInt(this.dataset.itemIdx, 10);
+        delta = parseInt(this.dataset.delta, 10);
+    }
+    var item = state.items[index];
+    if (!item) return;
+    var info = fighterInfo[item.type_id];
+    if (delta > 0) {
+        if (info && info.max_size > 0 && item.quantity + delta > info.max_size) {
+            _limitNote('Not added \u00b7 squadron is full (' + info.max_size + ' fighters)');
+            return;
+        }
+        var why = fighterRoomProblem(item.type_id, delta);
+        if (why) { _limitNote(why); return; }
+    } else if (item.quantity + delta < 1) {
+        return;   // a squadron keeps at least one fighter; use the x to remove it
+    }
+    item.quantity += delta;
+    // A legacy squadron above its maximum comes back down to it.
+    if (info && info.max_size > 0 && item.quantity > info.max_size) item.quantity = info.max_size;
+    saveState();
+    renderSlots();
+    recalcStats();
+}
+
+function toggleFighterLaunch(index) {
+    if (this && this.dataset && this.dataset.itemIdx !== undefined) {
+        index = parseInt(this.dataset.itemIdx, 10);
+    }
+    var item = state.items[index];
+    if (!item) return;
+    if (!_fighterWanted(item)) {
+        var why = fighterLaunchProblem(index);
+        if (why) { _limitNote('Not launched \u00b7 ' + why); return; }
+        item.online = true;
+    } else {
+        item.online = false;
+    }
+    saveState();
+    renderSlots();
+    recalcStats();
+}
+
+function _syncFighterInfo() {
+    var src = document.querySelector('#stats-panel [data-fighter-info]');
+    if (!src) return;
+    try {
+        var info = JSON.parse(src.getAttribute('data-fighter-info') || '{}');
+        if (info && typeof info === 'object') {
+            Object.keys(info).forEach(function(k) { fighterInfo[parseInt(k, 10)] = info[k]; });
+        }
+    } catch (e) { /* keep what we have */ }
+    // A hull with no hangar (0) is a hull that takes no fighters: unknown,
+    // not "full", so a stale answer from the previous ship refuses nothing.
+    var total = parseFloat(src.getAttribute('data-fighter-hangar'));
+    fighterHangarTotal = total > 0 ? total : null;
+    renderFighters();
+}
+
+/* The Drones section goes away on a fighter hull (no bay) unless drones are
+   somehow fitted, so nothing hides a fitted item. */
+function _droneSectionHidden() {
+    return shipSlots.fighter_tubes > 0 && shipSlots.drone_bay === 0 &&
+        !state.items.some(function(i) { return i.slot === 'drone'; });
+}
+
+function _fighterSummary() {
+    var used = _fighterWalk(-1).used;
+    var tubes = shipSlots.fighter_tubes;
+    var parts = ['Tubes ' + used.tubes + (tubes == null ? '' : '/' + tubes)];
+    FIGHTER_CLASSES.forEach(function(cls) {
+        var lim = shipSlots['fighter_' + cls];
+        if (lim) parts.push(cls.charAt(0).toUpperCase() + cls.slice(1) + ' ' + used[cls] + '/' + lim);
+    });
+    var hangar = _fighterHangarUsed();
+    if (hangar > 0 || fighterHangarTotal != null) {
+        parts.push('Hangar ' + _fmtM3(hangar) + (fighterHangarTotal == null ? '' : '/' + _fmtM3(fighterHangarTotal)) + ' m\u00b3');
+    }
+    return parts.join(' \u00b7 ');
+}
+
+function renderFighters() {
+    var section = document.getElementById('section-fighter');
+    var container = document.getElementById('slots-fighter');
+    var items = state.items.filter(function(i) { return i.slot === 'fighter'; });
+    // Shown on a hull with tubes, and whenever a fighter is fitted at all.
+    section.style.display = (shipSlots.fighter_tubes > 0 || items.length > 0) ? '' : 'none';
+    var warn = document.getElementById('fighter-warn');
+    var tubeless = shipSlots.fighter_tubes === 0 && items.length > 0;
+    warn.textContent = tubeless ? 'This ship has no fighter tubes \u00b7 these squadrons stay in the hangar and add no damage' : '';
+    warn.hidden = !tubeless;
+    document.getElementById('fighter-summary').textContent = _fighterSummary();
+    // Walk in order, as the engine does, so a launched squadron that gets no
+    // tube or slot is shown as such instead of as launched.
+    var walk = _fighterWalk(-1);
+    var html = '';
+    state.items.forEach(function(item, globalIdx) {
+        if (item.slot !== 'fighter') return;
+        var info = fighterInfo[item.type_id] || {};
+        var cls = info['class'];
+        var reserve = walk.status[globalIdx] === null;
+        var bad = walk.status[globalIdx] || '';
+        var qty = parseInt(item.quantity, 10) || 0;
+        var overMax = info.max_size > 0 && qty > info.max_size;
+        // Amber, not the legend's red (overheated): launched but not counted.
+        var dotColor = reserve ? 'var(--border)' : (bad ? 'var(--warning, #d9a441)' : 'var(--success)');
+        var dotTitle = reserve ? 'In the hangar \u2014 click to launch'
+            : (bad ? 'Launched but not counted (' + bad + ') \u2014 click to return to the hangar'
+                   : 'Launched \u2014 click to return to the hangar');
+        var sub = (cls === 'standup' ? 'structure' : (cls || 'fighter')) + (reserve ? ' \u00b7 hangar' : (bad ? ' \u00b7 not counted' : ' \u00b7 launched'));
+        var maxTitle = info.max_size > 0 ? ' title="Squadron of up to ' + info.max_size + '"' : '';
+        html += '<div class="b-table-row" data-type-id="' + item.type_id + '" style="padding:0.2rem 0.75rem;display:flex;align-items:center;gap:0.4rem;opacity:' + (reserve ? '0.6' : '1') + ';">' +
+            '<button class="fit-ctl" data-click="toggleFighterLaunch" data-item-idx="' + globalIdx + '" aria-label="' + dotTitle + '" style="background:none;border:none;color:' + dotColor + ';cursor:pointer;font-size:8px;padding:0 0.15rem;" title="' + dotTitle + '">&#9679;</button>' +
+            '<img src="https://images.evetech.net/types/' + item.type_id + '/icon?size=32" style="width:20px;height:20px;border:1px solid var(--border);cursor:pointer;" data-click="showModuleInfo" data-type-id="' + item.type_id + '" title="Show info" data-on-error="hide">' +
+            '<span class="fit-dname" style="flex:1;min-width:0;font-size:11px;color:var(--text);">' + escapeHtml(item.type_name) +
+                '<span style="display:block;font-size:9px;color:var(--muted);text-transform:capitalize;">' + escapeHtml(sub) + '</span></span>' +
+            '<span class="skill-warn" title="">&#9888;</span>' +
+            '<button class="m-hide" data-click="showModuleInfo" data-type-id="' + item.type_id + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.2rem;font-style:italic;font-family:serif;" title="Show info">i</button>' +
+            '<div style="display:flex;align-items:center;gap:0.25rem;"' + maxTitle + '>' +
+            '<button class="fit-ctl" data-click="changeFighterQty" data-item-idx="' + globalIdx + '" data-delta="-1" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.15rem;">-</button>' +
+            '<span style="font-size:10px;color:' + (overMax ? 'var(--danger)' : 'var(--accent)') + ';min-width:16px;text-align:center;"' + (overMax ? ' title="Above the squadron maximum of ' + info.max_size + ': counted as ' + info.max_size + '"' : '') + '>' + qty + '</span>' +
+            '<button class="fit-ctl" data-click="changeFighterQty" data-item-idx="' + globalIdx + '" data-delta="1" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 0.15rem;">+</button>' +
+            '</div>' +
+            '<button class="fit-ctl" data-click="removeItem" data-item-idx="' + globalIdx + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0 0.25rem;" title="Remove">&times;</button>' +
+            '</div>';
+    });
+    container.innerHTML = html;
+    // The skill check ran against the rows this just replaced.
+    _applySkillWarnings(container);
 }
 
 /* ── Render Slots ─────────────────────────────────────────────────────────── */
@@ -1005,6 +1321,9 @@ function renderSlots() {
             '<button class="fit-ctl" data-click="removeItem" data-item-idx="' + globalIdx + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0 0.25rem;" title="Remove">&times;</button>' +
             '</div>';
     });
+    document.getElementById('section-drone').style.display = _droneSectionHidden() ? 'none' : '';
+
+    renderFighters();
 }
 
 /* ── Implants (10 slots, auto-routed by implantness) ───────────────── */
@@ -1492,11 +1811,13 @@ function recalcStats() {
         if (seq !== _statsSeq) return;
         document.getElementById('stats-panel').innerHTML = html;
         _syncDroneVolumes();
+        _syncFighterInfo();
         _fitSumBarUpdate();
     })
     .catch(function(e) {
         if (seq !== _statsSeq) return;
         document.getElementById('stats-panel').innerHTML = _fitErrorHtml(e.status);
+        fighterHangarTotal = null;   // no answer, so no known total
         _fitSumBarUpdate();
     });
     /* Skill check runs in parallel with the stats fetch — warnings don't
@@ -1561,7 +1882,31 @@ function onSkillCharChange() {
     }
 }
 
+/* The last skill-check answer, so rows redrawn after it (the fighter section
+   re-renders on every stats response) get their warnings back. */
+var _lastMissing = {};
+
+/* Show the warning on each fitting row under `root` that the last
+   skill-check flagged. */
+function _applySkillWarnings(root) {
+    root.querySelectorAll('.b-table-row[data-type-id]').forEach(function(row) {
+        var tid = row.dataset.typeId;
+        var warn = row.querySelector('.skill-warn');
+        if (!tid || !warn) return;
+        var entries = _lastMissing[tid];
+        if (entries && entries.length) {
+            warn.style.display = 'inline';
+            warn.title = _formatMissing(entries);
+            row.classList.add('fit-row-warn');
+        } else {
+            warn.style.display = 'none';
+            row.classList.remove('fit-row-warn');
+        }
+    });
+}
+
 function _clearSkillWarnings() {
+    _lastMissing = {};
     document.querySelectorAll('.b-table-row.fit-row-warn').forEach(function(r) {
         r.classList.remove('fit-row-warn');
     });
@@ -1611,20 +1956,8 @@ function refreshSkillWarnings() {
         }
 
         /* Module / drone rows. */
-        document.querySelectorAll('.b-table-row[data-type-id]').forEach(function(row) {
-            var tid = row.dataset.typeId;
-            var warn = row.querySelector('.skill-warn');
-            if (!tid || !warn) return;
-            var entries = missing[tid];
-            if (entries && entries.length) {
-                warn.style.display = 'inline';
-                warn.title = _formatMissing(entries);
-                row.classList.add('fit-row-warn');
-            } else {
-                warn.style.display = 'none';
-                row.classList.remove('fit-row-warn');
-            }
-        });
+        _lastMissing = missing;
+        _applySkillWarnings(document);
     })
     .catch(function(e) {
         console.warn('skill-check failed:', e);
@@ -1770,6 +2103,12 @@ function _flashButtonError(btn, msg) {
     }, 2500);
 }
 
+/* Notes from an import (fighters kept in the hangar, capped squadron counts):
+   shown in the limit note, which sets them as text, so nothing is HTML. */
+function _importWarnings(data) {
+    if (data && data.warnings && data.warnings.length) _limitNote(data.warnings.join(' \u00b7 '));
+}
+
 function charImportLoad(idx) {
     if (this && this.dataset && this.dataset.fitIdx !== undefined) {
         idx = parseInt(this.dataset.fitIdx, 10);
@@ -1783,6 +2122,7 @@ function charImportLoad(idx) {
         state.items = data.items;
         saveState();
         applyState();
+        _importWarnings(data);
         hideCharImportModal();
     }, function(errMsg) { _flashButtonError(btn, errMsg); });
 }
@@ -1870,6 +2210,7 @@ function doImportEFT() {
         // /tools/fitting/can-overheat — without this, a hardener imported
         // via EFT would show no overheat step at all.
         refreshOverheatCache();
+        _importWarnings(data);
         hideImportModal();
     });
 }
@@ -2229,8 +2570,16 @@ function renderBrowseItems(items) {
         var canFit = item.can_fit !== false;
         var opacity = canFit ? '1' : '0.35';
         var cursor = canFit ? 'pointer' : 'not-allowed';
+        var isFighter = item.slot_type === 'fighter';
+        if (isFighter) {
+            fighterInfo[item.type_id] = {'class': item.fighter_class || null, max_size: item.squadron_max || 0, volume: item.volume || 0};
+        }
+        // A fighter's badge says which squadron class it is and how big.
+        var badgeText = isFighter && item.fighter_class
+            ? item.fighter_class + (item.squadron_max ? ' \u00d7' + item.squadron_max : '')
+            : item.slot_type;
         var slotBadge = item.slot_type
-            ? '<span style="font-size:9px;color:var(--muted);text-transform:uppercase;padding:1px 4px;border:1px solid var(--border);border-radius:2px;">' + item.slot_type + '</span>'
+            ? '<span style="font-size:9px;color:var(--muted);text-transform:uppercase;padding:1px 4px;border:1px solid var(--border);border-radius:2px;">' + escapeHtml(badgeText) + '</span>'
             : '';
         // The title is hover-only, so phones also get the reason as text.
         var restrictLabel = !canFit ? ' <span style="font-size:9px;color:var(--danger);" title="Cannot fit this ship">\u2716</span><span class="m-only fit-nofit-why">Cannot fit this ship</span>' : '';
@@ -2239,7 +2588,8 @@ function renderBrowseItems(items) {
         // fit-brow: a 40px row on phones (mobile R6 T4).
         var rowClass = (canFit ? 'b-hover-accent ' : '') + 'fit-brow';
         var clickAttrs = canFit
-            ? ' data-click="addModuleFromBrowser" data-type-id="' + item.type_id + '" data-type-name="' + escapeHtml(item.type_name) + '" data-slot-type="' + (item.slot_type || 'cargo') + '" data-volume="' + (item.volume || 0) + '"'
+            ? ' data-click="addModuleFromBrowser" data-type-id="' + item.type_id + '" data-type-name="' + escapeHtml(item.type_name) + '" data-slot-type="' + (item.slot_type || 'cargo') + '" data-volume="' + (item.volume || 0) + '"' +
+              (isFighter ? ' data-fighter-class="' + escapeHtml(item.fighter_class || '') + '" data-squadron-max="' + (item.squadron_max || 0) + '"' : '')
             : '';
         html += '<div class="' + rowClass + '" style="padding:0.35rem 0.75rem;cursor:' + cursor + ';display:flex;align-items:center;gap:0.5rem;border-bottom:1px solid var(--border);opacity:' + opacity + ';"' +
                 clickAttrs + '>' +
@@ -2258,9 +2608,15 @@ function addModuleFromBrowser(typeId, typeName, slotType, volume) {
         if (this.dataset.volume !== undefined) volume = parseFloat(this.dataset.volume);
     }
     if (slotType === 'fighter') {
-        // ISS-136: fighters are not modelled yet. Say so rather than adding
-        // nothing, or filing them under cargo where they would do nothing.
-        _limitNote('Not added \u00b7 fighters are not supported in the fitting tool yet');
+        // ISS-136: a squadron of its own, never merged with another of the
+        // same type. Class and size ride on the row; volume on the usual one.
+        var finfo = {volume: volume};
+        if (this && this.dataset && this.dataset.fighterClass !== undefined) {
+            finfo['class'] = this.dataset.fighterClass || null;
+            finfo.max_size = parseInt(this.dataset.squadronMax, 10) || 0;
+        }
+        if (!addFighter(typeId, typeName, finfo)) return;
+        _noteBrowserAdd(_browserAddNoteText(typeId, typeName, slotType));
         return;
     }
     if (slotType !== 'drone' && slotType !== 'cargo' && isSlotFull(slotType)) {
@@ -2344,7 +2700,7 @@ addModule = function(typeId, typeName, slot) {
 function refreshOverheatCache() {
     var typeIds = [];
     state.items.forEach(function(item) {
-        if (item.slot !== 'drone' && item.slot !== 'cargo' && item.slot !== 'rig') {
+        if (item.slot !== 'drone' && item.slot !== 'cargo' && item.slot !== 'rig' && item.slot !== 'fighter') {
             if (overheatCache[item.type_id] === undefined) typeIds.push(item.type_id);
         }
     });

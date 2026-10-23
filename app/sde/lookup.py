@@ -16,7 +16,23 @@ from app.db.sde_models import (
     SDEGroup, SDETypeSkillReq, SDESkillInfo, SDECertificate, SDECertificateSkill,
     SDEShipMastery,
     SDEWormholeClass, SDEWormholeType, SDEMoon, SDEStar, SDEPlanet,
-    SDEModuleSlot, SDEMarketGroup, SDETypeDogmaAttribute, SDEMeta,
+    SDEModuleSlot, SDEMarketGroup, SDETypeDogmaAttribute, SDETypeEffect, SDEMeta,
+)
+from app.fitting.constants import (
+    ATTR_FIGHTER_CAPACITY,
+    ATTR_FIGHTER_HEAVY_SLOTS,
+    ATTR_FIGHTER_IS_HEAVY,
+    ATTR_FIGHTER_IS_LIGHT,
+    ATTR_FIGHTER_IS_STANDUP_HEAVY,
+    ATTR_FIGHTER_IS_STANDUP_LIGHT,
+    ATTR_FIGHTER_IS_STANDUP_SUPPORT,
+    ATTR_FIGHTER_IS_SUPPORT,
+    ATTR_FIGHTER_LIGHT_SLOTS,
+    ATTR_FIGHTER_SQUADRON_MAX_SIZE,
+    ATTR_FIGHTER_SUPPORT_SLOTS,
+    ATTR_FIGHTER_TUBES,
+    EFFECT_FIGHTER_ATTACK_MISSILE,
+    EFFECT_FIGHTER_MISSILES,
 )
 
 # Cached jump graph + cloning stations (loaded once, refreshed after 1h).
@@ -1245,28 +1261,20 @@ async def get_market_group_items(
         .where(SDEModuleSlot.type_id.in_(type_ids))
     )).fetchall())
 
-    # Drones have no sde_module_slots row, so they came back as null and the
-    # fitting tool added them to the cargo hold. Ask the same classifier the
-    # EFT import uses; only its "drone" answers are kept, so charges and other
-    # cargo items stay null and show no slot badge (ISS-126).
+    # Drones and fighters have no sde_module_slots row, so they came back as
+    # null and the fitting tool added them to the cargo hold. Ask the same
+    # classifier the EFT import uses; only its "drone" and "fighter" answers
+    # are kept, so charges and other cargo items stay null and show no slot
+    # badge (ISS-126, ISS-136).
     unslotted = [t for t in type_ids if t not in slot_by_tid]
     if unslotted:
         fallback = await get_module_slot_types_bulk(db, unslotted)
-        slot_by_tid.update({t: s for t, s in fallback.items() if s == "drone"})
+        slot_by_tid.update({t: s for t, s in fallback.items() if s in ("drone", "fighter")})
 
-        # Fighters have no slot row either and the fitting tool cannot model
-        # them yet, so say so instead of reporting null, which the page
-        # treated as "add to cargo" and then dropped without a word (ISS-136).
-        group_by_tid = {r.type_id: r.group_id for r in rows}
-        unclassified = [t for t in unslotted if t not in slot_by_tid and group_by_tid.get(t)]
-        if unclassified:
-            cat_rows = dict((await db.execute(
-                select(SDEGroup.group_id, SDEGroup.category_id)
-                .where(SDEGroup.group_id.in_({group_by_tid[t] for t in unclassified}))
-            )).fetchall())
-            for t in unclassified:
-                if cat_rows.get(group_by_tid[t]) == CATEGORY_FIGHTER:
-                    slot_by_tid[t] = "fighter"
+    fighter_info = {}
+    fighter_tids = [t for t in type_ids if slot_by_tid.get(t) == "fighter"]
+    if fighter_tids:
+        fighter_info = await get_fighter_info_bulk(db, fighter_tids)
 
     return [
         {
@@ -1275,9 +1283,125 @@ async def get_market_group_items(
             "group_id": r.group_id,
             "slot_type": slot_by_tid.get(r.type_id),
             "volume": r.volume or 0,
+            **(
+                {
+                    "fighter_class": fighter_info[r.type_id]["class"],
+                    "squadron_max": fighter_info[r.type_id]["max_size"],
+                }
+                if r.type_id in fighter_info
+                else {}
+            ),
         }
         for r in rows
     ]
+
+
+# ── Fighters ─────────────────────────────────────────────────────────────
+
+# Fighter type attr -> squadron class. Any standup flag wins: structure
+# fighters can never launch from a ship, whatever size they are.
+_FIGHTER_CLASS_ATTRS = (
+    (ATTR_FIGHTER_IS_STANDUP_LIGHT, "standup"),
+    (ATTR_FIGHTER_IS_STANDUP_SUPPORT, "standup"),
+    (ATTR_FIGHTER_IS_STANDUP_HEAVY, "standup"),
+    (ATTR_FIGHTER_IS_LIGHT, "light"),
+    (ATTR_FIGHTER_IS_SUPPORT, "support"),
+    (ATTR_FIGHTER_IS_HEAVY, "heavy"),
+)
+
+
+async def get_fighter_info_bulk(db: AsyncSession, type_ids: list[int]) -> dict[int, dict]:
+    """{type_id: {"class", "max_size", "volume", "primary"}} for fighter types,
+    in three queries however many ids come in (attributes, volumes, effects).
+
+    class: "light" / "support" / "heavy" from the 2212-2214 flags, "standup"
+    when any of 2740-2742 is set, else None. max_size is attr 2215 (0 when the
+    type lacks it). volume is the hangar volume of ONE fighter. primary is
+    "attack" when the type has effect 6465, else "missiles" when it has 6431
+    (superiority fighters, whose only weapon it is), else None. has_attack /
+    has_missiles say which of the two abilities the type carries at all (an
+    attack fighter usually has both).
+    """
+    type_ids = list({t for t in type_ids if t is not None})
+    if not type_ids:
+        return {}
+
+    wanted_attrs = [ATTR_FIGHTER_SQUADRON_MAX_SIZE] + [a for a, _ in _FIGHTER_CLASS_ATTRS]
+    attr_rows = (await db.execute(
+        select(SDETypeDogmaAttribute.type_id, SDETypeDogmaAttribute.attribute_id,
+               SDETypeDogmaAttribute.value)
+        .where(SDETypeDogmaAttribute.type_id.in_(type_ids))
+        .where(SDETypeDogmaAttribute.attribute_id.in_(wanted_attrs))
+    )).fetchall()
+    attrs: dict[int, dict[int, float]] = {}
+    for tid, aid, val in attr_rows:
+        attrs.setdefault(tid, {})[aid] = val
+
+    volumes = dict((await db.execute(
+        select(SDEType.type_id, SDEType.volume).where(SDEType.type_id.in_(type_ids))
+    )).fetchall())
+
+    effect_rows = (await db.execute(
+        select(SDETypeEffect.type_id, SDETypeEffect.effect_id)
+        .where(SDETypeEffect.type_id.in_(type_ids))
+        .where(SDETypeEffect.effect_id.in_(
+            [EFFECT_FIGHTER_ATTACK_MISSILE, EFFECT_FIGHTER_MISSILES]))
+    )).fetchall()
+    effects: dict[int, set[int]] = {}
+    for tid, eid in effect_rows:
+        effects.setdefault(tid, set()).add(eid)
+
+    out: dict[int, dict] = {}
+    for tid in type_ids:
+        a = attrs.get(tid, {})
+        cls = next((name for aid, name in _FIGHTER_CLASS_ATTRS if a.get(aid)), None)
+        fx = effects.get(tid, set())
+        if EFFECT_FIGHTER_ATTACK_MISSILE in fx:
+            primary = "attack"
+        elif EFFECT_FIGHTER_MISSILES in fx:
+            primary = "missiles"
+        else:
+            primary = None
+        out[tid] = {
+            "class": cls,
+            "max_size": int(a.get(ATTR_FIGHTER_SQUADRON_MAX_SIZE, 0)),
+            "volume": float(volumes.get(tid) or 0),
+            "primary": primary,
+            "has_attack": EFFECT_FIGHTER_ATTACK_MISSILE in fx,
+            "has_missiles": EFFECT_FIGHTER_MISSILES in fx,
+        }
+    return out
+
+
+async def get_fighter_ship_limits(db: AsyncSession, ship_type_ids: list[int]) -> dict[int, dict]:
+    """{ship_type_id: {"tubes", "light", "support", "heavy", "hangar_base"}}.
+    A missing attribute is 0, so a hull with no tubes gets all zeros. The
+    hangar is the raw base value; Fighter Hangar Management is applied by the
+    engine, not here."""
+    ship_type_ids = list({t for t in ship_type_ids if t is not None})
+    if not ship_type_ids:
+        return {}
+    keys = {
+        ATTR_FIGHTER_TUBES: "tubes",
+        ATTR_FIGHTER_LIGHT_SLOTS: "light",
+        ATTR_FIGHTER_SUPPORT_SLOTS: "support",
+        ATTR_FIGHTER_HEAVY_SLOTS: "heavy",
+        ATTR_FIGHTER_CAPACITY: "hangar_base",
+    }
+    rows = (await db.execute(
+        select(SDETypeDogmaAttribute.type_id, SDETypeDogmaAttribute.attribute_id,
+               SDETypeDogmaAttribute.value)
+        .where(SDETypeDogmaAttribute.type_id.in_(ship_type_ids))
+        .where(SDETypeDogmaAttribute.attribute_id.in_(list(keys)))
+    )).fetchall()
+    out = {
+        sid: {"tubes": 0, "light": 0, "support": 0, "heavy": 0, "hangar_base": 0.0}
+        for sid in ship_type_ids
+    }
+    for sid, aid, val in rows:
+        key = keys[aid]
+        out[sid][key] = float(val) if key == "hangar_base" else int(val)
+    return out
 
 
 # ── Build-profitability finder (Task 4) ──────────────────────────────────
@@ -1789,11 +1913,12 @@ async def get_compatible_charges_bulk(
 
 async def get_module_slot_types_bulk(db: AsyncSession, type_ids: list[int]) -> dict[int, str]:
     """Batched form of the slot-type resolution import_eft does per item:
-    SDEModuleSlot first, then a drone/cargo fallback via group -> category
-    for anything without a module-slot row (fighters, service modules,
-    drones, charges, or an id the SDE doesn't know at all). One request's
-    worth of distinct type_ids resolved in at most 3 queries total, not one
-    (or three) per id — the batching T-069's character import needs.
+    SDEModuleSlot first, then a drone/fighter/cargo fallback via group ->
+    category for anything without a module-slot row (fighters, service
+    modules, drones, charges, or an id the SDE doesn't know at all). Category
+    87 (every fighter group, structure ones included) answers "fighter". One
+    request's worth of distinct type_ids resolved in at most 3 queries total,
+    not one (or three) per id — the batching T-069's character import needs.
     """
     type_ids = list({t for t in type_ids if t is not None})
     if not type_ids:
@@ -1820,7 +1945,12 @@ async def get_module_slot_types_bulk(db: AsyncSession, type_ids: list[int]) -> d
             cat_by_group = dict(cat_rows)
         for t in missing:
             cat_id = cat_by_group.get(group_by_type.get(t))
-            slot_map[t] = "drone" if cat_id == 18 else "cargo"
+            if cat_id == CATEGORY_DRONE:
+                slot_map[t] = "drone"
+            elif cat_id == CATEGORY_FIGHTER:
+                slot_map[t] = "fighter"
+            else:
+                slot_map[t] = "cargo"
     return slot_map
 
 

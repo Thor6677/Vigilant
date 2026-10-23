@@ -1,8 +1,9 @@
-"""The fitting tool must respect the drone bay and handle fighters (ISS-135, ISS-136 quick part).
+"""The fitting tool must respect the drone bay (ISS-135) and accept fighters (ISS-136).
 
 The page used to accept any number of drones on any ship: 13 light drones in a
 40 m3 bay, and drones on a carrier whose bay is 0. A fighter picked in the
-module browser added nothing and said nothing. Bandwidth is not a carry limit
+module browser added nothing and said nothing (it now adds a squadron; the
+fighter rules are in test_fighter_page_logic.py). Bandwidth is not a carry limit
 (it only caps how many drones launch, which the engine already applies to DPS),
 so it is flagged in the stats panel instead of refused.
 
@@ -201,10 +202,11 @@ const afterPlus = state.items[0].quantity;
 changeDroneQty(0, -1);
 out.D = {afterPlus, afterMinus: state.items[0].quantity, note: note()};
 
-// E: a fighter from the browser adds nothing and says why.
+// E: a fighter from the browser adds a squadron of its own.
 reset({drone_bay: 40, drone_bandwidth: 25});
 addModuleFromBrowser(5001, 'Test Fighter', 'fighter');
-out.E = {n: state.items.length, note: note()};
+out.E = {n: state.items.length, slot: state.items[0] && state.items[0].slot,
+         online: state.items[0] && state.items[0].online, note: note()};
 
 // F: volumes learned from the stats panel cover drones that came from an import.
 reset({drone_bay: 10, drone_bandwidth: 25});
@@ -230,14 +232,17 @@ out.I = {n: state.items.length, slot: state.items[0] && state.items[0].slot};
 """
 
 NAMES = ["_fmtM3", "_limitNote", "_droneBayUsed", "droneRoomProblem", "_syncDroneVolumes",
-         "changeDroneQty", "addDrone", "addModuleFromBrowser"]
+         "changeDroneQty", "addDrone", "_fighterClass", "_fighterHardProblem", "_fighterFit",
+         "_fighterWanted", "_fighterWalk", "_fighterHangarUsed", "fighterRoomProblem", "addFighter",
+         "addModuleFromBrowser"]
 
 
 @pytest.fixture(scope="module")
 def result(script, tmp_path_factory):
     if not shutil.which("node"):
         pytest.skip("node not installed")
-    parts = ["var droneVolumes = {};", "var _limitNoteTimer = null;"]
+    parts = ["var droneVolumes = {};", "var _limitNoteTimer = null;", "var fighterInfo = {};",
+             "var fighterHangarTotal = null;", "var FIGHTER_CLASSES = ['light', 'support', 'heavy'];", "var NOT_LAUNCHABLE = 'not a launchable fighter';"]
     parts += [_fn(script, n) for n in NAMES]
     harness = HARNESS % {"names": json.dumps(NAMES), "src": json.dumps("\n".join(parts)),
                          "scenarios": SCENARIOS}
@@ -272,10 +277,10 @@ def test_plus_button_obeys_the_bay_and_minus_always_works(result):
     assert "drone bay full" in r["note"]
 
 
-def test_fighter_from_the_browser_adds_nothing_and_says_so(result):
+def test_fighter_from_the_browser_adds_a_squadron(result):
     r = result["E"]
-    assert r["n"] == 0
-    assert "fighters are not supported" in r["note"]
+    assert (r["n"], r["slot"], r["online"]) == (1, "fighter", True)
+    assert "not supported" not in r["note"]
 
 
 def test_imported_drones_count_toward_the_bay_via_the_stats_volumes(result):

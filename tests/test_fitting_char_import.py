@@ -55,6 +55,7 @@ from app.routes.fitting import (
     _prepare_bulk_import_cache, _convert_esi_fit_items, _ship_class_map,
 )
 from app.routes.fittings import _parse_fitting, _to_eft
+from app.sde import lookup as sde
 
 USER_A = 8701
 USER_B = 8702
@@ -80,6 +81,10 @@ UNKNOWN_SHIP = 99998   # never inserted into sde_types at all
 # TURRET/CHARGE above so the two pairs can't cross-match by accident.
 MED_MOD = 98013    # med slot, has a compatible cargo charge
 BOOSTER = 98022    # compatible with MED_MOD only
+
+# Fighter equivalence fixture (ISS-136)
+FIGHTER_LIGHT = 98041    # category 87, light, squadron of 6
+FIGHTER_SUPPORT = 98042  # category 87, support, squadron of 3
 
 # Market groups
 MG_SHIPS_ROOT = 9000
@@ -328,6 +333,74 @@ def test_conversion_matches_import_eft_for_equivalent_fit():
         turret_item = next(i for i in direct_items if i["type_id"] == TURRET)
         assert turret_item.get("charge_type_id") == CHARGE
         assert not any(i["type_id"] == CHARGE and i["slot"] == "cargo" for i in direct_items)
+    finally:
+        teardown()
+
+
+# ── 1a. Fighters take the same split-and-launch path on both routes ────────
+
+async def _seed_fighters(db):
+    """_seed_base plus two fighter types, and tubes on the frigate hull
+    (4 tubes, 3 light, 2 support) so launch state is decidable."""
+    await _seed_base(db)
+    db.add(sm.SDEGroup(group_id=9605, category_id=87, group_name="Test Fighters"))
+    db.add_all([
+        sm.SDEType(type_id=FIGHTER_LIGHT, type_name="Test Light Fighter", group_id=9605,
+                   category_id=87, published=True),
+        sm.SDEType(type_id=FIGHTER_SUPPORT, type_name="Test Support Fighter", group_id=9605,
+                   category_id=87, published=True),
+    ])
+    db.add_all([
+        sm.SDETypeDogmaAttribute(type_id=FIGHTER_LIGHT, attribute_id=2212, value=1.0),
+        sm.SDETypeDogmaAttribute(type_id=FIGHTER_LIGHT, attribute_id=2215, value=6.0),
+        sm.SDETypeDogmaAttribute(type_id=FIGHTER_SUPPORT, attribute_id=2213, value=1.0),
+        sm.SDETypeDogmaAttribute(type_id=FIGHTER_SUPPORT, attribute_id=2215, value=3.0),
+        sm.SDETypeDogmaAttribute(type_id=SHIP_FRIGATE, attribute_id=2216, value=4.0),
+        sm.SDETypeDogmaAttribute(type_id=SHIP_FRIGATE, attribute_id=2217, value=3.0),
+        sm.SDETypeDogmaAttribute(type_id=SHIP_FRIGATE, attribute_id=2218, value=2.0),
+    ])
+
+
+def test_conversion_matches_import_eft_with_fighters():
+    teardown, SessionLocal, _engine = _seeded_db(_seed_fighters)
+    try:
+        # ESI hands back one FighterBay total per type, no launch state.
+        # Support listed first on purpose: Load orders fighters by name/class
+        # while Save used raw order, which gave the support squadrons the tubes
+        # before the 3rd light one. Both now put damage squadrons first.
+        fit = _raw_fit(505, "Test Fighter Fit", SHIP_FRIGATE, [
+            _item(LOW_MOD, "LoSlot0"),
+            _item(FIGHTER_SUPPORT, "FighterBay", qty=6),
+            _item(FIGHTER_LIGHT, "FighterBay", qty=24),
+        ])
+
+        async def _direct(db):
+            cache = await _prepare_bulk_import_cache(db, [fit])
+            return _convert_esi_fit_items(fit["items"], cache, SHIP_FRIGATE)
+        direct_items = _run_async(SessionLocal, _direct)
+
+        # With the hull known: 3 light + 1 support take the 4 tubes, the rest
+        # stays in the hangar.
+        squads = [(i["type_id"], i["quantity"], i["online"])
+                  for i in direct_items if i["slot"] == "fighter"]
+        assert squads == [
+            (FIGHTER_LIGHT, 6, True), (FIGHTER_LIGHT, 6, True), (FIGHTER_LIGHT, 6, True),
+            (FIGHTER_LIGHT, 6, False), (FIGHTER_SUPPORT, 3, True), (FIGHTER_SUPPORT, 3, False),
+        ]
+
+        type_names = {LOW_MOD: "Test Damage Control", FIGHTER_LIGHT: "Test Light Fighter",
+                      FIGHTER_SUPPORT: "Test Support Fighter"}
+        async def _info(db):
+            return await sde.get_fighter_info_bulk(db, [FIGHTER_LIGHT, FIGHTER_SUPPORT])
+        info = _run_async(SessionLocal, _info)
+        for fighter_info in (None, info):
+            eft_text = _to_eft(_parse_fitting(fit, type_names, "Test Rifter", {}), fighter_info)
+            r = _authed_client(USER_A).post("/tools/fitting/import-eft", json={"eft": eft_text},
+                                            headers={"X-CSRF-Token": _CSRF})
+            assert r.status_code == 200
+            body = r.json()
+            assert "error" not in body, body
+            assert Counter(_item_key(i) for i in direct_items) == Counter(_item_key(i) for i in body["items"])
     finally:
         teardown()
 
@@ -669,6 +742,37 @@ def test_user_fittings_migration_adds_columns_and_index_and_is_idempotent():
 
 # ── 8. Query-count evidence ──────────────────────────────────────────────────
 
+def test_bulk_import_query_count_stays_flat_with_fighters(monkeypatch):
+    """Fighter lookups are batched once per request too, not per fit."""
+    teardown, SessionLocal, engine = _seeded_db(_seed_fighters)
+    try:
+        def _count_queries(n):
+            _mock_esi(monkeypatch, {CHAR_A: [
+                _fit_fighters(fitting_id=700 + i, name=f"Test Fighter Bulk {i}") for i in range(n)]})
+            counts = {"n": 0}
+            def _before(conn, cursor, statement, parameters, context, executemany):
+                if not statement.lstrip().upper().startswith("INSERT"):
+                    counts["n"] += 1
+            event.listen(engine.sync_engine, "before_cursor_execute", _before)
+            try:
+                r = _authed_client(USER_A).post(f"/tools/fitting/import-character/{CHAR_A}/save",
+                                                 json={"all": True}, headers={"X-CSRF-Token": _CSRF})
+            finally:
+                event.remove(engine.sync_engine, "before_cursor_execute", _before)
+            assert r.json()["imported"] == n
+
+            async def _wipe(db):
+                await db.execute(UserFitting.__table__.delete())
+                await db.execute(UserFittingFolder.__table__.delete())
+                await db.commit()
+            _run_async(SessionLocal, _wipe)
+            return counts["n"]
+
+        assert _count_queries(3) == _count_queries(30)
+    finally:
+        teardown()
+
+
 def test_bulk_import_query_count_stays_flat_as_fit_count_grows(monkeypatch):
     """25 fits built from the SAME small set of distinct types must cost
     exactly the same number of non-INSERT statements a 5-fit import does —
@@ -710,6 +814,52 @@ def test_bulk_import_query_count_stays_flat_as_fit_count_grows(monkeypatch):
         c25 = _count_queries(25)
         c173 = _count_queries(173)
         assert c5["non_insert"] == c25["non_insert"] == c173["non_insert"]
+    finally:
+        teardown()
+
+
+# ── 8b. Fighters through the character routes ──────────────────────────────
+
+def _fit_fighters(fitting_id=507, name="Test Fighter Route Fit"):
+    return _raw_fit(fitting_id, name, SHIP_FRIGATE, [
+        _item(FIGHTER_SUPPORT, "FighterBay", qty=6),
+        _item(FIGHTER_LIGHT, "FighterBay", qty=24),
+    ])
+
+
+def test_save_route_launches_fighters_by_the_hulls_limits(monkeypatch):
+    teardown, SessionLocal, _engine = _seeded_db(_seed_fighters)
+    try:
+        _mock_esi(monkeypatch, {CHAR_A: [_fit_fighters()]})
+        r = _authed_client(USER_A).post(f"/tools/fitting/import-character/{CHAR_A}/save",
+                                         json={"all": True}, headers={"X-CSRF-Token": _CSRF})
+        assert r.json()["imported"] == 1
+
+        async def _check(db):
+            row = (await db.execute(UserFitting.__table__.select())).fetchone()
+            return json.loads(row.items_json)
+        saved = _run_async(SessionLocal, _check)
+        assert [(i["type_id"], i["quantity"], i["online"]) for i in saved] == [
+            (FIGHTER_LIGHT, 6, True), (FIGHTER_LIGHT, 6, True), (FIGHTER_LIGHT, 6, True),
+            (FIGHTER_LIGHT, 6, False), (FIGHTER_SUPPORT, 3, True), (FIGHTER_SUPPORT, 3, False),
+        ]
+    finally:
+        teardown()
+
+
+def test_fittings_list_and_single_eft_routes_split_fighters_into_squadrons(monkeypatch):
+    teardown, SessionLocal, _engine = _seeded_db(_seed_fighters)
+    try:
+        _mock_esi(monkeypatch, {CHAR_A: [_fit_fighters()]})
+        client = _authed_client(USER_A)
+        expected = ("Test Light Fighter x6\n" * 4 + "Test Support Fighter x3\nTest Support Fighter x3")
+
+        r = client.get(f"/tools/fitting/import-character/{CHAR_A}/fittings")
+        assert r.json()["fittings"][0]["eft"].endswith(expected)
+
+        r = client.get(f"/character/{CHAR_A}/fittings/507/eft")
+        assert r.status_code == 200
+        assert r.text.endswith(expected)
     finally:
         teardown()
 

@@ -21,6 +21,8 @@ from sqlalchemy import select, text
 
 from app.fitting.cap_sim import simulate_cap
 from app.fitting.boosters import apply_booster_bonuses
+from app.fitting.fighters import as_int
+from app.sde.lookup import get_fighter_info_bulk
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.sde_models import (
@@ -47,7 +49,16 @@ from app.fitting.constants import (
     ATTR_EM_DAMAGE, ATTR_EXPLOSIVE_DAMAGE, ATTR_KINETIC_DAMAGE, ATTR_THERMAL_DAMAGE,
     OVERLOAD_SOURCE_ATTR_PREFIX,
     ARMOR_RESONANCE_ATTRS, DAMAGE_TYPE_KEYS,
-    EFFECT_ADAPTIVE_ARMOR_HARDENER, EFFECT_POWER_BOOSTER,
+    EFFECT_ADAPTIVE_ARMOR_HARDENER, EFFECT_POWER_BOOSTER, NON_RACK_SLOTS,
+    ATTR_FIGHTER_CAPACITY, ATTR_FIGHTER_TUBES, ATTR_FIGHTER_LIGHT_SLOTS,
+    ATTR_FIGHTER_SUPPORT_SLOTS, ATTR_FIGHTER_HEAVY_SLOTS,
+    ATTR_FIGHTER_ATTACK_MULT, ATTR_FIGHTER_ATTACK_EM, ATTR_FIGHTER_ATTACK_THERMAL,
+    ATTR_FIGHTER_ATTACK_KINETIC, ATTR_FIGHTER_ATTACK_EXPLOSIVE,
+    ATTR_FIGHTER_ATTACK_DURATION,
+    ATTR_FIGHTER_MISSILE_MULT, ATTR_FIGHTER_MISSILE_EM, ATTR_FIGHTER_MISSILE_THERMAL,
+    ATTR_FIGHTER_MISSILE_KINETIC, ATTR_FIGHTER_MISSILE_EXPLOSIVE,
+    ATTR_FIGHTER_MISSILE_DURATION,
+    SKILL_FIGHTER_HANGAR_MANAGEMENT,
     ATTR_CAPACITOR_BONUS, ATTR_CHARGED_ARMOR_DAMAGE_MULTIPLIER,
     CHARGE_GROUP_ATTRS,
     ATTR_DMG_MULT_BONUS_PER_CYCLE, ATTR_DMG_MULT_BONUS_MAX,
@@ -1318,7 +1329,7 @@ async def _build_item_attrs(
     handling: an overheated hardener's boosted resistance bonus simply enters
     the existing stacking machinery as a stronger modifier.
     """
-    slotted = [i for i in items if i.get("slot") not in ("drone", "cargo")]
+    slotted = [i for i in items if i.get("slot") not in NON_RACK_SLOTS]
     slotted_type_ids = list({i["type_id"] for i in slotted})
     charge_type_ids = list({
         i["charge_type_id"] for i in items if i.get("charge_type_id")
@@ -1352,9 +1363,9 @@ async def _build_item_attrs(
         type_id = item["type_id"]
         base_attrs = module_attrs_map.get(type_id, {})
 
-        # Drones and cargo have no per-copy state, so they keep sharing the
-        # type-level dict rather than paying for a copy each.
-        if item.get("slot") in ("drone", "cargo"):
+        # Drones, cargo and fighters have no per-copy state, so they keep
+        # sharing the type-level dict rather than paying for a copy each.
+        if item.get("slot") in NON_RACK_SLOTS:
             enriched.append((item, base_attrs))
             continue
 
@@ -1404,6 +1415,39 @@ async def _build_item_attrs(
     return enriched, rah_type_ids, warnings
 
 
+# Fighter ability -> (damage multiplier, EM/thermal/kinetic/explosive, cycle ms).
+# Primary attack (effect 6465) and the missile ability (effect 6431) each read
+# their own attribute block.
+_FIGHTER_PRIMARY_ATTRS = (
+    ATTR_FIGHTER_ATTACK_MULT,
+    (ATTR_FIGHTER_ATTACK_EM, ATTR_FIGHTER_ATTACK_THERMAL,
+     ATTR_FIGHTER_ATTACK_KINETIC, ATTR_FIGHTER_ATTACK_EXPLOSIVE),
+    ATTR_FIGHTER_ATTACK_DURATION,
+)
+_FIGHTER_SALVO_ATTRS = (
+    ATTR_FIGHTER_MISSILE_MULT,
+    (ATTR_FIGHTER_MISSILE_EM, ATTR_FIGHTER_MISSILE_THERMAL,
+     ATTR_FIGHTER_MISSILE_KINETIC, ATTR_FIGHTER_MISSILE_EXPLOSIVE),
+    ATTR_FIGHTER_MISSILE_DURATION,
+)
+
+
+def _fighter_ability_typed(attrs: dict[int, float], block, n: int) -> list[float]:
+    """Sustained DPS per damage type (em, therm, kin, expl) of one fighter
+    ability for a squadron of `n`: n x damage x multiplier / cycle seconds.
+    All of the attributes are read after every skill, hull and module bonus.
+    Zero when the ability has no cycle time."""
+    mult_attr, dmg_attrs, cycle_attr = block
+    cycle = attrs.get(cycle_attr, 0)
+    if cycle <= 0 or n <= 0:
+        return [0.0, 0.0, 0.0, 0.0]
+    mult = attrs.get(mult_attr, 1)
+    return [n * attrs.get(a, 0) * mult / (cycle / 1000) for a in dmg_attrs]
+
+
+FIGHTER_UNSIZED_MAX = 12  # largest real squadron, for a fighter type with no size attribute
+
+
 # Bump whenever a change here (or in cap_sim.py / boosters.py's bonus math)
 # would change a previously-computed stats result for the same
 # ship+items+implants+boosters. The persistent per-fit DPS cache
@@ -1411,7 +1455,8 @@ async def _build_item_attrs(
 # this alongside the SDE version stamp, so a bump here — not a data
 # change — is what forces every cached value to recompute instead of
 # quietly serving a number from before the change.
-FITTING_ENGINE_VERSION = "1"
+# 2: fighters (squadron DPS, launch accounting, Fighter Hangar Management).
+FITTING_ENGINE_VERSION = "2"
 
 
 def dps_cache_key(
@@ -1473,10 +1518,10 @@ async def calculate_fitting_stats(
     # modules' chain is untouched.
     ship_mods: dict[int, list[tuple[int, float]]] = defaultdict(list)
 
-    # Collect all module type IDs (excluding drones and cargo)
+    # Collect all module type IDs (excluding drones, cargo and fighters)
     # Only online modules contribute to fitting (offline modules skip CPU/PG/effects)
     fitted_items = [i for i in items
-                    if i.get("slot") not in ("drone", "cargo")
+                    if i.get("slot") not in NON_RACK_SLOTS
                     and i.get("online", True)]
     module_type_ids = list({item["type_id"] for item in fitted_items})
     all_type_ids = list({item["type_id"] for item in items})
@@ -1604,6 +1649,9 @@ async def calculate_fitting_stats(
         (3419, ATTR_SHIELD_HP),        # Shield Management
         (3394, ATTR_ARMOR_HP),         # Hull Upgrades
         (3392, ATTR_HP),               # Mechanics
+        # Fighter Hangar Management: effect 6570 is an ItemModifier on the
+        # ship, source attr 2340 = 5.0 (verified 2026-10-23), so 5% per level.
+        (SKILL_FIGHTER_HANGAR_MANAGEMENT, ATTR_FIGHTER_CAPACITY),
     ]
     for skill_id, attr_id in _FITTING_SKILLS_FIVE_PCT:
         lvl = DEFAULT_SKILL_LEVEL if skill_levels is None else skill_levels.get(skill_id, 0)
@@ -1688,11 +1736,11 @@ async def calculate_fitting_stats(
     )
     enriched_fitted = [
         (item, attrs) for item, attrs in enriched_items
-        if item.get("slot") not in ("drone", "cargo") and item.get("online", True)
+        if item.get("slot") not in NON_RACK_SLOTS and item.get("online", True)
     ]
 
     # Per-item attribute dicts grouped by type, for the pass below to write
-    # into. Drones and cargo share their type-level dict by design (they have
+    # into. Drones, cargo and fighters share their type-level dict by design (they have
     # no per-copy state), so the same object can appear under several items —
     # dedupe by identity or a group bonus would be applied to them twice.
     item_attrs_by_type: dict[int, list[dict[int, float]]] = defaultdict(list)
@@ -1890,7 +1938,7 @@ async def calculate_fitting_stats(
     # slotted item rather than `module_type_ids` (which is online-only),
     # because an offline module still occupies its hardpoint.
     slotted_type_ids = list({
-        i["type_id"] for i in items if i.get("slot") not in ("drone", "cargo")
+        i["type_id"] for i in items if i.get("slot") not in NON_RACK_SLOTS
     })
     slot_info = {}
     if slotted_type_ids:
@@ -2065,7 +2113,7 @@ async def calculate_fitting_stats(
             drone_bay_used += drone_volumes.get(tid, 0) * qty
             continue
 
-        if slot == "cargo":
+        if slot in ("cargo", "fighter"):
             continue
 
         # Hardpoints are consumed by the module being FITTED, not by it being
@@ -2174,6 +2222,84 @@ async def calculate_fitting_stats(
         if shield_rep > 0:
             shield_rep_rate += (shield_rep / cycle_s) * qty
 
+    # ── Fighters: hangar, launch accounting, warnings ────────────────────
+    # One item per squadron (quantity = squadron size). A squadron is launched
+    # when it is online, of a class a ship can launch, and a tube plus a slot
+    # of its class are left, walking the items in order. Everything else stays
+    # in the hangar as a reserve: it costs volume but fires nothing. The page
+    # refuses these cases up front; the engine re-checks so a crafted or
+    # legacy request cannot inflate DPS (ISS-136).
+    # Squadrons are tracked by POSITION in `items`, never by object identity:
+    # a request that repeats one dict (`[sq] * 4`) must still count each
+    # entry on its own. `enriched_items` is one-to-one with `items`, in order.
+    #
+    # Beyond DPS this reports, for the page: `fighter_squadrons` (how many
+    # fighter items the request held) and `fighter_launched` (one bool per
+    # fighter item, in request order: True when the engine counted it).
+    fighter_idx = [n for n, i in enumerate(items) if i.get("slot") == "fighter"]
+    fighter_items = [items[n] for n in fighter_idx]
+    fighter_info = await get_fighter_info_bulk(db, [i["type_id"] for i in fighter_items])
+
+    fighter_tubes_total = int(mattr(ATTR_FIGHTER_TUBES))
+    fighter_class_total = {
+        "light": int(mattr(ATTR_FIGHTER_LIGHT_SLOTS)),
+        "support": int(mattr(ATTR_FIGHTER_SUPPORT_SLOTS)),
+        "heavy": int(mattr(ATTR_FIGHTER_HEAVY_SLOTS)),
+    }
+    fighter_hangar_total = mattr(ATTR_FIGHTER_CAPACITY)
+    fighter_tubes_used = 0
+    fighter_class_used = {"light": 0, "support": 0, "heavy": 0}
+    fighter_hangar_used = 0.0
+    fighter_not_counted = 0  # launch requested, but no tube or slot for it
+    fighter_counted: dict[int, int] = {}  # position in items -> launched squadron size
+    for pos, item in zip(fighter_idx, fighter_items):
+        info = fighter_info.get(item["type_id"], {})
+        name = item.get("type_name") or f"type {item['type_id']}"
+        # The request body is untrusted JSON: Infinity, NaN and 1e999 parse,
+        # so read the quantity without letting them raise.
+        qty = max(as_int(item.get("quantity", 1), 0), 0)
+        max_size = info.get("max_size", 0)
+        if max_size <= 0:
+            # No size on record: no squadron has more than 12 (the largest real one).
+            qty = min(qty, FIGHTER_UNSIZED_MAX)
+        if max_size > 0 and qty > max_size:
+            warnings.append(
+                f'Fighter squadron "{name}" has {qty} fighters; '
+                f"counted as {max_size}, the squadron maximum"
+            )
+            qty = max_size
+        # Reserves count toward the hangar too, launched or not.
+        fighter_hangar_used += info.get("volume", 0.0) * qty
+        if not item.get("online", True) or qty <= 0:
+            continue
+        cls = info.get("class")
+        if cls == "standup":
+            reason = "structure fighters cannot launch from a ship"
+        elif cls not in fighter_class_used:
+            reason = "not a launchable fighter"
+        elif fighter_tubes_total <= 0:
+            reason = "this ship has no fighter tubes"
+        elif fighter_class_total[cls] <= 0:
+            reason = f"this ship cannot launch {cls} fighters"
+        elif fighter_tubes_used >= fighter_tubes_total:
+            reason = "no free launch tube"
+        elif fighter_class_used[cls] >= fighter_class_total[cls]:
+            reason = f"no free {cls} squadron slot"
+        else:
+            reason = None
+        if reason:
+            warnings.append(f'Fighter squadron "{name}" not counted: {reason}')
+            fighter_not_counted += 1
+            continue
+        fighter_tubes_used += 1
+        fighter_class_used[cls] += 1
+        fighter_counted[pos] = qty
+    if fighter_items and fighter_hangar_used > fighter_hangar_total:
+        warnings.append(
+            f"Fighter hangar over capacity: {fighter_hangar_used:.0f} m3 "
+            f"of {fighter_hangar_total:.0f} m3"
+        )
+
     # ── Step 6: DPS calculation ──────────────────────────────────────────
     # charge_attrs_map was built early and modified by skill/hull bonus steps.
     weapon_dps = 0.0
@@ -2185,6 +2311,14 @@ async def calculate_fitting_stats(
     # Order: (em, therm, kin, expl)
     weapon_dps_typed = [0.0, 0.0, 0.0, 0.0]
     drone_dps_typed = [0.0, 0.0, 0.0, 0.0]
+    # Fighter abilities are kept apart so a later toggle can drop the salvo:
+    # the primary attack (6465) and the missile salvo (6431 on an ATTACK
+    # fighter). A superiority fighter's 6431 is its only weapon, so it sits in
+    # the primary bucket and a salvo toggle never touches it. Both count as
+    # sustained, as pyfa does by default (salvo on, reload off: it is treated
+    # as never running out).
+    fighter_primary_typed = [0.0, 0.0, 0.0, 0.0]
+    fighter_salvo_typed = [0.0, 0.0, 0.0, 0.0]
     # Turret application figures, taken from the first firing turret. A
     # tracking or optimal-range script changes exactly these and nothing else,
     # so without them the response could not show that a loaded script had
@@ -2226,7 +2360,7 @@ async def calculate_fitting_stats(
         drone_active_counts[tid] = drone_active_counts.get(tid, 0) + active
         bw_remaining -= active * bw_each
 
-    for item, mod_attrs in enriched_items:
+    for pos, (item, mod_attrs) in enumerate(enriched_items):
         tid = item["type_id"]
         qty = item.get("quantity", 1)
         slot = item.get("slot", "")
@@ -2255,7 +2389,22 @@ async def calculate_fitting_stats(
                 drone_dps_typed[3] += (expl * dmg_mult / cycle_s) * active_qty
             continue
 
-        if slot in ("cargo", "drone"):
+        if slot == "fighter":
+            n = fighter_counted.get(pos, 0)
+            if n > 0:
+                finfo = fighter_info.get(tid, {})
+                has_attack = finfo.get("has_attack", False)
+                if has_attack:
+                    for i, v in enumerate(_fighter_ability_typed(mod_attrs, _FIGHTER_PRIMARY_ATTRS, n)):
+                        fighter_primary_typed[i] += v
+                if finfo.get("has_missiles", False):
+                    # Superiority (no 6465): the missiles are the primary.
+                    bucket = fighter_salvo_typed if has_attack else fighter_primary_typed
+                    for i, v in enumerate(_fighter_ability_typed(mod_attrs, _FIGHTER_SALVO_ATTRS, n)):
+                        bucket[i] += v
+            continue
+
+        if slot in NON_RACK_SLOTS:
             continue
 
         # Offline weapons don't fire
@@ -2322,8 +2471,12 @@ async def calculate_fitting_stats(
         else:
             weapon_dps_max_spool += (volley / (cycle / 1000)) * qty
 
-    total_dps = weapon_dps + drone_dps
-    total_dps_max_spool = weapon_dps_max_spool + drone_dps
+    fighter_primary_dps = sum(fighter_primary_typed)
+    fighter_salvo_dps = sum(fighter_salvo_typed)
+    fighter_dps = fighter_primary_dps + fighter_salvo_dps
+    fighter_dps_typed = [a + b for a, b in zip(fighter_primary_typed, fighter_salvo_typed)]
+    total_dps = weapon_dps + drone_dps + fighter_dps
+    total_dps_max_spool = weapon_dps_max_spool + drone_dps + fighter_dps
 
     # Resist-weighted effective DPS against the target's resist profile.
     # effective = raw_per_type * (1 - target_resist_per_type), summed.
@@ -2335,12 +2488,19 @@ async def calculate_fitting_stats(
     effective_drone_dps = sum(
         drone_dps_typed[i] * (1.0 - target_resists[i]) for i in range(4)
     )
-    effective_total_dps = effective_weapon_dps + effective_drone_dps
+    effective_fighter_primary_dps = sum(
+        fighter_primary_typed[i] * (1.0 - target_resists[i]) for i in range(4)
+    )
+    effective_fighter_salvo_dps = sum(
+        fighter_salvo_typed[i] * (1.0 - target_resists[i]) for i in range(4)
+    )
+    effective_fighter_dps = effective_fighter_primary_dps + effective_fighter_salvo_dps
+    effective_total_dps = effective_weapon_dps + effective_drone_dps + effective_fighter_dps
     # Spool ratio (only weapons can spool) — apply the same uplift to typed
     # weapon DPS for the effective max-spool figure.
     weapon_spool_ratio = (weapon_dps_max_spool / weapon_dps) if weapon_dps > 0 else 1.0
     effective_total_dps_max_spool = (effective_weapon_dps * weapon_spool_ratio
-                                     + effective_drone_dps)
+                                     + effective_drone_dps + effective_fighter_dps)
 
     # ── Reactive hardener phasing suggestion ─────────────────────────────
     # Computed whenever a reactive hardener is fitted and running, so the UI
@@ -2381,6 +2541,23 @@ async def calculate_fitting_stats(
         # Per-unit volume of each fitted drone type: lets the page check a new
         # drone against the bay, including drones that came from an import.
         "drone_volumes": {str(t): v for t, v in drone_volumes.items()},
+        # Launched squadrons against tubes and per-class limits; the hangar
+        # counts every squadron, reserves included, and its total carries
+        # Fighter Hangar Management.
+        "fighter_tubes_used": fighter_tubes_used,
+        "fighter_tubes_total": fighter_tubes_total,
+        "fighter_light_used": fighter_class_used["light"],
+        "fighter_light_total": fighter_class_total["light"],
+        "fighter_support_used": fighter_class_used["support"],
+        "fighter_support_total": fighter_class_total["support"],
+        "fighter_heavy_used": fighter_class_used["heavy"],
+        "fighter_heavy_total": fighter_class_total["heavy"],
+        "fighter_hangar_used": round(fighter_hangar_used, 1),
+        "fighter_hangar_total": round(fighter_hangar_total, 1),
+        "fighter_info": {str(t): v for t, v in fighter_info.items()},
+        "fighter_squadrons": len(fighter_items),
+        "fighter_not_counted": fighter_not_counted,
+        "fighter_launched": [n in fighter_counted for n in fighter_idx],
         "hull_hp": round(hull_hp),
         "armor_hp": round(armor_hp),
         "shield_hp": round(shield_hp),
@@ -2442,6 +2619,11 @@ async def calculate_fitting_stats(
         # DPS
         "weapon_dps": round(weapon_dps, 1),
         "drone_dps": round(drone_dps, 1),
+        # Fighters: the sum, then each ability on its own (primary attack and
+        # missile salvo), so a toggle can show either without a recompute.
+        "fighter_dps": round(fighter_dps, 1),
+        "fighter_primary_dps": round(fighter_primary_dps, 1),
+        "fighter_salvo_dps": round(fighter_salvo_dps, 1),
         "total_dps": round(total_dps, 1),
         "weapon_volley": round(weapon_volley),
         "weapon_dps_max_spool": round(weapon_dps_max_spool, 1),
@@ -2456,6 +2638,9 @@ async def calculate_fitting_stats(
         # DPS values above; the template only shows them when they differ.
         "effective_weapon_dps": round(effective_weapon_dps, 1),
         "effective_drone_dps": round(effective_drone_dps, 1),
+        "effective_fighter_dps": round(effective_fighter_dps, 1),
+        "effective_fighter_primary_dps": round(effective_fighter_primary_dps, 1),
+        "effective_fighter_salvo_dps": round(effective_fighter_salvo_dps, 1),
         "effective_total_dps": round(effective_total_dps, 1),
         "effective_total_dps_max_spool": round(effective_total_dps_max_spool, 1),
         "target_resist_profile": target_resist_profile,

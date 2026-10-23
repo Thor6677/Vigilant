@@ -41,6 +41,7 @@ COMPARE_STAT_SECTIONS: list[dict] = [
     {"name": "Offense", "rows": [
         ("Weapon DPS", "weapon_dps", "higher", "f1", None),
         ("Drone DPS", "drone_dps", "higher", "f1", None),
+        ("Fighter DPS", "fighter_dps", "higher", "f1", None),
         ("Total DPS", "total_dps", "higher", "f1", None),
         ("Total DPS (max spool)", "total_dps_max_spool", "higher", "f1", "spool"),
         ("Alpha (volley)", "weapon_volley", "higher", "int", None),
