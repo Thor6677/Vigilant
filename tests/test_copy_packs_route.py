@@ -343,7 +343,7 @@ def _mem(cid, name, scopes, corp=CORP_A, corp_name="Alpha"):
 
 
 def _gather(monkeypatch, chars, selected, personal=None, corp=None, dead=(), fail=(),
-            assets=(None, "no assets")):
+            assets=(None, "no assets"), char_assets=None, type_names=None):
     """Run _owned_blueprints with ESI faked. `personal` is {char_id: rows};
     `corp` is the (result, err) the fallback returns, or {corp_id: (r, e)};
     `assets` is what the corp-assets fallback returns (the office map source)."""
@@ -364,6 +364,14 @@ def _gather(monkeypatch, chars, selected, personal=None, corp=None, dead=(), fai
     async def fake_dead(cs):
         return set(dead)
 
+    async def fake_char_assets(client, char_id):
+        return (char_assets or {}).get(char_id, [])
+
+    async def fake_type_names(db, ids):
+        return {i: (type_names or {}).get(i, f"Type {i}") for i in ids}
+
+    monkeypatch.setattr(copy_packs.esi_assets, "get_character_assets", fake_char_assets)
+    monkeypatch.setattr(copy_packs.sde, "type_ids_to_names", fake_type_names)
     monkeypatch.setattr(copy_packs, "refresh_token", fake_refresh)
     monkeypatch.setattr(copy_packs, "_fetch_all_pages", fake_pages)
     monkeypatch.setattr(copy_packs, "_try_api_call_with_fallback", fake_fallback)
@@ -818,5 +826,89 @@ def test_plan_bpo_dropdown_options_include_the_location(monkeypatch):
         r = _plan(_client())
         assert "BPO 10/20 · Alpha Corp, Corp Hangar 2" in r.text
         assert "BPO 10/20 · Alpha Corp, Azbel Keepstar, Corp Hangar 3" in r.text
+    finally:
+        teardown()
+
+
+# ── blueprints inside ships and containers ───────────────────────────────────
+
+SHIP, STATION, CONTAINER = 9001, 60003760, 9002
+
+
+def _asset(item_id, type_id, location_id, kind="station", flag="Hangar"):
+    return {"item_id": item_id, "type_id": type_id, "location_id": location_id,
+            "location_type": kind, "location_flag": flag}
+
+
+def test_resolve_holder_walks_up_to_the_station():
+    assets = {SHIP: _asset(SHIP, 587, STATION),
+              CONTAINER: _asset(CONTAINER, 3293, SHIP, "item", "Cargo")}
+    assert copy_packs.resolve_holder(SHIP, assets) == (STATION, 587)
+    # A container inside the ship: the label is the container, the place the station.
+    assert copy_packs.resolve_holder(CONTAINER, assets) == (STATION, 3293)
+    # A structure reads as location_type "other" and is a place too.
+    assert copy_packs.resolve_holder(SHIP, {SHIP: _asset(SHIP, 587, 1234567, "other")}) == (1234567, 587)
+
+
+def test_resolve_holder_gives_no_place_in_space_or_when_unlisted():
+    assert copy_packs.resolve_holder(SHIP, {SHIP: _asset(SHIP, 587, 30000142, "solar_system")}) == (None, 587)
+    assert copy_packs.resolve_holder(SHIP, {}) == (None, None)
+    # A cycle or a chain that never reaches a place stops instead of looping.
+    loop = {SHIP: _asset(SHIP, 587, CONTAINER, "item"), CONTAINER: _asset(CONTAINER, 3293, SHIP, "item")}
+    assert copy_packs.resolve_holder(SHIP, loop) == (None, 587)
+
+
+def test_owned_remembers_the_item_a_blueprint_sits_in():
+    assert copy_packs._owned(_row(location_flag="Cargo", location_id=SHIP), "A", True).holder_id == SHIP
+    assert copy_packs._owned(_row(location_flag="Unlocked", location_id=CONTAINER), "A", True).holder_id == CONTAINER
+    assert copy_packs._owned(_row(), "A", True).holder_id is None
+    assert copy_packs._owned(_row(location_flag="CorpSAG3"), "A", True).holder_id is None
+
+
+def test_gather_places_a_cargo_bpc_in_its_ship_and_station(monkeypatch):
+    me = _mem(1, "Me", perms.BLUEPRINTS + " " + perms.ASSETS)
+    personal = {1: [_row(item_id=11, quantity=-2, runs=3, location_flag="Cargo", location_id=SHIP)]}
+    _b, bpcs, notes, cands = _gather(
+        monkeypatch, [me], me, personal=personal,
+        char_assets={1: [_asset(SHIP, 587, STATION)]}, type_names={587: "Rifter"})
+    assert (bpcs[0].location_id, bpcs[0].holder_label) == (STATION, "Rifter")
+    assert not any("couldn't be located" in n for n in notes)
+    assert 1 in [c.character_id for c in cands[STATION]]    # its name can be looked up
+
+
+def test_gather_cargo_without_the_assets_scope_keeps_the_flag_and_says_so(monkeypatch):
+    me = _mem(1, "Me", perms.BLUEPRINTS)
+    personal = {1: [_row(item_id=11, quantity=-2, runs=3, location_flag="Cargo", location_id=SHIP)]}
+    _b, bpcs, notes, _c = _gather(monkeypatch, [me], me, personal=personal)
+    assert bpcs[0].holder_label == "" and bpcs[0].location_label == "Cargo"
+    assert any("Me has 1 blueprint inside a ship or container" in n for n in notes)
+
+
+def test_gather_corp_bpc_in_a_ship_uses_the_corp_assets(monkeypatch):
+    me = _mem(1, "Me", perms.CORP_BLUEPRINTS + " " + perms.CORP_ASSETS)
+    corp = ([_row(item_id=31, quantity=-2, runs=4, location_flag="Cargo", location_id=SHIP)], None)
+    _b, bpcs, _n, _c = _gather(monkeypatch, [me], me, corp=corp,
+                               assets=([_asset(SHIP, 587, STATION)], None),
+                               type_names={587: "Rifter"})
+    assert (bpcs[0].owner_name, bpcs[0].location_id, bpcs[0].holder_label) == ("Alpha", STATION, "Rifter")
+
+
+def test_collect_header_names_owner_ship_and_station(monkeypatch):
+    teardown = _seeded_db()
+    try:
+        cargo_bpc = cp.OwnedBlueprint(7100, PLATES_BP, False, 10, 16, 40, owner_name="Builder",
+                                      location_id=STATION, location_label="Cargo",
+                                      holder_id=SHIP, holder_type_id=587, holder_label="Rifter")
+        _stub_esi(monkeypatch, bpos=[HULL_BPO], bpcs=[cargo_bpc])
+
+        async def names(db, plan, candidates):
+            return {STATION: "Faurent I"}
+
+        monkeypatch.setattr(copy_packs, "_location_names", names)
+        r = _plan(_client(), state_json=json.dumps({"build": {str(PLATES): True}}))
+        assert r.status_code == 200
+        assert "Rifter in Faurent I" in r.text
+        assert "· Builder (1)" in r.text
+        assert ">Cargo " not in r.text      # no longer a bare "Cargo" group
     finally:
         teardown()

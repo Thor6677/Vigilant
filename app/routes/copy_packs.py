@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import scopes as perms, status as perm_status
 from app.character_skills import skill_levels, skill_summary
 from app.db.models import AsyncSessionLocal, Character, CharacterDashboardCache, get_db
+from app.esi import assets as esi_assets
 from app.esi import character as esi_char
 from app.esi import corporation as esi_corp
 from app.esi.client import ESIClient, refresh_token
@@ -83,6 +84,37 @@ _PLACE_FLAGS = frozenset({"Hangar", "Deliveries", "CorpDeliveries"})
 # Corp hangar divisions: location_id is the office's item id or, for some
 # structures, the structure id itself; either way it needs the office map.
 _OFFICE_FLAGS = frozenset(f"CorpSAG{n}" for n in range(1, 8))
+# Flags meaning "inside another item": location_id is that item's id (a ship
+# for Cargo, a container for Unlocked/Locked), not a place. Only the owner's
+# assets say what the item is and where it sits.
+_INSIDE_ITEM_FLAGS = frozenset(
+    {"Cargo", "Unlocked", "Locked", "AutoFit", "ShipHangar", "FleetHangar"})
+_HOLDER_DEPTH = 6   # ship in a container in a ship... is as deep as it gets
+
+
+def _inside_item(row: dict) -> bool:
+    return row.get("location_flag") in _INSIDE_ITEM_FLAGS and bool(row.get("location_id"))
+
+
+def resolve_holder(holder_id: int, assets_by_id: dict) -> tuple[int | None, int | None]:
+    """(place id, type id of the item the blueprint is directly inside) from
+    the owner's assets. Walks up through nested containers to the station or
+    structure; the place is None when the item is in space or isn't in the
+    assets (undocked and unlisted, or another owner's)."""
+    first = assets_by_id.get(holder_id)
+    if first is None:
+        return None, None
+    cur = first
+    for _ in range(_HOLDER_DEPTH):
+        kind = cur.get("location_type")
+        if kind in ("station", "other"):
+            return cur.get("location_id"), first.get("type_id")
+        if kind != "item":
+            break
+        cur = assets_by_id.get(cur.get("location_id"))
+        if cur is None:
+            break
+    return None, first.get("type_id")
 
 
 def _owned(row: dict, owner_name: str, reachable: bool) -> cp.OwnedBlueprint | None:
@@ -106,6 +138,7 @@ def _owned(row: dict, owner_name: str, reachable: bool) -> cp.OwnedBlueprint | N
             location_id=row.get("location_id") if flag in _PLACE_FLAGS else None,
             location_label=LOCATION_FLAGS.get(flag, flag),
             reachable=reachable,
+            holder_id=row.get("location_id") if flag in _INSIDE_ITEM_FLAGS else None,
         )
     except (KeyError, TypeError, ValueError):
         return None
@@ -138,8 +171,11 @@ async def _owned_blueprints(db: AsyncSession, chars: list[Character],
     notes: list[str] = []
     candidates: dict[int, list[Character]] = {}
 
+    unlocated: dict[str, int] = {}
+
     def add(raw: list, owner: str, own: bool, resolvers: list[Character],
-            office_map: dict[int, int] | None = None) -> None:
+            office_map: dict[int, int] | None = None,
+            assets_by_id: dict | None = None) -> None:
         for row in raw or []:
             ob = _owned(row, owner, reachable=own)
             if ob is None:
@@ -152,6 +188,12 @@ async def _owned_blueprints(db: AsyncSession, chars: list[Character],
                     lid if lid in office_map.values() else None)
                 if structure_id:
                     ob = dataclasses.replace(ob, location_id=structure_id)
+            if ob.holder_id:
+                place, holder_type = resolve_holder(ob.holder_id, assets_by_id or {})
+                if holder_type:
+                    ob = dataclasses.replace(ob, location_id=place, holder_type_id=holder_type)
+                else:
+                    unlocated[owner] = unlocated.get(owner, 0) + 1
             if ob.is_bpo:
                 bpos.append(ob)
             elif own:
@@ -186,7 +228,8 @@ async def _owned_blueprints(db: AsyncSession, chars: list[Character],
         if len(raw) >= _PAGE_CAP:
             notes.append(f"{char.character_name}'s blueprint list may be incomplete "
                          "(over 10,000 blueprints).")
-        add(raw, char.character_name, own, [char])
+        assets_by_id = await _char_assets_by_id(raw, char, token, db)
+        add(raw, char.character_name, own, [char], assets_by_id=assets_by_id)
 
     corps: dict[int, list[Character]] = {}
     for c in chars:
@@ -212,27 +255,75 @@ async def _owned_blueprints(db: AsyncSession, chars: list[Character],
         if len(raw) >= _PAGE_CAP:
             notes.append(f"{corp_name}'s blueprint list may be incomplete "
                          "(over 10,000 blueprints).")
-        office_map, asset_holders = await _office_map(raw, members, corp_id, db)
+        office_map, asset_holders, assets_by_id = await _office_map(raw, members, corp_id, db)
         add(raw, corp_name, corp_id == selected.corporation_id,
-            holders + [c for c in asset_holders if c not in holders], office_map)
+            holders + [c for c in asset_holders if c not in holders], office_map,
+            assets_by_id)
+
+    bpos, bpcs = await _name_holders(db, bpos, bpcs)
+    for owner, n in sorted(unlocated.items()):
+        notes.append(f"{owner} has {n} blueprint{'s' if n != 1 else ''} inside a ship or "
+                     "container that couldn't be located (assets not shared or not "
+                     "readable), so they show as Cargo or the container flag.")
     return bpos, bpcs, notes, candidates
 
 
+async def _char_assets_by_id(raw: list, char: Character, token: str,
+                             db: AsyncSession) -> dict[int, dict]:
+    """{item id: asset} for a character with blueprints inside ships or
+    containers, else {} without a fetch. Best effort: no assets scope or a
+    failed fetch leaves the blueprints labelled by their flag."""
+    if not any(_inside_item(r) for r in raw or []):
+        return {}
+    if perms.ASSETS not in (char.scopes or ""):
+        return {}
+    try:
+        assets = await esi_assets.get_character_assets(
+            ESIClient(token, db=db), char.character_id)
+    except Exception as exc:
+        logger.info("Copy packs: assets for %s failed: %s", char.character_id, exc)
+        return {}
+    return {a["item_id"]: a for a in assets or [] if "item_id" in a}
+
+
+async def _name_holders(db: AsyncSession, bpos: list, bpcs: list) -> tuple[list, list]:
+    """Fill in holder_label (the ship or container's type name) in one lookup."""
+    ids = {o.holder_type_id for o in bpos + bpcs if o.holder_type_id}
+    if not ids:
+        return bpos, bpcs
+    try:
+        names = await sde.type_ids_to_names(db, list(ids))
+    except Exception as exc:
+        logger.info("Copy packs: holder names failed: %s", exc)
+        return bpos, bpcs
+
+    def label(o):
+        name = names.get(o.holder_type_id) if o.holder_type_id else None
+        return dataclasses.replace(o, holder_label=name) if name else o
+
+    return [label(o) for o in bpos], [label(o) for o in bpcs]
+
+
 async def _office_map(raw: list, members: list[Character], corp_id: int,
-                      db: AsyncSession) -> tuple[dict[int, int], list[Character]]:
+                      db: AsyncSession) -> tuple[dict[int, int], list[Character], dict[int, dict]]:
     """({office item id: structure id}, characters that could read the corp's
-    assets) for a corp with BPOs sitting in hangar offices. Corp assets are
-    the only place an office is tied to its structure. Best effort: with no
-    asset scope or a failed fetch the BPOs keep their hangar-division label."""
-    if not any(r.get("quantity") != -2 and r.get("location_flag") in _OFFICE_FLAGS
-               for r in raw or []):
-        return {}, []
+    assets, {item id: asset}) for a corp with blueprints sitting in hangar
+    offices (BPOs) or inside ships and containers. Corp assets are the only
+    place an office is tied to its structure and a ship to its location. Best
+    effort: with no asset scope or a failed fetch the blueprints keep their
+    hangar-division or flag label."""
+    wants_offices = any(r.get("quantity") != -2 and r.get("location_flag") in _OFFICE_FLAGS
+                        for r in raw or [])
+    wants_holders = any(_inside_item(r) for r in raw or [])
+    if not (wants_offices or wants_holders):
+        return {}, [], {}
     holders = [c for c in members if perms.CORP_ASSETS in (c.scopes or "")]
     if not holders:
-        return {}, []
+        return {}, [], {}
     assets, _err = await _try_api_call_with_fallback(
         "assets", {"assets": holders}, esi_corp.get_corporation_assets, corp_id, db)
-    return _build_office_to_structure_map(assets or []), holders
+    by_id = {a["item_id"]: a for a in assets or [] if "item_id" in a}
+    return _build_office_to_structure_map(assets or []), holders, by_id
 
 
 async def _skills(db: AsyncSession, char: Character, overrides: dict):

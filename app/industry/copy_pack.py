@@ -100,6 +100,12 @@ class OwnedBlueprint:
     location_id: int | None = None
     location_label: str = ""
     reachable: bool = True      # the selected character can copy from it
+    # Set when the blueprint sits inside a ship or container: the item's own
+    # id (ESI's location_id is not a place then) and, once the owner's assets
+    # have been read, what it is and the place it is in (location_id above).
+    holder_id: int | None = None
+    holder_type_id: int | None = None
+    holder_label: str = ""
 
 
 @dataclass(frozen=True)

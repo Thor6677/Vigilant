@@ -93,3 +93,35 @@ def test_collect_groups_by_place_biggest_first_then_by_name():
     first = groups[0].rows[0]
     assert (first.me, first.te, first.uses, first.runs) == (9, 14, 6, 6)
     assert view.group_bpcs(_plan([_item(1)], [1]), {}, names) == []
+
+
+# ── owner and ship in Collect ────────────────────────────────────────────────
+
+def _held(item_id, runs, owner, label="Personal Hangar", loc=None, holder=""):
+    return cp.OwnedBlueprint(item_id, 1, False, 10, 20, runs, owner_name=owner,
+                             location_id=loc, location_label=label, holder_label=holder)
+
+
+def test_place_label_names_the_ship_and_where_it_is():
+    cargo = _held(1, 5, "Builder", label="Cargo", loc=111, holder="Archon")
+    assert view.place_label(cargo, {111: "Faurent I"}) == "Archon in Faurent I"
+    # A ship whose place could not be read still says it is a ship.
+    lost = _held(2, 5, "Builder", label="Cargo", holder="Archon")
+    assert view.place_label(lost, {}) == "Archon (location unknown)"
+    # With no holder resolved the flag label is unchanged.
+    assert view.place_label(_held(3, 5, "Builder", label="Cargo"), {}) == "Cargo"
+
+
+def test_collect_separates_owners_sharing_a_place():
+    names = {1: "Archon", 2: "Armor Plates", 3: "Jump Drive"}
+    plan = _plan([
+        _item(1, used=[(_held(1, 6, "Builder", loc=111), 6)]),
+        _item(2, used=[(_held(2, 40, "Alpha Corp", label="Corp Hangar 3", loc=111), 5)]),
+        _item(3, used=[(_held(3, 8, "Builder", label="Cargo", loc=111, holder="Archon"), 4)]),
+    ], [1, 2, 3])
+    groups = view.group_bpcs(plan, {111: "Faurent I"}, names)
+    assert sorted((g.owner, g.place, len(g.rows)) for g in groups) == [
+        ("Alpha Corp", "Faurent I, Corp Hangar 3", 1),
+        ("Builder", "Archon in Faurent I", 1),
+        ("Builder", "Faurent I", 1),
+    ]
