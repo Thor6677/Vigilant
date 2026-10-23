@@ -57,6 +57,8 @@ def place_label(o: cp.OwnedBlueprint, location_names: dict) -> str:
     named = location_names.get(o.location_id) if o.location_id else None
     label = o.location_label or ""
     if o.holder_label:
+        if o.holder_in_space:
+            return f"{o.holder_label} (in space, {named})" if named else f"{o.holder_label} (in space)"
         return f"{o.holder_label} in {named}" if named else f"{o.holder_label} (location unknown)"
     if named and label.startswith("Corp Hangar"):
         return f"{named}, {label}"

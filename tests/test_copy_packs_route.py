@@ -843,19 +843,27 @@ def _asset(item_id, type_id, location_id, kind="station", flag="Hangar"):
 def test_resolve_holder_walks_up_to_the_station():
     assets = {SHIP: _asset(SHIP, 587, STATION),
               CONTAINER: _asset(CONTAINER, 3293, SHIP, "item", "Cargo")}
-    assert copy_packs.resolve_holder(SHIP, assets) == (STATION, 587)
+    assert copy_packs.resolve_holder(SHIP, assets) == (STATION, 587, False)
     # A container inside the ship: the label is the container, the place the station.
-    assert copy_packs.resolve_holder(CONTAINER, assets) == (STATION, 3293)
+    assert copy_packs.resolve_holder(CONTAINER, assets) == (STATION, 3293, False)
     # A structure reads as location_type "other" and is a place too.
-    assert copy_packs.resolve_holder(SHIP, {SHIP: _asset(SHIP, 587, 1234567, "other")}) == (1234567, 587)
+    assert copy_packs.resolve_holder(SHIP, {SHIP: _asset(SHIP, 587, 1234567, "other")}) == (1234567, 587, False)
 
 
-def test_resolve_holder_gives_no_place_in_space_or_when_unlisted():
-    assert copy_packs.resolve_holder(SHIP, {SHIP: _asset(SHIP, 587, 30000142, "solar_system")}) == (None, 587)
-    assert copy_packs.resolve_holder(SHIP, {}) == (None, None)
+def test_resolve_holder_gives_the_system_for_a_ship_in_space():
+    system = 30000142
+    assert copy_packs.resolve_holder(SHIP, {SHIP: _asset(SHIP, 587, system, "solar_system", "AutoFit")}) == (system, 587, True)
+    # A container in a ship in space: the label is the container, the place the ship's system.
+    nested = {SHIP: _asset(SHIP, 587, system, "solar_system", "AutoFit"),
+              CONTAINER: _asset(CONTAINER, 3293, SHIP, "item", "Cargo")}
+    assert copy_packs.resolve_holder(CONTAINER, nested) == (system, 3293, True)
+
+
+def test_resolve_holder_gives_no_place_when_unlisted_or_looping():
+    assert copy_packs.resolve_holder(SHIP, {}) == (None, None, False)
     # A cycle or a chain that never reaches a place stops instead of looping.
     loop = {SHIP: _asset(SHIP, 587, CONTAINER, "item"), CONTAINER: _asset(CONTAINER, 3293, SHIP, "item")}
-    assert copy_packs.resolve_holder(SHIP, loop) == (None, 587)
+    assert copy_packs.resolve_holder(SHIP, loop) == (None, 587, False)
 
 
 def test_owned_remembers_the_item_a_blueprint_sits_in():
@@ -910,5 +918,35 @@ def test_collect_header_names_owner_ship_and_station(monkeypatch):
         assert "Rifter in Faurent I" in r.text
         assert "· Builder (1)" in r.text
         assert ">Cargo " not in r.text      # no longer a bare "Cargo" group
+    finally:
+        teardown()
+
+
+def test_gather_marks_a_cargo_bpc_in_a_ship_in_space(monkeypatch):
+    me = _mem(1, "Me", perms.BLUEPRINTS + " " + perms.ASSETS)
+    personal = {1: [_row(item_id=11, quantity=-2, runs=3, location_flag="Cargo", location_id=SHIP)]}
+    _b, bpcs, _n, _c = _gather(
+        monkeypatch, [me], me, personal=personal,
+        char_assets={1: [_asset(SHIP, 587, 30000142, "solar_system", "AutoFit")]},
+        type_names={587: "Rifter"})
+    assert (bpcs[0].location_id, bpcs[0].holder_label, bpcs[0].holder_in_space) == (30000142, "Rifter", True)
+
+
+def test_collect_header_names_the_system_for_a_ship_in_space(monkeypatch):
+    teardown = _seeded_db()
+    try:
+        bpc = cp.OwnedBlueprint(7101, PLATES_BP, False, 10, 16, 40, owner_name="Builder",
+                                location_id=30000142, location_label="Cargo", holder_id=SHIP,
+                                holder_type_id=587, holder_label="Rifter", holder_in_space=True)
+        _stub_esi(monkeypatch, bpos=[HULL_BPO], bpcs=[bpc])
+
+        async def names(db, plan, candidates):
+            return {30000142: "Jita"}
+
+        monkeypatch.setattr(copy_packs, "_location_names", names)
+        r = _plan(_client(), state_json=json.dumps({"build": {str(PLATES): True}}))
+        assert r.status_code == 200
+        assert "Rifter (in space, Jita)" in r.text
+        assert "location unknown" not in r.text
     finally:
         teardown()

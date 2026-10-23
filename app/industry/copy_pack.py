@@ -106,6 +106,7 @@ class OwnedBlueprint:
     holder_id: int | None = None
     holder_type_id: int | None = None
     holder_label: str = ""
+    holder_in_space: bool = False   # the ship is out in space; location_id is its system
 
 
 @dataclass(frozen=True)
