@@ -1462,8 +1462,12 @@ function toggleDefenceUnits() {
 }
 
 /* ── Stats Recalculation ──────────────────────────────────────────────────── */
+/* Each call takes a number and only the latest one may write the panel, so a
+   slow earlier response arriving last can't overwrite newer numbers. */
+var _statsSeq = 0;
 function recalcStats() {
     if (!state.shipTypeId) return;
+    var seq = ++_statsSeq;
     var charId = getSelectedSkillCharId();
     var profile = getSelectedProfile();
     fetch('/tools/fitting/stats', {
@@ -1485,11 +1489,13 @@ function recalcStats() {
     .then(_fitCheckOk)
     .then(function(r) { return r.text(); })
     .then(function(html) {
+        if (seq !== _statsSeq) return;
         document.getElementById('stats-panel').innerHTML = html;
         _syncDroneVolumes();
         _fitSumBarUpdate();
     })
     .catch(function(e) {
+        if (seq !== _statsSeq) return;
         document.getElementById('stats-panel').innerHTML = _fitErrorHtml(e.status);
         _fitSumBarUpdate();
     });
