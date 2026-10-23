@@ -2378,6 +2378,9 @@ async def calculate_fitting_stats(
         "drone_bw_total": round(mattr(SHIP_STAT_ATTRS["drone_bandwidth"]), 1),
         "drone_bay_used": round(drone_bay_used, 1),
         "drone_bay_total": round(mattr(SHIP_STAT_ATTRS["drone_capacity"]), 1),
+        # Per-unit volume of each fitted drone type: lets the page check a new
+        # drone against the bay, including drones that came from an import.
+        "drone_volumes": {str(t): v for t, v in drone_volumes.items()},
         "hull_hp": round(hull_hp),
         "armor_hp": round(armor_hp),
         "shield_hp": round(shield_hp),

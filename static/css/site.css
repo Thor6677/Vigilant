@@ -106,6 +106,9 @@
 .b-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .b-btn:disabled::after { animation: none; display: none; }
 .b-btn:not(.is-primary):not(.is-ghost):disabled:hover { background: none; color: var(--muted); }
+
+/* Fitting tool: why an add was refused (drone bay full, fighters). */
+.fit-limit-note { margin-top: 0.35rem; padding: 0.3rem 0.5rem; border: 1px solid var(--danger); color: var(--danger); font-size: 11px; line-height: 1.4; }
 .b-btn.is-ghost:disabled:hover { background: var(--glass-bg); color: var(--text); border-color: var(--glass-border); box-shadow: none; }
 .b-btn.is-ghost.is-danger:disabled:hover { color: var(--danger); }
 .b-btn.is-primary:disabled:hover { background: var(--accent); color: var(--bg); box-shadow: none; transform: none; }

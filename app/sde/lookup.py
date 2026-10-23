@@ -1145,7 +1145,7 @@ async def search_modules(db: AsyncSession, query: str, slot_type: str | None = N
 async def search_drones(db: AsyncSession, query: str, limit: int = 15) -> list[dict]:
     """Search published drone types by partial name."""
     result = await db.execute(
-        select(SDEType.type_id, SDEType.type_name, SDEType.group_id)
+        select(SDEType.type_id, SDEType.type_name, SDEType.group_id, SDEType.volume)
         .join(SDEGroup, SDEType.group_id == SDEGroup.group_id)
         .where(SDEGroup.category_id == CATEGORY_DRONE)
         .where(SDEType.published == True)
@@ -1153,7 +1153,8 @@ async def search_drones(db: AsyncSession, query: str, limit: int = 15) -> list[d
         .order_by(func.length(SDEType.type_name), SDEType.type_name)
         .limit(limit)
     )
-    return [{"type_id": r.type_id, "type_name": r.type_name, "group_id": r.group_id}
+    return [{"type_id": r.type_id, "type_name": r.type_name, "group_id": r.group_id,
+             "volume": r.volume or 0}
             for r in result.fetchall()]
 
 
@@ -1230,7 +1231,7 @@ async def get_market_group_items(
 ) -> list[dict]:
     """Get all published items in a market group with slot type info."""
     rows = (await db.execute(
-        select(SDEType.type_id, SDEType.type_name, SDEType.group_id)
+        select(SDEType.type_id, SDEType.type_name, SDEType.group_id, SDEType.volume)
         .where(SDEType.market_group_id == market_group_id)
         .where(SDEType.published == True)
         .order_by(SDEType.type_name)
@@ -1253,12 +1254,27 @@ async def get_market_group_items(
         fallback = await get_module_slot_types_bulk(db, unslotted)
         slot_by_tid.update({t: s for t, s in fallback.items() if s == "drone"})
 
+        # Fighters have no slot row either and the fitting tool cannot model
+        # them yet, so say so instead of reporting null, which the page
+        # treated as "add to cargo" and then dropped without a word (ISS-136).
+        group_by_tid = {r.type_id: r.group_id for r in rows}
+        unclassified = [t for t in unslotted if t not in slot_by_tid and group_by_tid.get(t)]
+        if unclassified:
+            cat_rows = dict((await db.execute(
+                select(SDEGroup.group_id, SDEGroup.category_id)
+                .where(SDEGroup.group_id.in_({group_by_tid[t] for t in unclassified}))
+            )).fetchall())
+            for t in unclassified:
+                if cat_rows.get(group_by_tid[t]) == CATEGORY_FIGHTER:
+                    slot_by_tid[t] = "fighter"
+
     return [
         {
             "type_id": r.type_id,
             "type_name": r.type_name,
             "group_id": r.group_id,
             "slot_type": slot_by_tid.get(r.type_id),
+            "volume": r.volume or 0,
         }
         for r in rows
     ]
