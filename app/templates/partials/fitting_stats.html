@@ -1,10 +1,14 @@
 {# ── Summary Bar ──────────────────────────────────────────────────────────── #}
+{# tojson leaves its double quotes bare, so a JSON attribute is single-quoted
+   (tojson escapes the apostrophe itself). #}
 {# data-sum-*: the values fitting_tool.html's phone summary bar copies after
    each render (mobile R6 T4). DPS is always given, even at 0, and Cap
    follows the Capacitor section's Stability row (stable %, time left while
    draining, or 100% with no drain), so the bar never contradicts the panel. #}
 <div class="fit-sum" data-fit-sum
-     data-drone-vols="{{ stats.drone_volumes | tojson }}"
+     data-drone-vols='{{ stats.drone_volumes | tojson }}'
+     data-fighter-info='{{ stats.fighter_info | tojson }}'
+     data-fighter-hangar="{{ stats.fighter_hangar_total }}"
      data-sum-dps="{{ "{:,.0f}".format(stats.total_dps) }}{% if stats.spool_time_s > 0 %} / {{ "{:,.0f}".format(stats.total_dps_max_spool) }}{% endif %}"
      data-sum-ehp="{{ "{:,.0f}".format(stats.total_ehp) }}"
      data-sum-cap="{% if stats.cap_stable %}{{ stats.cap_stable_pct }}%{% elif stats.cap_drain_rate > 0 %}{% if stats.cap_lasts_s >= 60 %}{{ (stats.cap_lasts_s // 60)|int }}m{{ (stats.cap_lasts_s % 60)|int }}s{% else %}{{ stats.cap_lasts_s }}s{% endif %}{% else %}100%{% endif %}"
@@ -68,7 +72,7 @@
 </div>
 
 {# ── Offense ──────────────────────────────────────────────────────────────── #}
-{% if stats.total_dps > 0 or stats.drone_dps > 0 %}
+{% if stats.total_dps > 0 or stats.drone_dps > 0 or stats.fighter_dps > 0 %}
 {% set show_effective = stats.target_resist_profile and stats.target_resist_profile != "uniform" and stats.effective_total_dps != stats.total_dps %}
 <div class="b-section">
     <div class="b-section-head" style="display:flex;justify-content:space-between;align-items:center;">
@@ -94,6 +98,25 @@
                     {{ "{:,.1f}".format(stats.drone_dps) }}{% if show_effective %} <span style="color:var(--muted);font-size:9px;">&rarr; {{ "{:,.1f}".format(stats.effective_drone_dps) }}</span>{% endif %}
                 </td>
             </tr>
+            {% endif %}
+            {% if stats.fighter_dps > 0 %}
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Fighter DPS</td>
+                <td style="text-align:right;color:var(--text);">
+                    {{ "{:,.1f}".format(stats.fighter_dps) }}{% if show_effective %} <span style="color:var(--muted);font-size:9px;">&rarr; {{ "{:,.1f}".format(stats.effective_fighter_dps) }}</span>{% endif %}
+                </td>
+            </tr>
+            {# The missile salvo of an attack fighter, split from its primary attack. #}
+            {% if stats.fighter_salvo_dps > 0 and stats.fighter_primary_dps > 0 %}
+            <tr>
+                <td style="color:var(--muted);padding:0 0 2px 0.75rem;font-size:9px;">Attack</td>
+                <td style="text-align:right;color:var(--muted);font-size:9px;">{{ "{:,.1f}".format(stats.fighter_primary_dps) }}{% if show_effective %} &rarr; {{ "{:,.1f}".format(stats.effective_fighter_primary_dps) }}{% endif %}</td>
+            </tr>
+            <tr>
+                <td style="color:var(--muted);padding:0 0 2px 0.75rem;font-size:9px;">Missiles</td>
+                <td style="text-align:right;color:var(--muted);font-size:9px;">{{ "{:,.1f}".format(stats.fighter_salvo_dps) }}{% if show_effective %} &rarr; {{ "{:,.1f}".format(stats.effective_fighter_salvo_dps) }}{% endif %}</td>
+            </tr>
+            {% endif %}
             {% endif %}
             <tr style="border-top:1px solid var(--border);">
                 <td style="color:var(--muted);padding:3px 0 2px;font-weight:600;">Total DPS</td>
@@ -329,6 +352,43 @@
         </table>
     </div>
 </div>
+
+{# ── Fighters (ISS-136) ───────────────────────────────────────────────────
+   Shown when the hull has launch tubes, or when the fit holds fighters at all
+   (squadrons on a tubeless hull would otherwise vanish from view). Classes the
+   hull has no slots for are left out. #}
+{% if stats.fighter_tubes_total > 0 or stats.fighter_squadrons > 0 %}
+<div class="b-section" id="fighter-stats">
+    <div class="b-section-head"><span class="b-label">Fighters</span></div>
+    <div class="b-panel" style="padding:0.5rem 0.75rem;">
+        <table style="width:100%;font-size:10px;border-collapse:collapse;">
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Launch Tubes</td>
+                <td style="text-align:right;color:var(--text);">{{ stats.fighter_tubes_used }} / {{ stats.fighter_tubes_total }}</td>
+            </tr>
+            {# Launched squadrons the hull had no tube or slot for add no damage. #}
+            {% if stats.fighter_not_counted > 0 %}
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Not counted</td>
+                <td style="text-align:right;color:var(--danger);" title="Launched squadrons with no free tube or slot: see the warnings below">{{ stats.fighter_not_counted }} squadron{{ '' if stats.fighter_not_counted == 1 else 's' }}</td>
+            </tr>
+            {% endif %}
+            {% for label, key in [('Light', 'light'), ('Support', 'support'), ('Heavy', 'heavy')] %}
+            {% if stats['fighter_' ~ key ~ '_total'] > 0 %}
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">{{ label }} Squadrons</td>
+                <td style="text-align:right;color:var(--text);">{{ stats['fighter_' ~ key ~ '_used'] }} / {{ stats['fighter_' ~ key ~ '_total'] }}</td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+            <tr>
+                <td style="color:var(--muted);padding:2px 0;">Fighter Hangar</td>
+                <td style="text-align:right;color:{{ 'var(--danger)' if stats.fighter_hangar_used > stats.fighter_hangar_total else 'var(--text)' }};"{% if stats.fighter_hangar_used > stats.fighter_hangar_total %} title="Over the fighter hangar"{% endif %}>{{ "{:,.0f}".format(stats.fighter_hangar_used) }} / {{ "{:,.0f}".format(stats.fighter_hangar_total) }} m&sup3;</td>
+            </tr>
+        </table>
+    </div>
+</div>
+{% endif %}
 
 {# ── Drones & Cargo ──────────────────────────────────────────────────────── #}
 <div class="b-section">

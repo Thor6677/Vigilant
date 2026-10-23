@@ -102,6 +102,46 @@ ATTR_EXPL_RESIST_BONUS = 985
 ATTR_KIN_RESIST_BONUS = 986
 ATTR_THERM_RESIST_BONUS = 987
 
+# ── Fighters ─────────────────────────────────────────────────────────────
+# Ship side (SDE-confirmed 2026-10-23): a missing attribute means 0, so a hull
+# with no tubes simply has none of these. Not skill-modified except the hangar.
+ATTR_FIGHTER_CAPACITY = 2055            # fighter hangar, m3 (Fighter Hangar Management: +5%/lvl)
+ATTR_FIGHTER_TUBES = 2216
+ATTR_FIGHTER_LIGHT_SLOTS = 2217
+ATTR_FIGHTER_SUPPORT_SLOTS = 2218
+ATTR_FIGHTER_HEAVY_SLOTS = 2219
+# Fighter side: which launch-slot class a squadron needs. Structure fighters
+# (standup) can never launch from a ship, which has none of 2737-2739.
+ATTR_FIGHTER_SQUADRON_MAX_SIZE = 2215   # fighters per squadron
+ATTR_FIGHTER_IS_LIGHT = 2212
+ATTR_FIGHTER_IS_SUPPORT = 2213
+ATTR_FIGHTER_IS_HEAVY = 2214
+ATTR_FIGHTER_IS_STANDUP_LIGHT = 2740
+ATTR_FIGHTER_IS_STANDUP_SUPPORT = 2741
+ATTR_FIGHTER_IS_STANDUP_HEAVY = 2742
+# Primary attack (effect 6465) and the missile ability (effect 6431)
+ATTR_FIGHTER_ATTACK_MULT = 2226
+ATTR_FIGHTER_ATTACK_EM = 2227
+ATTR_FIGHTER_ATTACK_THERMAL = 2228
+ATTR_FIGHTER_ATTACK_KINETIC = 2229
+ATTR_FIGHTER_ATTACK_EXPLOSIVE = 2230
+ATTR_FIGHTER_ATTACK_DURATION = 2233     # ms
+ATTR_FIGHTER_MISSILE_MULT = 2130
+ATTR_FIGHTER_MISSILE_EM = 2131
+ATTR_FIGHTER_MISSILE_THERMAL = 2132
+ATTR_FIGHTER_MISSILE_KINETIC = 2133
+ATTR_FIGHTER_MISSILE_EXPLOSIVE = 2134
+ATTR_FIGHTER_MISSILE_DURATION = 2182    # ms
+EFFECT_FIGHTER_ATTACK_MISSILE = 6465    # fighterAbilityAttackM, the sustained primary
+EFFECT_FIGHTER_MISSILES = 6431          # fighterAbilityMissiles
+EFFECT_FIGHTER_BOMB = 6485              # excluded from DPS
+EFFECT_FIGHTER_KAMIKAZE = 6554          # excluded from DPS
+SKILL_FIGHTER_HANGAR_MANAGEMENT = 24613
+
+# Slots that never occupy a module rack: no CPU, powergrid, hardpoint or
+# module-modifier pass, so they stay out of the fitted-module lists.
+NON_RACK_SLOTS = ("drone", "cargo", "fighter")
+
 # ── Reactive Armor Hardener ──────────────────────────────────────────────
 # Effect 4928 (adaptiveArmorHardener) is the module's defining effect and
 # carries NO modifierInfo — CCP models the redistribution in the game server,

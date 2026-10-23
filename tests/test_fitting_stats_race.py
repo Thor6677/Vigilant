@@ -26,7 +26,7 @@ global.getSelectedSkillCharId = () => null; global.getSelectedProfile = () => 'u
 global.getCustomWeights = () => null; global.getImplantTypeIds = () => []; global.getBoosterPayload = () => [];
 global._fitCheckOk = (r) => r;
 global._fitErrorHtml = (s) => 'ERROR ' + s;
-global._syncDroneVolumes = () => {}; global._fitSumBarUpdate = () => {}; global.refreshSkillWarnings = () => {};
+global._syncDroneVolumes = () => {}; global._syncFighterInfo = () => {}; global._fitSumBarUpdate = () => {}; global.refreshSkillWarnings = () => {};
 // each fetch parks until the scenario settles it, in whatever order it likes
 global.fetch = () => new Promise((resolve, reject) => pending.push({resolve, reject}));
 const ok = (html) => ({text: () => Promise.resolve(html)});

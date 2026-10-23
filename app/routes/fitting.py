@@ -19,6 +19,10 @@ from app.fitting.engine import calculate_fitting_stats, get_type_dogma_attrs, dp
 from app.fitting.compare import build_compare_sections
 from app.fitting.constants import ATTR_CPU, ATTR_POWER, ATTR_UPGRADE_COST, ATTR_DRONE_BW_USED
 from app.fitting.boosters import ATTR_BOOSTERNESS, get_booster_info
+from app.fitting.fighters import (
+    assign_fighter_squadrons, fighter_order_key, order_fighters_for_export,
+)
+from app.routes.fittings import _category_for_flag
 from app.db.sde_models import (
     SDEModuleSlot, SDEType, SDEGroup, SDETypeDogmaAttribute, SDEDogmaAttribute,
     SDETypeSkillReq,
@@ -696,6 +700,8 @@ async def ship_slots(
         ATTR_HI_SLOT_MODIFIER, ATTR_MED_SLOT_MODIFIER, ATTR_LOW_SLOT_MODIFIER,
         ATTR_TURRET_HARDPOINT_MODIFIER, ATTR_LAUNCHER_HARDPOINT_MODIFIER,
         ATTR_DRONE_CAPACITY, ATTR_DRONE_BANDWIDTH,
+        ATTR_FIGHTER_TUBES, ATTR_FIGHTER_LIGHT_SLOTS, ATTR_FIGHTER_SUPPORT_SLOTS,
+        ATTR_FIGHTER_HEAVY_SLOTS, ATTR_FIGHTER_CAPACITY,
     )
     hi = attrs.get(ATTR_HI_SLOTS, 0)
     med = attrs.get(ATTR_MED_SLOTS, 0)
@@ -735,6 +741,15 @@ async def ship_slots(
         # cannot be carried (ISS-135).
         "drone_bay": float(attrs.get(ATTR_DRONE_CAPACITY, 0)),
         "drone_bandwidth": float(attrs.get(ATTR_DRONE_BANDWIDTH, 0)),
+        # Fighter launch limits (ISS-136). A missing attribute is 0, so every
+        # hull without tubes reports all zeros. The hangar is the raw base
+        # value, informational only: Fighter Hangar Management raises it, and
+        # the page checks volume against the stats response's total instead.
+        "fighter_tubes": int(attrs.get(ATTR_FIGHTER_TUBES, 0)),
+        "fighter_light": int(attrs.get(ATTR_FIGHTER_LIGHT_SLOTS, 0)),
+        "fighter_support": int(attrs.get(ATTR_FIGHTER_SUPPORT_SLOTS, 0)),
+        "fighter_heavy": int(attrs.get(ATTR_FIGHTER_HEAVY_SLOTS, 0)),
+        "fighter_hangar_base": float(attrs.get(ATTR_FIGHTER_CAPACITY, 0)),
     }
 
 
@@ -897,6 +912,18 @@ async def import_eft(
                 item["charge_type_id"] = charge_id
                 item["charge_name"] = charge_name_eft
 
+    # Fighters: split each xN line into squadrons and decide which are
+    # launched (ISS-136). Whatever the hull can't launch stays as a reserve.
+    # Done AFTER the inline-charge loop above, which pairs `items` with
+    # `charge_names_eft` by index: splitting a line first would shift every
+    # charge after it onto the wrong module.
+    warnings: list[str] = []
+    fighter_ids = [i["type_id"] for i in items if i["slot"] == "fighter"]
+    if fighter_ids:
+        fighter_info = await sde.get_fighter_info_bulk(db, fighter_ids)
+        limits = (await sde.get_fighter_ship_limits(db, [ship_type_id])).get(ship_type_id, {})
+        items = assign_fighter_squadrons(items, fighter_info, limits, warnings)
+
     # Auto-load charges from cargo onto compatible weapons — one fit's worth
     # of weapon types, batched in the same fixed handful of queries the
     # character bulk-import path uses for all of them at once.
@@ -913,6 +940,7 @@ async def import_eft(
         "ship_name": ship_name,
         "fitting_name": fitting_name,
         "items": items,
+        **({"warnings": warnings} if warnings else {}),
     }
 
 
@@ -953,26 +981,32 @@ async def export_eft(
             lines.append(name)
         lines.append("")
 
+    # Drones, fighters and cargo always carry "xN", even for 1: pyfa drops a
+    # bare drone/fighter line. Fighters get their own block (blank line on both
+    # sides; pyfa imports a mixed block as cargo), one line per squadron,
+    # launched first then reserves.
+    # KNOWN LIMIT: EFT has no launch-state marker, so a reserve squadron
+    # re-imports as launched whenever the hull still has a free tube and class
+    # slot (the same fit only round-trips exactly when the launched ones fill
+    # the tubes or class limits).
     drones = [i for i in items if i.get("slot") == "drone"]
-    if drones:
-        for item in drones:
-            name = type_names.get(item["type_id"], f"Type {item['type_id']}")
-            qty = item.get("quantity", 1)
-            if qty > 1:
-                lines.append(f"{name} x{qty}")
-            else:
-                lines.append(name)
-        lines.append("")
-
+    fighters = order_fighters_for_export([i for i in items if i.get("slot") == "fighter"])
     cargo = [i for i in items if i.get("slot") == "cargo"]
-    if cargo:
-        for item in cargo:
-            name = type_names.get(item["type_id"], f"Type {item['type_id']}")
+    for bay in (drones, fighters, cargo):
+        written = False
+        for item in bay:
             qty = item.get("quantity", 1)
-            if qty > 1:
-                lines.append(f"{name} x{qty}")
-            else:
-                lines.append(name)
+            try:
+                qty = 1 if qty is None else int(qty)
+            except (TypeError, ValueError, OverflowError):
+                qty = 1
+            if qty < 1:
+                continue   # never write "x0" / "x-3"
+            name = type_names.get(item["type_id"], f"Type {item['type_id']}")
+            lines.append(f"{name} x{qty}")
+            written = True
+        if written:
+            lines.append("")
 
     return PlainTextResponse("\n".join(lines).rstrip())
 
@@ -1675,7 +1709,18 @@ async def _prepare_bulk_import_cache(db: AsyncSession, raw_fittings: list[dict])
     weapon_type_ids = [tid for tid, slot in slots.items() if slot in ("high", "med")]
     compat = await sde.get_compatible_charges_bulk(db, weapon_type_ids)
     compat_ids = {tid: {c["type_id"] for c in chs} for tid, chs in compat.items()}
-    return {"names": names, "slots": slots, "compat": compat_ids}
+
+    # Fighter squadron sizes/classes and per-hull tube limits (ISS-136); four
+    # extra queries (info: 3, limits: 1), only when the batch holds a fighter.
+    fighter_ids = [tid for tid, slot in slots.items() if slot == "fighter"]
+    fighters: dict = {}
+    fighter_limits: dict = {}
+    if fighter_ids:
+        fighters = await sde.get_fighter_info_bulk(db, fighter_ids)
+        fighter_limits = await sde.get_fighter_ship_limits(
+            db, [f["ship_type_id"] for f in raw_fittings if f.get("ship_type_id")])
+    return {"names": names, "slots": slots, "compat": compat_ids,
+            "fighters": fighters, "fighter_limits": fighter_limits}
 
 
 def _validate_bulk_fit(raw_fit: dict, cache: dict) -> dict | None:
@@ -1788,12 +1833,17 @@ def _describe_unresolvable_fit(validation: dict, names: dict[int, str]) -> str:
     return "; ".join(parts)
 
 
-def _convert_esi_fit_items(raw_items: list[dict], cache: dict) -> list[dict]:
+def _convert_esi_fit_items(raw_items: list[dict], cache: dict, ship_type_id: int | None = None) -> list[dict]:
     """ESI fitting items -> the fitting tool's saved-items shape, using the
     batched lookups _prepare_bulk_import_cache already ran for the whole
     request. Deliberately mirrors import_eft: same slot source (SDE module
     slot type, not the ESI flag), same cargo-charge autoload step — see
     tests/test_fitting_char_import.py's equivalence check.
+
+    Fighters are split into squadrons and launched by the hull's tube and
+    class limits, the same helper import_eft uses (ISS-136). ESI saved fits
+    carry only a per-type total under FighterBay, so there is no launch state
+    to read; without `ship_type_id` every squadron is kept as a reserve.
     """
     items = []
     for it in raw_items:
@@ -1804,6 +1854,16 @@ def _convert_esi_fit_items(raw_items: list[dict], cache: dict) -> list[dict]:
             "slot": cache["slots"].get(tid, "cargo"),
             "quantity": it.get("quantity", 1) or 1,
         })
+    if any(i["slot"] == "fighter" for i in items):
+        fighters = cache.get("fighters", {})
+        limits = cache.get("fighter_limits", {}).get(ship_type_id, {})
+        # ESI totals carry no line order; take tubes in the same order Load
+        # (_to_eft) writes them, so damage squadrons launch first.
+        order = iter(sorted(
+            (i for i in items if i["slot"] == "fighter"),
+            key=lambda i: fighter_order_key(fighters.get(i["type_id"]), i["type_name"])))
+        items = [next(order) if i["slot"] == "fighter" else i for i in items]
+        items = assign_fighter_squadrons(items, fighters, limits)
     return _autoload_cargo_charges(items, cache["compat"])
 
 
@@ -1865,6 +1925,11 @@ async def import_char_fittings(
     type_names = await sde.type_ids_to_names(db, list(all_ids))
     ship_classes = await _ship_class_map(db, [f["ship_type_id"] for f in raw])
     already_src, already_saved_pairs = await _already_imported_lookup(db, user_id, character_id)
+    fighter_ids = [
+        i["type_id"] for f in raw for i in f.get("items", [])
+        if _category_for_flag(i.get("flag")) == "fighter"
+    ]
+    fighter_info = await sde.get_fighter_info_bulk(db, fighter_ids) if fighter_ids else {}
 
     fittings = []
     for f in sorted(raw, key=lambda x: (x.get("ship_type_id"), x.get("name", ""))):
@@ -1879,7 +1944,7 @@ async def import_char_fittings(
             "name": name,
             "ship_type_id": sid,
             "ship_name": ship_name,
-            "eft": _to_eft(parsed),
+            "eft": _to_eft(parsed, fighter_info),
             "ship_class": ship_classes.get(sid, "Other"),
             "module_count": parsed["total_modules"],
             "already_imported": already_imported,
@@ -1993,7 +2058,7 @@ async def import_char_save(
             unresolvable.append({"name": name, **validation})
             continue
 
-        items = _convert_esi_fit_items(f.get("items", []), cache)
+        items = _convert_esi_fit_items(f.get("items", []), cache, int(ship_type_id))
 
         if char_folder_id is None:
             root = await _get_or_create_folder(db, user_id, None, f"{char.character_name} · in-game")
@@ -2083,7 +2148,23 @@ async def browse_items(
 
     # Check fit restrictions if a ship is selected
     if ship_type_id:
+        limits = {}
+        if any(i.get("slot_type") == "fighter" for i in items):
+            limits = (await sde.get_fighter_ship_limits(db, [ship_type_id])).get(ship_type_id, {})
         for item in items:
+            if item.get("slot_type") == "fighter":
+                # Structure fighters never launch from a ship, a hull with no
+                # tubes launches nothing, and a class the hull has no slots
+                # for (or no known class at all) can't be launched either
+                # (ISS-136). The page refuses the same cases; this just greys
+                # the row out.
+                cls = item.get("fighter_class")
+                item["can_fit"] = (
+                    cls in ("light", "support", "heavy")
+                    and bool(limits.get("tubes"))
+                    and bool(limits.get(cls))
+                )
+                continue
             item["can_fit"] = await sde.can_module_fit_ship(
                 db, item["type_id"], ship_type_id
             )
