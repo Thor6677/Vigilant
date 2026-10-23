@@ -96,25 +96,29 @@ def _inside_item(row: dict) -> bool:
     return row.get("location_flag") in _INSIDE_ITEM_FLAGS and bool(row.get("location_id"))
 
 
-def resolve_holder(holder_id: int, assets_by_id: dict) -> tuple[int | None, int | None]:
-    """(place id, type id of the item the blueprint is directly inside) from
-    the owner's assets. Walks up through nested containers to the station or
-    structure; the place is None when the item is in space or isn't in the
-    assets (undocked and unlisted, or another owner's)."""
+def resolve_holder(holder_id: int, assets_by_id: dict) -> tuple[int | None, int | None, bool]:
+    """(place id, type id of the item the blueprint is directly inside, in
+    space) from the owner's assets. Walks up through nested containers to the
+    station or structure. A ship out in space gives its solar system as the
+    place and in_space True; the place is None when the item isn't in the
+    assets (undocked and unlisted, or another owner's) or the chain never
+    reaches a place."""
     first = assets_by_id.get(holder_id)
     if first is None:
-        return None, None
+        return None, None, False
     cur = first
     for _ in range(_HOLDER_DEPTH):
         kind = cur.get("location_type")
         if kind in ("station", "other"):
-            return cur.get("location_id"), first.get("type_id")
+            return cur.get("location_id"), first.get("type_id"), False
+        if kind == "solar_system":
+            return cur.get("location_id"), first.get("type_id"), True
         if kind != "item":
             break
         cur = assets_by_id.get(cur.get("location_id"))
         if cur is None:
             break
-    return None, first.get("type_id")
+    return None, first.get("type_id"), False
 
 
 def _owned(row: dict, owner_name: str, reachable: bool) -> cp.OwnedBlueprint | None:
@@ -189,9 +193,10 @@ async def _owned_blueprints(db: AsyncSession, chars: list[Character],
                 if structure_id:
                     ob = dataclasses.replace(ob, location_id=structure_id)
             if ob.holder_id:
-                place, holder_type = resolve_holder(ob.holder_id, assets_by_id or {})
+                place, holder_type, in_space = resolve_holder(ob.holder_id, assets_by_id or {})
                 if holder_type:
-                    ob = dataclasses.replace(ob, location_id=place, holder_type_id=holder_type)
+                    ob = dataclasses.replace(ob, location_id=place, holder_type_id=holder_type,
+                                             holder_in_space=in_space)
                 else:
                     unlocated[owner] = unlocated.get(owner, 0) + 1
             if ob.is_bpo:

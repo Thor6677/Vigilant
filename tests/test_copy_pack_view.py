@@ -97,9 +97,10 @@ def test_collect_groups_by_place_biggest_first_then_by_name():
 
 # ── owner and ship in Collect ────────────────────────────────────────────────
 
-def _held(item_id, runs, owner, label="Personal Hangar", loc=None, holder=""):
+def _held(item_id, runs, owner, label="Personal Hangar", loc=None, holder="", in_space=False):
     return cp.OwnedBlueprint(item_id, 1, False, 10, 20, runs, owner_name=owner,
-                             location_id=loc, location_label=label, holder_label=holder)
+                             location_id=loc, location_label=label, holder_label=holder,
+                             holder_in_space=in_space)
 
 
 def test_place_label_names_the_ship_and_where_it_is():
@@ -125,3 +126,9 @@ def test_collect_separates_owners_sharing_a_place():
         ("Builder", "Archon in Faurent I", 1),
         ("Builder", "Faurent I", 1),
     ]
+
+
+def test_place_label_for_a_ship_in_space_names_its_system():
+    space = _held(1, 5, "Builder", label="Cargo", loc=30000142, holder="Archon", in_space=True)
+    assert view.place_label(space, {30000142: "Jita"}) == "Archon (in space, Jita)"
+    assert view.place_label(space, {}) == "Archon (in space)"
