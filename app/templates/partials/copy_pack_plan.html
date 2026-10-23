@@ -6,7 +6,7 @@
    copy_packs.html's nonced script (tests/test_csp_inline_handlers.py). #}
 {%- macro item_name(t) -%}{{ names.get(t, 'Type ' ~ t) }}{%- endmacro -%}
 {#- A resolved structure name replaces the flag label, except for a corp hangar, where the division (Corp Hangar 3) is worth keeping next to it. -#}
-{%- macro where(o) -%}{{ o.owner_name }}{% set named = location_names.get(o.location_id) %}{% set loc = (named ~ ', ' ~ o.location_label if named and o.location_label.startswith('Corp Hangar') else (named or o.location_label)) %}{% if loc %}, {{ loc }}{% endif %}{%- endmacro -%}
+{%- macro where(o) -%}{{ o.owner_name }}{% set named = location_names.get(o.location_id) %}{% set loc = (o.holder_label ~ (' in ' ~ named if named else ' (location unknown)') if o.holder_label else (named ~ ', ' ~ o.location_label if named and o.location_label.startswith('Corp Hangar') else (named or o.location_label))) %}{% if loc %}, {{ loc }}{% endif %}{%- endmacro -%}
 {%- macro skill_chips(ip) -%}{% for sid, lvl in ip.missing_skills %} <span class="cp-chip cp-chip--warn">needs {{ item_name(sid) }} {{ lvl }}</span>{% endfor %}{%- endmacro -%}
 
 {% if not copy_loaded %}
@@ -78,7 +78,7 @@
     <div class="b-panel">
         <div class="b-panel-head"><span class="b-label">2 · Collect BPCs ({{ collect_total }})</span></div>
         {%- for g in collect %}
-        <div class="cp-place">{{ g.place }} <span class="b-muted-sm">({{ g.rows | length }})</span></div>
+        <div class="cp-place">{{ g.place }} <span class="b-muted-sm">· {{ g.owner }} ({{ g.rows | length }})</span></div>
         {%- for row in g.rows %}
         <div class="b-table-row cp-row">
             <span style="flex:3;">{{ item_name(row.product_type_id) }}{{ skill_chips(plan.items[row.product_type_id]) }}</span>

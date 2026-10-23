@@ -45,15 +45,19 @@ class CollectRow:
 
 @dataclass(frozen=True)
 class CollectGroup:
+    owner: str
     place: str
     rows: list
 
 
 def place_label(o: cp.OwnedBlueprint, location_names: dict) -> str:
     """Where a blueprint sits. A corp hangar keeps its division next to the
-    structure name; anything else is the name alone, then the flag label."""
+    structure name; a blueprint inside a ship or container says which one,
+    then where that is; anything else is the name alone, then the flag label."""
     named = location_names.get(o.location_id) if o.location_id else None
     label = o.location_label or ""
+    if o.holder_label:
+        return f"{o.holder_label} in {named}" if named else f"{o.holder_label} (location unknown)"
     if named and label.startswith("Corp Hangar"):
         return f"{named}, {label}"
     return named or label or "Unknown location"
@@ -83,16 +87,16 @@ def build_pack(plan: cp.Plan) -> Pack:
 
 
 def group_bpcs(plan: cp.Plan, location_names: dict, names: dict) -> list:
-    """The BPCs the plan uses, grouped by place: biggest group first, then
-    by place name; rows within a group by item name."""
-    groups: dict[str, list] = {}
+    """The BPCs the plan uses, grouped by owner and place: biggest group
+    first, then by owner and place name; rows within a group by item name."""
+    groups: dict[tuple[str, str], list] = {}
     for ip in plan.bpc_items():
         for o, n in ip.bpcs_used:
-            groups.setdefault(place_label(o, location_names), []).append(
+            groups.setdefault((o.owner_name, place_label(o, location_names)), []).append(
                 CollectRow(ip.product_type_id, o.me, o.te, n, o.runs))
     out = []
-    for place, rows in groups.items():
+    for (owner, place), rows in groups.items():
         rows.sort(key=lambda r: (names.get(r.product_type_id, ""), -r.runs))
-        out.append(CollectGroup(place, rows))
-    out.sort(key=lambda g: (-len(g.rows), g.place))
+        out.append(CollectGroup(owner, place, rows))
+    out.sort(key=lambda g: (-len(g.rows), g.owner, g.place))
     return out
