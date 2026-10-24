@@ -278,6 +278,15 @@ def _background_jobs_enabled() -> bool:
     return get_settings().background_jobs_enabled
 
 
+def _sde_autoload_enabled() -> bool:
+    """Whether startup() should check for and download the SDE.
+
+    Split out of startup() like _background_jobs_enabled() — see
+    tests/test_test_isolation.py.
+    """
+    return get_settings().sde_autoload_enabled
+
+
 @app.on_event("startup")
 async def startup():
     from sqlalchemy import text
@@ -572,8 +581,12 @@ async def startup():
     # NOT gated by BACKGROUND_JOBS_ENABLED: every page that renders a type or
     # system name needs the SDE tables, and on a seeded dev DB this no-ops
     # immediately once the DB carries every sde_meta marker (a dev DB seeded
-    # from a prod DB that predates a marker reimports once).
-    asyncio.create_task(ensure_sde_loaded())
+    # from a prod DB that predates a marker reimports once). It has its own
+    # switch, SDE_AUTOLOAD_ENABLED, for the test suite.
+    if _sde_autoload_enabled():
+        asyncio.create_task(ensure_sde_loaded())
+    else:
+        logging.info("SDE_AUTOLOAD_ENABLED=false — skipping SDE check and download.")
 
     # T-080: ix_wallet_snapshots_char_recorded, off the blocking startup
     # path — see create_wallet_snapshot_index_background()'s docstring.

@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     # so this stays one switch rather than growing a flag per task.
     background_jobs_enabled: bool = True
 
+    # Whether startup() checks for and downloads the SDE. True in production.
+    # False skips it entirely: the test suite sets it (its throwaway DB has no
+    # SDE, so every app start would begin a full download) and so can an
+    # offline instance that loads the SDE some other way.
+    sde_autoload_enabled: bool = True
+
     # In-app update checker: polls the GitHub Releases API for this repo and
     # announces a newer release once, via Discord and an admin banner. It NEVER
     # auto-updates — the operator always chooses when to deploy. A build
