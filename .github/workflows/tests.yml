@@ -43,8 +43,8 @@ jobs:
 
       # No secrets or .env needed: tests/conftest.py supplies dummy SSO
       # credentials and points DATABASE_URL at a throwaway SQLite file.
-      # --timeout fails a single stuck test instead of the whole job, and the
-      # thread method dumps every thread's stack so the log names the hang. It
+      # --timeout with the thread method dumps every thread's stack so the log
+      # names the hang, then aborts the whole run (not just the stuck test). It
       # is set here rather than in pytest config so local runs don't need the
       # plugin.
       - name: Run tests

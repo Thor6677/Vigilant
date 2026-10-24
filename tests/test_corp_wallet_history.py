@@ -179,7 +179,7 @@ def _client(user_id=None):
 
 
 @pytest.fixture
-def gated_app(monkeypatch):
+def gated_app(monkeypatch, network_unreachable):
     engine, SessionLocal = _temp_db()
 
     async def _seed():

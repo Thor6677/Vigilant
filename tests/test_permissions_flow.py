@@ -103,6 +103,13 @@ def env(monkeypatch):
                 "birthday": None, "corporation_name": "Test Corp", "alliance_name": None}
 
     monkeypatch.setattr(auth_routes, "revoke_refresh_token", fake_revoke)
+
+    # The admin removal routes import revoke_refresh_token from app.auth.tokens
+    # at call time, so patching auth_routes alone left them posting to CCP.
+    async def no_revoke(token):
+        return True
+
+    monkeypatch.setattr("app.auth.tokens.revoke_refresh_token", no_revoke)
     monkeypatch.setattr(auth_routes, "_public_metadata", fake_meta)
     monkeypatch.setattr(auth_routes, "_queue_sync", lambda cid: calls["synced"].append(cid))
 
@@ -739,6 +746,7 @@ def test_single_notice_import_unaffected_by_new_summary_macro():
     assert "perm-notice-roles" not in html and "<details" not in html
 
 
+@pytest.mark.usefixtures("network_unreachable")
 def test_corp_detail_page_wires_the_summary_macro_in():
     """End-to-end through the real route and template, not just the macro in
     isolation: /corporations/{id}/detail must actually call

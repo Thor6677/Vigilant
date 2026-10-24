@@ -20,7 +20,9 @@ def _settings(**kw):
     return Settings(**base)
 
 
-def test_defaults_to_enabled():
+def test_defaults_to_enabled(monkeypatch):
+    # conftest turns the flag off for the whole suite; Settings reads the env.
+    monkeypatch.delenv("BACKGROUND_JOBS_ENABLED", raising=False)
     assert _settings().background_jobs_enabled is True
 
 
