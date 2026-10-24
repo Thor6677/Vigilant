@@ -170,6 +170,7 @@ def test_admin_section_poll_by_an_admin_is_the_fragment(admin_user_id):
     assert "<html" not in r.text.lower(), "a fragment, not a page"
 
 
+@pytest.mark.usefixtures("network_unreachable")
 def test_every_gated_literal_get_route_answers_htmx_with_hx_redirect():
     """For every literal GET route: if an anonymous browser navigation is
     redirected, an anonymous htmx request to the same path must be told to

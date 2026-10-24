@@ -57,6 +57,48 @@ os.environ["BACKGROUND_JOBS_ENABLED"] = "false"
 os.environ["SDE_AUTOLOAD_ENABLED"] = "false"
 
 
+# Network guard (tests/_network_guard.py): fails any test that reaches the real
+# network, even when the app swallows the error.
+import pytest  # noqa: E402
+
+from tests import _network_guard  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_real_network(request):
+    _network_guard.install()
+    _network_guard.drain()
+    _network_guard.start(
+        request.node.nodeid,
+        enabled=request.node.get_closest_marker("allow_network") is None,
+    )
+    yield
+    _network_guard.stop()
+    hits = _network_guard.drain()
+    if hits:
+        pytest.fail(
+            "test reached the real network (stub it, or mark it "
+            "@pytest.mark.allow_network):\n"
+            + "\n".join(f"  {nodeid}: {what}" for nodeid, what in hits),
+            pytrace=False,
+        )
+
+
+@pytest.fixture
+def network_unreachable(monkeypatch):
+    """Every httpx request fails at once with a connection error.
+
+    For tests that go through routes which call ESI or another web service but
+    assert nothing about the answer: the real call would be blocked by the
+    guard above. A test that cares about the result stubs its own helper.
+    """
+    import httpx
+
+    async def _refuse(self, request, **kwargs):
+        raise httpx.ConnectError("network unreachable in tests", request=request)
+
+    monkeypatch.setattr(httpx.AsyncClient, "send", _refuse)
+
 
 def pytest_configure(config):
     """Create the full schema in the throwaway DB before any test runs.
@@ -65,6 +107,10 @@ def pytest_configure(config):
     `_temp_engine` in test_networth.py); this only guarantees that routes
     reached through TestClient find tables rather than an empty file.
     """
+    config.addinivalue_line(
+        "markers", "allow_network: exempt this test from the network guard"
+    )
+
     import asyncio
 
     from app.db.models import Base, engine, ensure_wal
