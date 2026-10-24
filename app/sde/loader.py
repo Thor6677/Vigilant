@@ -9,12 +9,14 @@ import logging
 import math
 import zipfile
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 
 import httpx
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import AsyncSessionLocal
+from app.sde.map_data import build_from_zip
 from app.db.sde_models import (
     SDEType, SDESystem, SDEJump, SDEStation, SDERegion, SDEConstellation, SDEMeta,
     SDEBlueprintMaterial, SDETypeMaterial, SDECompressible, SDEBlueprintInfo,
@@ -366,6 +368,19 @@ def _parse_npc_corp_item(item: dict) -> dict | None:
         except (ValueError, TypeError):
             faction_id = None
     return {"corporation_id": corp_id, "faction_id": faction_id}
+
+
+def _regenerate_kspace_map(zf: zipfile.ZipFile, out_dir: Path = Path("/data/map")) -> None:
+    """Rewrite the runtime K-space map JSONs (served by /api/map/kspace-data/*).
+
+    Never raises: the SDE import already succeeded, and an escaping error
+    here would leave import_in_progress set.
+    """
+    try:
+        build_from_zip(zf, out_dir)
+        log.info(f"Regenerated K-space map JSONs in {out_dir}")
+    except Exception:
+        log.warning("Map-data regeneration failed (non-fatal)", exc_info=True)
 
 
 async def download_and_import(db: AsyncSession):
@@ -1409,26 +1424,9 @@ async def download_and_import(db: AsyncSession):
     except KeyError:
         log.warning("typeBonus.jsonl not present in SDE zip — skipping")
 
-    # T-031 / ISS-019: regenerate K-space star-map JSONs from the same SDE
-    # zip we just imported. Writes to /data/map/{systems,edges,regions}.json
-    # — served at runtime by /api/map/kspace-data/*. Without this, the
-    # frontend's k-space map stays stale (it would otherwise only refresh
-    # on a frontend rebuild). Failure here is non-fatal — the SDE import
-    # itself already succeeded.
-    try:
-        import sys
-        from pathlib import Path
-        # scripts/ is at the repo root; in the container it lives at /app/scripts/.
-        repo_root = Path(__file__).resolve().parents[2]
-        scripts_dir = repo_root / "scripts"
-        if str(scripts_dir) not in sys.path:
-            sys.path.insert(0, str(scripts_dir))
-        from build_map_data import build_from_zip  # type: ignore[import-not-found]
-        map_out = Path("/data/map")
-        build_from_zip(zf, map_out)
-        log.info(f"Regenerated K-space map JSONs in {map_out}")
-    except Exception as e:
-        log.warning(f"Map-data regeneration failed (non-fatal): {e}")
+    # T-031 / ISS-019: regenerate the K-space star-map JSONs from the same
+    # SDE zip. Failure is non-fatal — the SDE import itself already succeeded.
+    _regenerate_kspace_map(zf)
 
     # T-049: this run imported sde_effects with code that keeps
     # fittingUsageChanceAttributeID, so needs_update() never has to force

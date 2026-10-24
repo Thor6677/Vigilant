@@ -10,8 +10,9 @@ the synthetic hex-flower we used previously.
 
 Projection: top-down (look down +Y axis), so screen-X = world-X and
 screen-Y = world-Z. This is the same convention K-space falls back to
-(`build_map_data.py` lines 169-171). Z is flipped on the screen Y axis
-because EVE's Y-up world coords map to screen Y-down.
+(`app/sde/map_data.py`, the 2-D position block in `build_from_zip`). Z is
+flipped on the screen Y axis because EVE's Y-up world coords map to screen
+Y-down.
 
 Output: app/data/wormhole_positions.json with the shape
     {
@@ -145,7 +146,8 @@ def build(use_cache: bool) -> None:
     # Top-down XZ projection: world-X → screen-X, world-Z → screen-Y.
     # Normalise to a 0..CANVAS_SIZE square preserving aspect, then flip
     # screen-Y so Z increasing maps to "down" on screen — same convention
-    # K-space uses (build_map_data.py:223-225).
+    # K-space uses (the "Flip Y" block in
+    # app/sde/map_data.py build_from_zip).
     raw_x = [s["px"] for s in raw]
     raw_y = [s["pz"] for s in raw]
     min_x, max_x = min(raw_x), max(raw_x)
