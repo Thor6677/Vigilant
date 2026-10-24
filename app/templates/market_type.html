@@ -22,6 +22,11 @@
     .mk-stat { background:var(--surface); border:1px solid var(--border); padding:0.5rem 0.75rem; }
     .mk-stat-val { font-size:16px; color:var(--accent); font-weight:600; }
     .mk-stat-label { font-size:9px; letter-spacing:0.12em; color:var(--muted); text-transform:uppercase; margin-top:2px; }
+    /* ISS-130: 1fr = minmax(auto, 1fr), so each order-book column was as wide
+       as its longest nowrap station row and the page scrolled sideways.
+       min-width:0 lets both columns share the width; the location cell then
+       ellipsises as it was always meant to. Phones already stack (site.css). */
+    .mk-book > .b-section { min-width: 0; }
 </style>
 {% endblock %}
 
