@@ -67,7 +67,10 @@
  *                           fallback pattern. Sets display:none on the
  *                           element when its 'error' event fires.
  *                           Listener is registered with {capture:true}
- *                           because 'error' does not bubble.
+ *                           because 'error' does not bubble. Any other value
+ *                           names a global handler (e.g. imgFallback). A
+ *                           DOMContentLoaded sweep also applies it to images
+ *                           that failed before this script ran (ISS-110).
  *   data-stop             — when present on a matched element, the
  *                           dispatcher calls e.stopPropagation() before
  *                           invoking the handler. Use to migrate sites
@@ -698,16 +701,12 @@
         }
     });
 
-    // 'error' does not bubble — must use capture phase to catch it at the
-    // document level. data-on-error="hide" is the only recognized value
-    // (built-in shortcut for the broken-image fallback pattern). To dispatch
-    // to a named handler, use data-on-error="myHandler" instead.
-    document.addEventListener('error', function (e) {
-        var el = e.target;
-        // Guard against non-Element targets: 'error' also fires on window,
-        // XMLHttpRequest, etc. Those lack getAttribute. The guard is
-        // intentional — do not remove.
-        if (!el || !el.getAttribute) return;
+    // Shared by the capture listener below and the DOMContentLoaded sweep, so
+    // both paths treat a broken image identically. data-on-error="hide" is the
+    // built-in shortcut for the broken-image fallback pattern; any other value
+    // names a global function (for example imgFallback) called with the element
+    // as `this`.
+    function applyOnError(el, e) {
         var spec = el.getAttribute('data-on-error');
         if (!spec) return;
         if (spec === 'hide') {
@@ -720,7 +719,34 @@
         } else if (window.console && console.warn) {
             console.warn('vigilant.actions: no global function named "' + spec + '" for error');
         }
+    }
+
+    // 'error' does not bubble — must use capture phase to catch it at the
+    // document level.
+    document.addEventListener('error', function (e) {
+        var el = e.target;
+        // Guard against non-Element targets: 'error' also fires on window,
+        // XMLHttpRequest, etc. Those lack getAttribute. The guard is
+        // intentional — do not remove.
+        if (!el || !el.getAttribute) return;
+        applyOnError(el, e);
     }, true);
+
+    // ISS-110: an image whose error fired before this file ran (it loads at the
+    // end of <body>; evetech caches its 400s for 2h, so a repeat visit fails in
+    // ~0 ms) never reached the listener above. Error events are tasks, so by
+    // DOMContentLoaded every image has either already failed (caught here) or
+    // will fail later (caught by the listener). None of these images is an SVG,
+    // so naturalWidth 0 with complete means broken, not "has no intrinsic size".
+    document.addEventListener('DOMContentLoaded', function () {
+        var imgs = document.querySelectorAll('img[data-on-error]');
+        for (var i = 0; i < imgs.length; i++) {
+            var img = imgs[i];
+            if (img.tagName === 'IMG' && img.getAttribute('src') && img.complete && img.naturalWidth === 0) {
+                applyOnError(img, { type: 'error', target: img });
+            }
+        }
+    });
 
     /* Updater restart gap (Task 6).
      *
