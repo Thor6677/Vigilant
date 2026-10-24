@@ -47,6 +47,16 @@ tempfile.tempdir = _RUN_TMP
 _TEST_DB = os.path.join(tempfile.mkdtemp(prefix="vigilant-tests-"), "test.db")
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_TEST_DB}"
 
+# Every `with TestClient(main.app)` runs the app's startup, which launches the
+# scheduler, pollers, update check and an SDE download as bare tasks that are
+# never cancelled and all reach for the network. They were the suspect in the
+# intermittent hang at TestClient teardown (ISS-117, ISS-132), and none is
+# wanted in a test. Set unconditionally, like DATABASE_URL, so an inherited
+# value can never turn them back on.
+os.environ["BACKGROUND_JOBS_ENABLED"] = "false"
+os.environ["SDE_AUTOLOAD_ENABLED"] = "false"
+
+
 
 def pytest_configure(config):
     """Create the full schema in the throwaway DB before any test runs.
