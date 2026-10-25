@@ -93,7 +93,7 @@
             {# No tags: no label, so the phone row hides the cell (untagged
                m-row children are hidden) instead of showing an empty line. #}
             <td data-col-cell="tags"{% if row.tags %} data-m-label="{{ column_labels.get(key, key) }}"{% endif %} data-sort-value="{{ row.cells.tags.sort }}" style="padding:0.35rem 0.6rem;border-bottom:1px solid var(--border);">
-                {% for t in row.tags %}<span class="b-badge" style="font-size:8px;border:1px solid var(--border);color:var(--muted);margin-right:2px;">{{ t }}</span>{% endfor %}
+                {% if row.tags %}<span class="dash-tags">{% for t in row.tags %}<span class="b-badge" style="font-size:8px;border:1px solid var(--border);color:var(--muted);margin-right:2px;">{{ t }}</span>{% endfor %}</span>{% endif %}
             </td>
             {% elif key == 'can_fly' %}
             <td data-col-cell="can_fly" data-m-label="{{ column_labels.get(key, key) }}" data-sort-value="{{ row.cells.can_fly.sort }}" data-canfly-slot="{{ row.character_id }}" style="padding:0.35rem 0.6rem;border-bottom:1px solid var(--border);"><span data-canfly-text>{{ row.cells.can_fly.text }}</span></td>

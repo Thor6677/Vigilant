@@ -14,7 +14,8 @@ import app.main  # noqa: F401 — populates every router's templates.env.globals
 from app.routes import blueprints as blueprints_mod
 from app.routes import fittings as fittings_mod
 from app.routes import intel_entity as entity_mod
-from tests._mobile import VOID, css_section, mrows, norm, render_page, rule_bodies, source
+from tests._mobile import (VOID, cells_rows, css_section, mrows, norm, phone_block, render_page, row_keys,
+                           rule_bodies, source)
 
 
 # ── HTML and CSS helpers ─────────────────────────────────────────────
@@ -336,10 +337,21 @@ def test_blueprint_css_filter_row_is_a_two_column_grid():
 def test_section_has_no_desktop_rules():
     """Everything in the R2 T3 section sits inside its one phone media block."""
     css = css_section("T3")
-    m = re.search(r"@media \(max-width: 640px\) \{", css)
-    assert m and css.count("@media") == 1
-    depth, i = 1, m.end()
-    while depth:
-        depth += (css[i] == "{") - (css[i] == "}")
-        i += 1
-    assert css[:m.start()].strip() == "" and css[i:].strip() == ""
+    assert css.count("@media") == 1
+    # phone_block fails unless the section opens with the phone block.
+    assert phone_block(css)[1].strip() == ""
+
+
+def test_blueprint_row_key_one_carries_the_bp_key_hook():
+    """Key 1 (R1 makes it a block) takes its line box from the inherited
+    16px unless a rule sets its size; the hook carries that rule (ISS-118)."""
+    for is_corp in (False, True):
+        rows = cells_rows(_render_blueprints(is_corp))
+        assert len(rows) == 2
+        for r in rows:
+            key1 = row_keys(r)[0]
+            assert "bp-key" in key1["attrs"].get("class", "").split()
+
+
+def test_blueprint_key_one_is_11px_like_the_name_and_key_two():
+    assert _decls(".m-row > [data-m=\"key\"].bp-key")["font-size"] == "11px"

@@ -21,7 +21,7 @@ import pytest
 from app.auth import scopes as perms
 from app.routes import corporations as corps_mod
 from tests._mobile import (SITE_CSS, VOID, assert_mrow, assert_single_value_child,
-                           cells_rows, clamps, css_section, norm, row_keys,
+                           cells_rows, clamps, css_section, norm, phone_block, row_keys,
                            row_labelled, rule_bodies, render_page)
 
 _NS = types.SimpleNamespace
@@ -31,47 +31,64 @@ _NS = types.SimpleNamespace
 
 @pytest.mark.parametrize("value, level", [
     ("EXPIRED", "danger"),
-    ("0h", "warn"),
-    ("18h", "warn"),
-    ("23h", "warn"),
+    ("0h", "danger"),
+    ("18h", "danger"),
+    ("23h", "danger"),
     ("1d 0h", "warn"),
     ("1d 23h", "warn"),
-    ("2d 0h", ""),
-    ("10d 0h", ""),
-    ("12d 4h", ""),
+    ("6d 23h", "warn"),
+    ("7d 0h", "muted"),
+    ("12d 4h", "muted"),
+    ("13d 23h", "muted"),
+    ("14d 0h", ""),
+    ("30d 0h", ""),
     (None, ""),
     ("", ""),
     ("soon", ""),
     ("1d", ""),
     ("d 4h", ""),
+    ("\u0663h", ""),          # a non-ASCII digit is not a count
+    ("\u0663d 1h", ""),
 ])
 def test_fuel_level_boundaries(value, level):
     assert corps_mod._fuel_level(value) == level
 
 
-def test_fuel_under_a_day_is_a_warning_end_to_end():
+def test_fuel_under_a_day_is_danger_end_to_end():
     """The bug itself: under 24h _fuel_remaining says "18h", never "0d …",
-    so the template's old startswith('0d') test let it through uncoloured."""
+    so the template's old startswith('0d') test let it through uncoloured.
+    Under a day is now red (ISS-118), like the structure timer banner."""
     expires = (datetime.now(timezone.utc) + timedelta(hours=18, minutes=30)).isoformat()
     remaining = corps_mod._fuel_remaining(expires)
     assert remaining == "18h"
-    assert corps_mod._fuel_level(remaining) == "warn"
+    assert corps_mod._fuel_level(remaining) == "danger"
 
 
+_ISO = {
+    "offset": lambda dt: dt.isoformat(),
+    "z": lambda dt: dt.strftime("%Y-%m-%dT%H:%M:%SZ"),   # what ESI sends
+}
+
+
+@pytest.mark.parametrize("fmt", sorted(_ISO))
 @pytest.mark.parametrize("ahead, level", [
-    (timedelta(minutes=30), "warn"),             # "0h"
-    (timedelta(hours=23, minutes=30), "warn"),   # "23h"
+    (timedelta(minutes=30), "danger"),           # "0h"
+    (timedelta(hours=23, minutes=30), "danger"), # "23h"
     (timedelta(hours=24, minutes=30), "warn"),   # "1d 0h"
     (timedelta(hours=47, minutes=30), "warn"),   # "1d 23h"
-    (timedelta(hours=48, minutes=30), ""),       # "2d 0h"
+    (timedelta(days=6, hours=23, minutes=30), "warn"),    # "6d 23h"
+    (timedelta(days=7, minutes=30), "muted"),    # "7d 0h"
+    (timedelta(days=13, hours=23, minutes=30), "muted"),  # "13d 23h"
+    (timedelta(days=14, minutes=30), ""),        # "14d 0h"
     (timedelta(minutes=-1), "danger"),           # "EXPIRED"
 ])
-def test_fuel_level_round_trips_fuel_remaining(ahead, level):
+def test_fuel_level_round_trips_fuel_remaining(fmt, ahead, level):
     """_fuel_level reads _fuel_remaining's display string, so pin the pair
     together: a change to that string's format must not silently drop the
     warning. Each case sits 30 minutes inside its band, so the moment
-    _fuel_remaining reads the clock can't move it."""
-    expires = (datetime.now(timezone.utc) + ahead).isoformat()
+    _fuel_remaining reads the clock can't move it. Both the +00:00 form and
+    the Z form ESI actually sends are covered."""
+    expires = _ISO[fmt](datetime.now(timezone.utc) + ahead)
     assert corps_mod._fuel_level(corps_mod._fuel_remaining(expires)) == level
 
 
@@ -406,6 +423,7 @@ _STRUCTS = [
             timer="2026-10-06", services=[{"name": "Market", "state": "online"}]),
     _struct("Sample Station Charlie", "shield_vulnerable", "18h"),
     _struct("Sample Station Delta", "shield_vulnerable", "EXPIRED", reinforce=12),
+    _struct("Sample Station Foxtrot", "shield_vulnerable", "20d 2h"),
 ]
 
 
@@ -494,7 +512,7 @@ def test_structure_key_one_is_the_name_with_a_badge_only_off_normal():
 
 def test_structure_key_two_is_fuel_coloured_by_fuel_level():
     rows = _struct_rows(_render_detail())
-    expect = {"danger": "is-danger", "warn": "is-warn", "": None}
+    expect = {"danger": "is-danger", "warn": "is-warn", "muted": "is-muted", "": "is-text"}
     seen = set()
     for s in _STRUCTS:
         keys = row_keys(rows[s["name"]])
@@ -503,13 +521,13 @@ def test_structure_key_two_is_fuel_coloured_by_fuel_level():
         cls = keys[1]["attrs"]["class"].split()
         level = corps_mod._fuel_level(s["fuel_remaining"])
         seen.add(level)
-        for want in ("is-danger", "is-warn"):
+        for want in ("is-danger", "is-warn", "is-muted", "is-text"):
             assert (want in cls) == (expect[level] == want), (s["name"], cls)
-    assert seen == {"danger", "warn", ""}
+    assert seen == {"danger", "warn", "muted", ""}
 
 
 def test_desktop_fuel_span_uses_the_same_level():
-    """ISS-113 on desktop: the 18h structure's Fuel line turns amber too."""
+    """ISS-113 on desktop: the 18h structure's Fuel line turns red too."""
     html = _render_detail()
     for s in _STRUCTS:
         m = re.search(r'<span class="([^"]*)">\s*Fuel: ' + re.escape(s["fuel_remaining"]) + r"\s*</span>", html)
@@ -519,6 +537,45 @@ def test_desktop_fuel_span_uses_the_same_level():
         assert "b-row-label" in cls
         assert ("is-warn" in cls) == (level == "warn"), s["name"]
         assert ("is-danger" in cls) == (level == "danger"), s["name"]
+        assert ("is-muted" in cls) == (level == "muted"), s["name"]
+        assert ("is-text" in cls) == (level == ""), s["name"]
+
+
+def _components_css():
+    path = os.path.join(os.path.dirname(SITE_CSS), "..", "..", "design-system", "css", "components.css")
+    with open(path, encoding="utf-8") as fh:
+        return fh.read()
+
+
+def _effective_colour(classes):
+    """The colour components.css gives an element with these classes: a
+    matching `.is-*` utility (they are !important) over .b-row-label's own."""
+    css = _components_css()
+    for c in classes:
+        if c.startswith("is-"):
+            m = re.search(rf"(?<![\w-])\.{re.escape(c)}\s*\{{\s*color:\s*([^;]+?)\s*!important", css)
+            if m:
+                return m.group(1)
+    m = re.search(r"\.b-row-label\s*\{[^}]*?[;{\s]color:\s*([^;}]+)", css)
+    return m.group(1).strip()
+
+
+def test_every_fuel_band_has_its_own_colour_on_desktop_and_phone():
+    """The 14+ day band used to take .b-row-label's own gray, the same as
+    the 7-13 day "muted" band. Compute the colour the CSS really gives each
+    band, on the desktop span and the phone key 2 alike."""
+    html = _render_detail()
+    rows = _struct_rows(html)
+    by_level = {}
+    for s in _STRUCTS:
+        level = corps_mod._fuel_level(s["fuel_remaining"])
+        phone = _effective_colour(row_keys(rows[s["name"]])[1]["attrs"]["class"].split())
+        m = re.search(r'<span class="([^"]*)">\s*Fuel: ' + re.escape(s["fuel_remaining"]) + r"\s*</span>", html)
+        desktop = _effective_colour(m.group(1).split())
+        assert phone == desktop, s["name"]
+        by_level[level] = phone
+    assert by_level == {"danger": "var(--danger)", "warn": "var(--warn)",
+                        "muted": "var(--muted)", "": "var(--text)"}
 
 
 def test_structure_without_fuel_keeps_one_key():
@@ -621,6 +678,14 @@ def test_jobs_clamp_with_show_all_past_ten():
     assert btn["attrs"]["data-toggle-target"] == ".m-clamp-wrap"
 
 
+@pytest.mark.parametrize("n, shown", [(10, False), (11, True)])
+def test_jobs_show_all_boundary_is_past_ten(n, shown):
+    """The template's threshold is `> 10`: exactly 10 jobs get no button."""
+    cl = clamps(_render_detail(n_jobs=n))
+    assert len(cl.clamps) == 1 and cl.clamps[0]["children"] == n
+    assert len(cl.showall) == (1 if shown else 0)
+
+
 def test_jobs_no_show_all_for_five():
     c = clamps(_render_detail(n_jobs=5))
     assert len(c.clamps) == 1 and c.clamps[0]["children"] == 5
@@ -716,23 +781,8 @@ def _t5():
     return css_section("T5")
 
 
-def _split_media(section):
-    """(before, inside, after) the section's phone @media block, found by
-    matching braces from its opening `{`, so a rule after the block (a
-    desktop rule) lands in `after` rather than inside the block."""
-    at = section.index("@media")
-    start = section.index("{", at) + 1
-    depth = 1
-    for i in range(start, len(section)):
-        depth += (section[i] == "{") - (section[i] == "}")
-        if depth == 0:
-            return section[:at], section[start:i], section[i + 1:]
-    raise AssertionError("R2 T5's @media block never closes")
-
-
 def _phone_block():
-    before, inside, after = _split_media(_t5())
-    return inside
+    return phone_block(_t5())[0]
 
 
 def _decl(body, prop):
@@ -753,9 +803,12 @@ def test_header_name_sits_in_a_shrinkable_line_and_ellipsises():
     """The name gets the width the hidden scope line frees: its line is the
     flexible one (flex:1; min-width:0), and .b-card-name ellipsises."""
     html = _render_list()
-    for m in re.finditer(r'<div class="corp-sum-main" style="([^"]*)"', html):
+    mains = list(re.finditer(r'<div class="corp-sum-main" style="([^"]*)"', html))
+    sides = list(re.finditer(r'<div class="corp-sum-side" style="([^"]*)"', html))
+    assert len(mains) == len(sides) == 3     # player, small, NPC corp headers
+    for m in mains:
         assert "flex:1" in m.group(1) and "min-width:0" in m.group(1)
-    for m in re.finditer(r'<div class="corp-sum-side" style="([^"]*)"', html):
+    for m in sides:
         assert "flex-shrink:0" in m.group(1)
     components_css = os.path.join(os.path.dirname(SITE_CSS), "..", "..",
                                   "design-system", "css", "components.css")
@@ -799,6 +852,7 @@ def test_our_characters_permissions_link_is_11px_on_phones():
     through its hook (!important beats the inline size). Desktop keeps the
     inline size (D21)."""
     rows = _hooked(_render_detail(), "corp-char-row")
+    assert len(rows) == 2
     for r in rows:
         perms_link = [k for k in r["kids"] if k[0] == "a" and "/account/permissions/" in k[2]["href"]]
         assert len(perms_link) == 1
@@ -845,18 +899,7 @@ def test_css_has_no_desktop_rules():
     """D21: desktop renders as before, so the section is one phone @media
     block with only whitespace before it and after its closing brace, up to
     the end marker."""
-    body = _t5()
-    before, inside, after = _split_media(body)
-    assert body[len(before):].startswith("@media (max-width: 640px) {")
-    assert not before.strip(), before
+    # phone_block fails unless the section opens with the phone block.
+    inside, after = phone_block(_t5())
     assert not after.strip(), f"rules after the phone block apply on desktop: {after.strip()!r}"
     assert "@media" not in inside
-
-
-def test_split_media_catches_a_rule_after_the_block():
-    """The guard above, against the mutation that slipped past a greedy
-    match: a desktop rule after the phone block, inside the section."""
-    sample = "\n@media (max-width: 640px) {\n    .a { color: red; }\n}\n.b { outline: 3px solid red; }\n"
-    before, inside, after = _split_media(sample)
-    assert ".b" not in inside and ".a" in inside
-    assert after.strip() == ".b { outline: 3px solid red; }"

@@ -23,6 +23,9 @@ Helpers, one line each:
   phone_block(section)           a css_section's phone @media body (brace-matched) and what follows it
   selectors(prelude)             split a CSS selector list on its top-level commas (not inside :not())
   rule_bodies(css, selector)     joined bodies of every rule whose selector list contains `selector`
+  has_decl(body, decl)           `decl` ("prop: value") as a whole declaration in a rule body, not
+                                 a suffix of a longer property (`max-width` for `width`)
+  ACTION_BINDING                 regex for the data-* attributes static/js/actions.js dispatches on
 
 `assert_mrow(html)` parses rendered HTML and checks every element with class
 `m-row`:
@@ -32,7 +35,7 @@ Helpers, one line each:
     forces width:auto !important on row children, so without them an
     unloaded or broken image collapses to ~2px and the row jumps when it
     arrives.
-  * every data-m-label is non-empty
+  * every data-m-label is non-empty and unique within the row
   * a non-link row is toggled by toggleMRow or by its own toggleExpanded;
     a link row (m-row--link) is never toggled by toggleMRow
   * neither the row nor any tagged cell (data-m or data-m-label) is hidden
@@ -120,6 +123,9 @@ def assert_mrow(html: str, min_rows: int = 1) -> list[dict]:
         for tag, k in zip(r["child_tags"], kids):
             if tag == "img" and k.get("data-m") == "lead":
                 _assert_img_size(where, k)
+        labels = [k["data-m-label"] for k in kids if "data-m-label" in k]
+        assert len(labels) == len(set(labels)), (
+            f"{where}: duplicate data-m-label values {sorted(l for l in set(labels) if labels.count(l) > 1)}")
         for k in kids:
             assert not ("data-m" in k and "data-m-label" in k), (
                 f"{where}: a cell can't be both data-m and data-m-label")
@@ -212,7 +218,8 @@ class _Cells(HTMLParser):
       end tag can close a row early. Cells after it are dropped, which could
       hide a third key from assert_mrow.
     - `row_labelled` keys cells by label, so two cells with the same label
-      merge into the last one."""
+      merge into the last one. assert_mrow rejects duplicate labels;
+      assert_single_value_child doesn't use row_labelled for that reason."""
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
@@ -283,9 +290,12 @@ def assert_single_value_child(row):
     so several element children would still render. This helper is stricter
     than the CSS on purpose: one wrapper per value keeps each value laid out
     as a unit, the way its desktop cell is. m-hide children don't count."""
-    for label, c in row_labelled(row).items():
+    for c in row["cells"]:
+        if "data-m-label" not in c["attrs"]:
+            continue
         shown = [k for k in c["kids"] if "m-hide" not in k.get("class", "").split()]
-        assert len(shown) <= 1, f"labelled cell {label!r} has {len(shown)} element children"
+        assert len(shown) <= 1, (
+            f"labelled cell {c['attrs']['data-m-label']!r} has {len(shown)} element children")
 
 
 # ── Clamped lists and inline styles ───────────────────────────────────
@@ -426,3 +436,18 @@ def rule_bodies(css, selector):
         if selector in selectors(m.group(1)):
             out.append(m.group(2))
     return "\n".join(out)
+
+
+def has_decl(body, decl):
+    """`decl` ("prop: value") as a whole declaration in a rule body, not a
+    suffix of a longer property or a prefix of a longer value:
+    has_decl("max-width: 100%", "width: 100%") is False."""
+    prop, value = (x.strip() for x in decl.split(":", 1))
+    return bool(re.search(rf"(?:^|[;{{\s]){re.escape(prop)}:\s*{re.escape(value)}\s*(?:;|$)", body))
+
+
+# Every attribute static/js/actions.js dispatches on (its bubble and capture
+# events, the data-on-error shortcut and the data-confirm submit guard). None
+# of them does anything for a logged-out visitor.
+ACTION_BINDING = re.compile(
+    r'\sdata-(?:click|change|input|submit|keydown|mousedown|focus|error|on-error|confirm)=')

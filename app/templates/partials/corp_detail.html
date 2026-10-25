@@ -241,7 +241,8 @@
            untagged (so phones hide them); m-only cells carry the phone
            layout. Key 1 is the name, plus the state badge only off the
            normal online state (the state with no colour class); key 2 is
-           the fuel left, coloured by the same fuel_level as desktop. Open,
+           the fuel left, coloured by the same fuel_level as desktop (the plain band is is-text, so
+           it reads apart from the gray is-muted one). Open,
            the full Name comes first, then the details. #}
         {% for struct in corp_structures %}
         {% set fuel_lvl = struct.fuel_remaining | fuel_level %}
@@ -270,7 +271,7 @@
             <!-- Fuel + timer -->
             <div style="display:flex;flex-wrap:wrap;gap:0.75rem;margin-bottom:4px">
                 {% if struct.fuel_remaining %}
-                <span class="b-row-label{% if fuel_lvl %} is-{{ fuel_lvl }}{% endif %}">
+                <span class="b-row-label is-{{ fuel_lvl or 'text' }}">
                     Fuel: {{ struct.fuel_remaining }}
                 </span>
                 {% endif %}
@@ -290,7 +291,7 @@
             {% endif %}
             <span class="m-only corp-struct-key" data-m="key"><span class="corp-struct-name">{{ struct.name }}</span>{% if struct.state_class %}<span class="b-badge {{ struct.state_class }}">{{ state_txt }}</span>{% endif %}</span>
             {% if struct.fuel_remaining %}
-            <span class="m-only b-row-label{% if fuel_lvl %} is-{{ fuel_lvl }}{% endif %}" data-m="key">{{ struct.fuel_remaining }}</span>
+            <span class="m-only b-row-label is-{{ fuel_lvl or 'text' }}" data-m="key">{{ struct.fuel_remaining }}</span>
             {% endif %}
             <span class="m-only" data-m-label="Name">{{ struct.name }}</span>
             <span class="m-only" data-m-label="State"><span class="b-badge {{ struct.state_class }}">{{ state_txt }}</span></span>

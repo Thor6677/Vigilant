@@ -89,6 +89,17 @@ def test_group_rename_updates_force_expanded_groups():
     assert "forceExpandedGroups[fx] = newName" in commit
 
 
+# ── ISS-118 ───────────────────────────────────────────────────────────────
+
+def test_group_rename_finds_the_body_in_compact_groups_too():
+    """The rename path looks the group body up with the same selector as the
+    expand and collapse code, not `.sortable-group` alone."""
+    src = _read("app/templates/dashboard.html")
+    refresh = src[src.index("// The toggle's title names the group: refresh it."):]
+    refresh = refresh[:refresh.index("dashSetGroupToggle(")]
+    assert "var groupBody = section.querySelector('.sortable-group, .dash-compact-group-body');" in refresh
+
+
 # ── ISS-127 ───────────────────────────────────────────────────────────────
 
 _PUSH = re.compile(r"lines\.push\(\{\{.*?\}\}\);")

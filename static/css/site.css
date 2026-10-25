@@ -677,8 +677,14 @@
    the contract is documented in the mobile R1 plan and pinned by
    tests/test_mobile_css.py. Desktop rendering is unchanged by the media
    queries; the few non-media rules below (tab-strip extra links, mobile-menu
-   groups, section toggle button) and these two guards are the exceptions. */
+   groups, section toggle button) and the desktop guards below (the 641px
+   one and its range-syntax twin) are the exceptions. */
 @media (min-width: 641px) {
+    .m-only, details.m-tabs { display: none !important; }
+}
+/* Range syntax closes the 640-641px gap (fractional widths, browser zoom);
+   engines without it ignore this block and keep the 641px guard above. */
+@media (width > 640px) {
     .m-only, details.m-tabs { display: none !important; }
 }
 
@@ -843,6 +849,10 @@
     #dash-table tr.m-row { border-bottom: 1px solid var(--border); }
     #dash-table tr.m-row > td { padding: 0 !important; border-bottom: none !important; }
     #dash-table tr.m-row > td[data-m-label] { white-space: normal !important; }
+    /* The Tags cell's single child (ISS-118): the wrapper generates no box,
+       so the badges stay individual flex items of the labelled cell and lay
+       out, wrap and space exactly as before the wrapper existed. */
+    #dash-table tr.m-row > td[data-m-label] > .dash-tags { display: contents; }
     /* Name cell (key 1): only the name truncates. A plain key cell clips at
        its end, which would cut the PAUSED/EMPTY/RENEW badges off first. */
     #dash-table tr.m-row > td.dash-tname { display: flex !important; align-items: center; gap: 0.3rem; }
@@ -926,11 +936,6 @@
     /* "Show all" inside an asset location card: inset, so its border doesn't
        double against the card's own sides and bottom. */
     .asset-list .m-showall { width: calc(100% - 1.5rem); margin: 0.4rem 0.75rem 0.6rem; }
-
-    /* Wallet journal type badge (key 1): as wide as the key cell rather than
-       the desktop 120px; a long type still ellipsises inside the badge. Its
-       line-up with the amount is R2 P's (the badge is a block there). */
-    .m-row > [data-m="key"] > .journal-type { max-width: 100% !important; }
 }
 
 /* ═══ v1.9.0 polish A — shared phone-layer fixes ═════════════════════════
@@ -983,12 +988,16 @@
        because a % max-width on the auto key-2 track resolves cyclically. */
     .cf-fly.m-row--link > [data-m="key"] ~ [data-m="key"] {
         max-width: 40vw !important; overflow: hidden; text-overflow: ellipsis;
+        font-size: 11px;
     }
 
     /* Corporation History: when the phone logo fails too, data-on-error hides
        it; the lead keeps its 18px slot so key 1 stays in line with its
        neighbours. min-width beats `.m-row > * { min-width: 0 !important }`. */
     .ov-corp.m-row > [data-m="lead"] { min-width: 18px !important; min-height: 18px; }
+    /* Both keys at 11px, as the other overview lists. The row carries an
+       inline 10px that the key cells inherit. */
+    .ov-corp.m-row > [data-m="key"] { font-size: 11px; }
 
     /* 40px tap targets: the Can Fly, Recently Completed and Corporation
        History toggles, at 11px over their inline 9-10px. line-height
@@ -999,10 +1008,11 @@
        centre); the class is only used on the character overview. */
     .asset-location-header { min-height: 40px; }
 
-    /* Combat Profile ISK row (D6): one column of label/value lines. The
-       tile's value comes first in the markup, so row-reverse puts the label
-       on the left; the value keeps its own colour and size. !important only
-       where an inline style has to lose. */
+    /* Combat Profile ISK row (D6; also the dashboard's, ISS-118): one column
+       of label/value lines.
+       The tile's value comes first in the markup, so row-reverse puts the
+       label on the left; the value keeps its own colour and size. !important
+       only where an inline style has to lose. */
     .ks-isk { flex-direction: column; text-align: left !important; }
     .ks-isk > .ks-isk-tile {
         display: flex; flex-direction: row-reverse; justify-content: space-between; align-items: baseline; gap: 0.75rem;
@@ -1062,6 +1072,8 @@
     .m-row > [data-m="key"].skills-key { display: flex !important; align-items: center; gap: 0.4rem; }
     .m-row > [data-m="key"].skills-key > :first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .m-row > [data-m="key"].skills-key > :last-child { flex: none; }
+    /* Key 2 (remap Diff) at 11px, as key 1; !important beats its inline 10px. */
+    .m-row > .skills-key ~ [data-m="key"] { font-size: 11px !important; }
 
     /* "Show all N" inside the Skill Queue panel: inset, so its border doesn't
        double against the panel's sides and bottom (as .asset-list's does). */
@@ -1128,6 +1140,11 @@
         font-size: 12px !important; white-space: nowrap;
     }
     .bp-filters > .bp-filter-sep { grid-column: 1 / -1; height: 0; overflow: hidden; }
+
+    /* Blueprint rows: key 1 is a block here (R1), so its line box came from
+       the inherited 16px while its 11px name and key 2 sit lower. At 11px
+       the keys share one baseline. */
+    .m-row > [data-m="key"].bp-key { font-size: 11px; }
 }
 /* ── end R2 T3 ── */
 
@@ -1187,8 +1204,8 @@
     .b-btn.corp-wallet-range { min-width: 40px; font-size: 12px !important; }
 
     /* Industry jobs (D11 A): the tile grid becomes one column, so its 1px
-       gaps read as dividers between rows. Key 1 (product) is 12px, as other
-       phone rows' names, so both keys share one line box. */
+       gaps read as dividers between rows. Key 1 (product) is 12px so both
+       keys share one line box. */
     .corp-jobs { grid-template-columns: minmax(0, 1fr) !important; }
     .corp-jobs > .m-row > .corp-job-product { font-size: 12px; }
 

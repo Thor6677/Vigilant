@@ -18,7 +18,7 @@ import pytest
 
 from app.routes import mining as mining_mod
 from tests._mobile import (VOID, assert_mrow, assert_single_value_child, cells_rows,
-                           clamps, css_section, render_page, row_keys, row_labelled,
+                           clamps, css_section, has_decl, phone_block, render_page, row_keys, row_labelled,
                            row_lead, rule_bodies, SITE_CSS)
 
 _CHAR = {"character_id": 90000001, "character_name": "Sample Miner",
@@ -335,28 +335,8 @@ def test_ore_key_keeps_its_icon_beside_an_ellipsised_name():
 
 def test_show_all_is_inset_inside_its_panel():
     body = rule_bodies(css_section("T4"), ".mining-clamp > .m-showall")
-    assert "width: calc(100% - 1.5rem)" in body
-    assert "margin: 0.4rem 0.75rem 0.6rem" in body
-
-
-def _split_section(section):
-    """A section's phone @media block body, and whatever follows the
-    block's closing brace (its desktop slot), found by brace matching."""
-    start = section.index("{", section.index("@media")) + 1
-    depth, i = 1, start
-    while depth:
-        depth += (section[i] == "{") - (section[i] == "}")
-        i += 1
-    return section[start:i - 1], section[i:]
-
-
-def test_split_section_sees_a_rule_in_the_desktop_slot():
-    sample = ("/* ── R2 T4 · mining ── */\n@media (max-width: 640px) {\n"
-              "    .a > .b { color: red; }\n}\n.mining-ore { color: blue; }\n"
-              "/* ── end R2 T4 ── */\n")
-    phone, desktop = _split_section(css_section("T4", sample))
-    assert ".a > .b" in phone and ".mining-ore" not in phone
-    assert ".mining-ore" in desktop
+    assert has_decl(body, "width: calc(100% - 1.5rem)")
+    assert has_decl(body, "margin: 0.4rem 0.75rem 0.6rem")
 
 
 def test_mining_classes_have_no_desktop_rules():
@@ -364,7 +344,7 @@ def test_mining_classes_have_no_desktop_rules():
     exactly as before (D21). T4 has no desktop rules at all."""
     with open(SITE_CSS, encoding="utf-8") as fh:
         css = re.sub(r"/\*.*?\*/", "", fh.read(), flags=re.S)
-    phone_block, desktop_slot = _split_section(css_section("T4"))
+    phone_css, desktop_slot = phone_block(css_section("T4"))
     assert not desktop_slot.strip(), "T4's desktop slot holds no rules"
     for cls in (".mining-ore", ".mining-clamp"):
-        assert css.count(cls) == phone_block.count(cls) > 0, cls
+        assert css.count(cls) == phone_css.count(cls) > 0, cls

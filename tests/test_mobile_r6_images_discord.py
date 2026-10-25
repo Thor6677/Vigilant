@@ -37,19 +37,14 @@ from html.parser import HTMLParser
 from app.routes import discordtime as dt_mod
 from app.routes import images as img_mod
 from app.routes import structure_age as sa_mod
-from tests._mobile import (VOID, assert_mrow, assert_single_value_child, cells_rows,
-                           css_section, phone_block, render_page, row_keys, row_labelled,
-                           row_lead, rule_bodies, selectors, source)
+from tests._mobile import (ACTION_BINDING as _ACTION_BINDING, VOID, assert_mrow,
+                           assert_single_value_child, cells_rows, css_section, phone_block,
+                           render_page, row_keys, row_labelled, row_lead, rule_bodies,
+                           selectors, source)
 
 _section = functools.partial(css_section, release="R6")
 _NS = types.SimpleNamespace
 _UTC = timezone.utc
-
-# Every attribute static/js/actions.js dispatches on (its bubble and capture
-# events, the data-on-error shortcut and the data-confirm submit guard).
-# None of them does anything for a logged-out visitor.
-_ACTION_BINDING = re.compile(
-    r'\sdata-(?:click|change|input|submit|keydown|mousedown|focus|error|on-error|confirm)=')
 
 
 def _phone():

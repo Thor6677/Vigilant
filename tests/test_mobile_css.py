@@ -8,6 +8,8 @@ import pytest
 
 from tests._mobile import SITE_CSS as _SITE_CSS
 from tests._mobile import css_section, phone_block
+from tests._mobile import assert_mrow, assert_single_value_child, cells_rows
+from tests._mobile import has_decl as _has_decl
 from tests._mobile import rule_bodies as _pb_rule_bodies
 from tests._mobile import selectors as _pb_selectors
 
@@ -141,6 +143,53 @@ def test_utilities_exist():
         assert re.search(cls, phone), cls
 
 
+def test_desktop_guard_has_no_gap_at_fractional_widths():
+    """`min-width: 641px` leaves 640-641px (browser zoom) matching neither it
+    nor the phone `max-width: 640px`, so m-only copies showed beside their
+    desktop twins. The range-syntax guard closes the gap; engines without
+    range syntax drop that block and keep the 641px one (ISS-118)."""
+    css = _css()
+    assert re.search(r"@media \(min-width: 641px\) \{\s*\.m-only, details\.m-tabs \{ display: none !important; \}\s*\}", css)
+    bodies = _media_bodies(css, "width > 640px")
+    assert re.search(r"\.m-only[^{]*\{[^}]*display:\s*none\s*!important", bodies)
+    assert re.search(r"details\.m-tabs[^{]*\{[^}]*display:\s*none\s*!important", bodies)
+    # Phone collectors look for the substring `max-width: 640px`; the guard
+    # must not contain it, or they would treat it as a phone block.
+    assert "max-width: 640px" not in re.search(r"@media \(width > 640px\)[^{]*", css).group(0)
+
+
+@pytest.mark.parametrize("body, decl, expected", [
+    ("width: 100%; color: red", "width: 100%", True),
+    ("color: red; width: 100%", "width: 100%", True),
+    ("max-width: 100%", "width: 100%", False),
+    ("min-height: 280px", "height: 280px", False),
+    ("line-height: 280px !important", "height: 280px !important", False),
+    ("height: 2800px", "height: 280px", False),
+    ("height: 280px !important", "height: 280px !important", True),
+])
+def test_has_decl_matches_whole_declarations_only(body, decl, expected):
+    assert _has_decl(body, decl) is expected
+
+
+def test_assert_mrow_rejects_a_duplicate_label():
+    row = ('<div class="m-row" data-click="toggleMRow"><span data-m="key">A</span>'
+           '<span data-m-label="Time">1</span><span data-m-label="Time">2</span></div>')
+    with pytest.raises(AssertionError, match="duplicate data-m-label"):
+        assert_mrow(row)
+    assert_mrow(row.replace('data-m-label="Time">2', 'data-m-label="Other">2'))
+
+
+def test_assert_single_value_child_sees_every_cell_even_with_a_repeated_label():
+    """It used to key cells by label, so a second cell with the same label
+    replaced the first and an over-full first cell went unchecked."""
+    html = ('<div class="m-row" data-click="toggleMRow"><span data-m="key">A</span>'
+            '<span data-m-label="Tags"><b>x</b><b>y</b></span>'
+            '<span data-m-label="Tags"><b>z</b></span></div>')
+    (row,) = cells_rows(html)
+    with pytest.raises(AssertionError, match="Tags"):
+        assert_single_value_child(row)
+
+
 def test_menu_groups_are_styled():
     assert re.search(r"\.b-mobile-menu \.b-mobile-group > summary", _css())
 
@@ -160,12 +209,6 @@ def _rule(css: str, selector: str) -> str:
     bodies = [body for sels, body in _rules(css) if selector in sels]
     assert bodies, f"no rule for {selector}"
     return "\n".join(bodies)
-
-
-def _has_decl(body: str, decl: str) -> bool:
-    """`decl` ("prop: value") as a whole declaration, not a prefix of a longer one."""
-    prop, value = (x.strip() for x in decl.split(":", 1))
-    return bool(re.search(rf"(?:^|[;{{\s]){re.escape(prop)}:\s*{re.escape(value)}\s*(?:;|$)", body))
 
 
 def test_b_tab_extra_rules_are_pinned():

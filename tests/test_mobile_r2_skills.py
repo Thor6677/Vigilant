@@ -21,7 +21,7 @@ import pytest
 
 from app.routes import skills as skills_mod
 from tests._mobile import (VOID, assert_mrow, assert_single_value_child, cells_rows,
-                           clamps, css_section, mrows, norm, render_page, row_keys,
+                           clamps, css_section, mrows, norm, phone_block, render_page, row_keys,
                            row_labelled, rule_bodies)
 
 _ROMAN = ["", "I", "II", "III", "IV", "V"]
@@ -411,6 +411,17 @@ def test_t2_css_keeps_the_level_visible_in_key_one():
         assert _decl(name, prop, value), (prop, value)
     assert _decl(rule_bodies(css, '.m-row > [data-m="key"].skills-key > :last-child'),
                  "flex", "none")
+
+
+def test_t2_css_remap_key_two_is_11px_like_key_one():
+    """Key 2 (the Diff) has an inline 10px; !important beats it (ISS-118)."""
+    body = rule_bodies(css_section("T2"), '.m-row > .skills-key ~ [data-m="key"]')
+    assert _decl(body, "font-size", "11px !important")
+
+
+def test_t2_css_has_no_desktop_rules():
+    """D21: the whole T2 section is one phone block, nothing after it."""
+    assert phone_block(css_section("T2"))[1].strip() == ""
 
 
 def test_t2_css_makes_the_rank_readable_on_phones():
