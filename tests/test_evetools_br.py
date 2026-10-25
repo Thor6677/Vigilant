@@ -5,6 +5,7 @@ times are invented. HTTP is stubbed with httpx.MockTransport (nothing leaves
 the process)."""
 import asyncio
 import gzip
+from datetime import datetime
 import json
 import types
 
@@ -277,7 +278,7 @@ def test_parse_battle_accepts_milliseconds():
 
 
 @pytest.mark.parametrize("doc", [
-    None, [], {}, {"battle": 5}, {"battle": {}}, _battle(solar_system="30009001"),
+    None, [], {}, {"battle": 5}, {"battle": {}},
     _battle(solar_system=2 ** 40), _battle(battle_start="2026-01-01"), _battle(battle_end=T0 - 5),
     _battle(battle_end=T0 + 90000), _battle(battle_start=True), _battle(battle_end=99_999_999_999_999),
 ])
@@ -313,6 +314,104 @@ def test_battle_failures_use_the_fallback_message(http):
     assert _run(ev.resolve_battle(7, 1, _all_exist)).message == bl.SORRY_PASTE_RELATED
     http.handler = lambda r: _body({"battle": None})
     assert _run(ev.resolve_battle(8, 1, _all_exist)).message == bl.SORRY_PASTE_RELATED
+
+
+ISO_START, ISO_END = "2027-01-15T08:00:00.000Z", "2027-01-15T10:00:00.000Z"
+E0 = 1_800_000_000 + 0   # 2027-01-15T08:00:00Z
+
+
+def _real_battle(**over):
+    """Shaped like the live response: string id, ISO times, ms kill times."""
+    battle = {"id": "98765", "solar_system": SYS_A, "status": "closed", "is_archived": False,
+              "battle_start": ISO_START, "battle_end": ISO_END, "km_count": 2,
+              "first_km_time": ISO_START, "last_km_time": "2027-01-15T09:30:00.000Z",
+              "system": {"name": "Testwell"}}
+    battle.update(over)
+    return {"battle": battle,
+            "kms": [{"id": 700001, "hash": HASH, "system": SYS_A, "time": (E0 + 600) * 1000, "totalValue": 1.0,
+                     "victim": {}, "attackers": []},
+                    {"id": 700002, "hash": HASH, "system": SYS_A, "time": (E0 + 4000) * 1000},
+                    {"id": 700003, "hash": HASH, "system": SYS_B, "time": (E0 + 7000) * 1000}]}
+
+
+def test_iso_string_times_with_a_z_suffix():
+    assert datetime.fromisoformat(ISO_START).timestamp() == E0
+    r = ev.parse_battle(_real_battle())
+    assert [(w.system_id, w.start, w.end) for w in r.windows] == [(SYS_A, E0, E0 + 7200)]
+    assert r.kms_count == 3
+
+
+@pytest.mark.parametrize("bad", ["2027-01-15T08:00:00", "yesterdayZ", "Z",
+                                 "2027-13-15T08:00:00.000Z", "9999-01-01T00:00:00.000Z",
+                                 "1999-01-01T00:00:00.000Z", "x" * 100 + "Z"])
+def test_bad_iso_strings_are_rejected(bad):
+    assert isinstance(ev.parse_battle(_real_battle(battle_start=bad)), ev.EvetoolsError)
+    assert isinstance(ev.parse_battle(_real_battle(battle_end=bad)), ev.EvetoolsError)
+
+
+def test_an_open_battle_ends_at_last_km_time(monkeypatch):
+    monkeypatch.setattr(ev.time, "time", lambda: E0 + 86400)
+    r = ev.parse_battle(_real_battle(battle_end=None, status="open"))
+    assert r.windows[0].end == E0 + 5400                       # 09:30
+
+
+def test_an_open_battle_without_last_km_time_uses_the_newest_kill_in_its_system(monkeypatch):
+    monkeypatch.setattr(ev.time, "time", lambda: E0 + 86400)
+    r = ev.parse_battle(_real_battle(battle_end=None, last_km_time=None))
+    assert r.windows[0].end == E0 + 4000                       # not the later kill in another system
+
+
+def test_an_open_battle_with_nothing_else_gets_a_bounded_default(monkeypatch):
+    monkeypatch.setattr(ev.time, "time", lambda: E0 + 86400)
+    doc = _real_battle(battle_end=None, last_km_time=None)
+    doc["kms"] = []
+    assert ev.parse_battle(doc).windows[0].end == E0 + ev.OPEN_BATTLE_DEFAULT_SECONDS
+
+
+def test_an_open_battle_never_runs_past_now_or_a_day(monkeypatch):
+    monkeypatch.setattr(ev.time, "time", lambda: E0 + 1800)
+    r = ev.parse_battle(_real_battle(battle_end=None))
+    assert r.windows[0].end == E0 + 1800
+    monkeypatch.setattr(ev.time, "time", lambda: E0 + 10 * 86400)
+    doc = _real_battle(battle_end=None, last_km_time=None)
+    doc["kms"] = [{"id": 1, "system": SYS_A, "time": (E0 + 5 * 86400) * 1000}]
+    assert ev.parse_battle(doc).windows[0].end == E0 + 86400
+
+
+def test_string_ids_are_coerced_safely():
+    r = ev.parse_battle(_real_battle(solar_system=str(SYS_A)))
+    assert r.windows[0].system_id == SYS_A
+    doc = _real_battle()
+    doc["kms"] = [{"id": "700001"}, {"id": "x"}, {"id": None}, {"id": True}]
+    assert ev.parse_battle(doc).kms_count == 1
+    for bad in ("30009001; drop", "-5", "", "٣٠٠٠٩٠٠١", "1" * 40, 2 ** 40, 1.5):
+        assert isinstance(ev.parse_battle(_real_battle(solar_system=bad)), ev.EvetoolsError)
+
+
+@pytest.mark.parametrize("junk", [5, True, "x", [1], {"a": [1]}])
+def test_odd_battle_shapes_never_raise(junk):
+    for doc in (_real_battle(last_km_time=junk, battle_end=None), {"battle": junk}, {"battle": {}, "kms": junk}):
+        assert isinstance(ev.parse_battle(doc), (ev.EvetoolsScope, ev.EvetoolsError))
+    deep = []
+    for _ in range(5000):
+        deep = [deep]
+    assert isinstance(ev.parse_battle({**_real_battle(), "kms": deep}), (ev.EvetoolsScope, ev.EvetoolsError))
+
+
+def test_a_real_shaped_battle_resolves_over_http(http, monkeypatch):
+    http.handler = lambda r: _body(_real_battle())
+    r = _run(ev.resolve_battle(4242, 1, _all_exist))
+    assert isinstance(r, ev.EvetoolsScope) and r.windows[0].end == E0 + 7200
+
+
+def test_composition_timings_are_epoch_seconds_ints():
+    """Pinned: the live /br/ composition carries timings [{systemID, start, end}]
+    in epoch SECONDS (not ms, not ISO strings)."""
+    doc = _doc(timings=[{"systemID": SYS_A, "start": 1_792_935_000, "end": 1_792_945_800}])
+    r = ev.parse_composition(doc)
+    assert [(w.start, w.end) for w in r.windows] == [(1_792_935_000, 1_792_945_800)]
+    iso = _doc(timings=[{"systemID": SYS_A, "start": ISO_START, "end": ISO_END}])
+    assert isinstance(ev.parse_composition(iso), ev.EvetoolsError)
 
 
 def test_src_cache_keys():

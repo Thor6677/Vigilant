@@ -29,6 +29,7 @@ import logging
 import re
 import time
 import zlib
+from datetime import datetime
 from collections import deque
 from dataclasses import dataclass
 from typing import Awaitable, Callable
@@ -47,6 +48,7 @@ EVETOOLS_API = "https://br.evetools.org/newapi"
 FETCH_TIMEOUT_SECONDS = 10      # per read
 TOTAL_DEADLINE_SECONDS = 20     # the whole fetch, however slowly the bytes trickle
 MAX_CONCURRENT_FETCHES = 2
+OPEN_BATTLE_DEFAULT_SECONDS = 2 * 3600   # an open battle with no kill times to go on
 MAX_BODY_BYTES = 16 * 1024 * 1024
 CACHE_TTL_SECONDS = 3600
 CACHE_MAX_ENTRIES = 128
@@ -150,31 +152,71 @@ def _parse_composition(doc) -> EvetoolsScope | EvetoolsError:
     return EvetoolsScope(scope, count if _is_int(count) and count >= 0 else _count_kills(doc))
 
 
-def _seconds(v) -> int | None:
+def _intish(v) -> int | None:
+    """An int, or a plain digit string (evetools sends some ids as strings)."""
+    if _is_int(v):
+        return v
+    if isinstance(v, str) and v.isascii() and v.isdigit() and len(v) <= 12:
+        return int(v)
+    return None
+
+
+def _when(v) -> int | None:
+    """A time as epoch seconds: numeric seconds or milliseconds, or an ISO 8601
+    string in UTC ("2026-10-25T15:02:18.000Z"). None if it is anything else or
+    outside the accepted range."""
+    if isinstance(v, str):
+        text = v.strip()
+        if not (text.endswith("Z") and len(text) <= 40):
+            return None
+        try:
+            v = int(datetime.fromisoformat(text).timestamp())
+        except ValueError:
+            return None
     if not _is_int(v) or v < _EPOCH_MIN:
         return None
-    return v // 1000 if v >= _MS_FLOOR else v
+    v = v // 1000 if v >= _MS_FLOOR else v
+    return v if v < MAX_EPOCH else None
 
 
 def parse_battle(doc) -> EvetoolsScope | EvetoolsError:
     """A decoded `/br/battle/<n>` document: `{battle{solar_system,
-    battle_start, battle_end}, kms[...]}` -> one window. Times are taken as
-    epoch seconds or milliseconds (unverified which). Never raises."""
+    battle_start, battle_end, last_km_time}, kms[{id, system, time}]}` -> one
+    window. Times may be ISO strings or epoch seconds/milliseconds. An open
+    battle has a null `battle_end`: the window then ends at the last kill
+    (`last_km_time`, else the newest kill in that system, else start plus
+    OPEN_BATTLE_DEFAULT_SECONDS), is cut to a day and never runs past now.
+    Never raises."""
     try:
         battle = doc.get("battle") if isinstance(doc, dict) else None
         if not isinstance(battle, dict):
             return EvetoolsError(SORRY_PASTE_RELATED)
-        sid = battle.get("solar_system")
-        start, end = _seconds(battle.get("battle_start")), _seconds(battle.get("battle_end"))
-        if not _is_int(sid) or start is None or end is None:
+        sid = _intish(battle.get("solar_system"))
+        start = _when(battle.get("battle_start"))
+        if sid is None or start is None:
             return EvetoolsError(SORRY_PASTE_RELATED)
-        if end - start > MAX_WINDOW_SECS:
-            return EvetoolsError("That battle spans more than a day. "
-                                 "Paste each system's 'link to related' instead.")
-        scope = normalize_scope([Window(sid, start, end)])
         kms = doc.get("kms")
-        count = sum(1 for km in kms if isinstance(km, dict) and _is_int(km.get("id"))) \
-            if isinstance(kms, list) else 0
+        kms = kms if isinstance(kms, list) else []
+        end = None
+        if battle.get("battle_end") is not None:
+            end = _when(battle.get("battle_end"))
+            if end is None:
+                return EvetoolsError(SORRY_PASTE_RELATED)
+            if end - start > MAX_WINDOW_SECS:
+                return EvetoolsError("That battle spans more than a day. "
+                                     "Paste each system's 'link to related' instead.")
+        else:
+            end = _when(battle.get("last_km_time"))
+            if end is None:
+                times = [_when(km.get("time")) for km in kms
+                         if isinstance(km, dict) and _intish(km.get("system")) in (None, sid)]
+                times = [t for t in times if t is not None]
+                end = max(times) if times else None
+            if end is None or end <= start:
+                end = start + OPEN_BATTLE_DEFAULT_SECONDS
+            end = min(end, start + MAX_WINDOW_SECS, int(time.time()))
+        scope = normalize_scope([Window(sid, start, end)])
+        count = sum(1 for km in kms if isinstance(km, dict) and _intish(km.get("id")))
         return EvetoolsScope(scope, count)
     except Exception:
         return EvetoolsError(SORRY_PASTE_RELATED)
