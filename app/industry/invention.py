@@ -8,6 +8,7 @@ Key formulas (single source of truth; mirrored in the design spec §2):
     P             = base_prob × (1 + E/40 + (S1+S2)/30) × decryptor_prob_mult
                     (skill levels clamped 0–5, result clamped to (0.0, 1.0])
     attempt_cost  = Σ(datacore_qty × price) + decryptor_price   (consumed per attempt)
+                    + consumed_item_price                       (a T3 source's relic)
     invented_runs = base_runs + decryptor_run_mod               (floored at 1)
     invented_me   = 2 + decryptor_me_mod                        (floored at 0)
     overhead/unit = attempt_cost / P / (invented_runs × per_run_output_qty)
@@ -99,8 +100,10 @@ def attempt_cost(
     datacores: list[dict],
     price_map: dict[int, float],
     decryptor_price: float = 0.0,
+    consumed_item_price: float = 0.0,
 ) -> float | None:
-    """Total ISK consumed per invention attempt (datacores + decryptor).
+    """Total ISK consumed per invention attempt (datacores + decryptor, plus
+    the relic when the source is one: an attempt consumes it).
 
     `datacores` is a list of {"material_type_id", "quantity"}. Returns None if
     any datacore is unpriced (site-wide unpriced convention — the row is then
@@ -112,7 +115,7 @@ def attempt_cost(
         if price is None:
             return None
         total += price * dc["quantity"]
-    return total + decryptor_price
+    return total + decryptor_price + consumed_item_price
 
 
 def invented_bpc(base_runs: int, decryptor) -> tuple[int, int]:
@@ -147,3 +150,19 @@ def invention_overhead_per_unit(
         return None
     units = invented_runs * per_run_output_qty
     return attempt_cost / probability / units
+
+
+def cheapest_source(options: list[tuple[object, float | None]]) -> tuple[object, float] | None:
+    """The (source, overhead) pair with the lowest overhead per unit.
+
+    `options` is `[(source, overhead_per_unit | None), ...]` in source id
+    order. Unpriced (None) options are ignored; on a tie the first wins
+    (strict `<`). Returns None when every option is unpriced.
+    """
+    best = None
+    for source, overhead in options:
+        if overhead is None:
+            continue
+        if best is None or overhead < best[1]:
+            best = (source, overhead)
+    return best

@@ -1,7 +1,7 @@
 import pytest
 
 from app.industry.invention import (
-    attempt_cost, invented_bpc, invention_overhead_per_unit,
+    attempt_cost, cheapest_source, invented_bpc, invention_overhead_per_unit,
     invention_probability,
 )
 
@@ -26,6 +26,27 @@ def test_attempt_cost_unpriced_datacore_is_none():
     assert attempt_cost(dcs, {20410: 100.0, 20424: 50.0},
                         decryptor_price=1000.0) == pytest.approx(
         8*100 + 8*50 + 1000)
+
+
+def test_attempt_cost_adds_consumed_item_price():
+    dcs = [{"material_type_id": 20410, "quantity": 8}]
+    assert attempt_cost(dcs, {20410: 100.0}, decryptor_price=1000.0,
+                        consumed_item_price=250.0) == pytest.approx(8*100 + 1000 + 250)
+    assert attempt_cost(dcs, {20410: 100.0}) == pytest.approx(800)
+
+
+def test_cheapest_source_lowest_overhead_wins():
+    assert cheapest_source([("a", 30.0), ("b", 10.0), ("c", 20.0)]) == ("b", 10.0)
+
+
+def test_cheapest_source_tie_keeps_first():
+    assert cheapest_source([("a", 10.0), ("b", 10.0)]) == ("a", 10.0)
+
+
+def test_cheapest_source_ignores_unpriced_and_all_none_is_none():
+    assert cheapest_source([("a", None), ("b", 5.0)]) == ("b", 5.0)
+    assert cheapest_source([("a", None), ("b", None)]) is None
+    assert cheapest_source([]) is None
 
 
 def test_invented_bpc_mods_and_floors():

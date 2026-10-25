@@ -24,7 +24,8 @@ material as free would understate cost and float phantom-profit items to the top
 
 **Invention overhead (optional):** `rank_builds` accepts an optional
 `invention` dict keyed by `product_type_id` —
-`{"overhead_per_unit": float | None, "invented_me": int, "skill_missing": bool}`.
+`{"overhead_per_unit": float | None, "invented_me": int, "skill_missing": bool,
+"source_name": str | None}`.
 The overhead itself (datacores + decryptor + failed-attempt expectation) is
 precomputed upstream by the route via `app.industry.invention` — this module
 just consumes the number. For a product present in the dict, the build-cost
@@ -34,7 +35,9 @@ ME2, not necessarily the page's chosen ME) instead of the page `me`, then
 decryptor) forces the row unpriced — never silently zero-costed — the same
 "excluded, sorts last" convention as an unpriced material. Products absent
 from the dict, or when `invention` is omitted/`None` entirely, behave
-exactly as before this feature existed.
+exactly as before this feature existed. `source_name` (the T1 blueprint or
+relic the route picked as the cheapest invention source) is only passed
+through to the row as `invention_source` for display.
 """
 from __future__ import annotations
 
@@ -105,11 +108,13 @@ def rank_builds(
         invention_overhead = None
         invented_me = None
         skill_missing = False
+        invention_source = None
         effective_me = me
         if inv is not None:
             invention_overhead = inv.get("overhead_per_unit")
             invented_me = inv.get("invented_me")
             skill_missing = bool(inv.get("skill_missing", False))
+            invention_source = inv.get("source_name")
             if invented_me is not None:
                 effective_me = invented_me
 
@@ -139,6 +144,7 @@ def rank_builds(
             "invention_overhead": invention_overhead,
             "invented_me": invented_me,
             "skill_missing": skill_missing,
+            "invention_source": invention_source,
         })
     rows.sort(key=lambda r: (r["margin_pct"] is None, -(r["margin_pct"] or 0.0)))
     return rows
