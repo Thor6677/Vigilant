@@ -215,6 +215,7 @@ body {
 .is-warn   { color: var(--warn) !important; }
 .is-danger { color: var(--danger) !important; }
 .is-muted  { color: var(--muted) !important; }
+.is-text   { color: var(--text) !important; }
 .is-accent { color: var(--accent) !important; }
 
 /* ── Stats strip ─────────────────────────────────────────────────── */

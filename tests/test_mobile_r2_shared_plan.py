@@ -15,8 +15,8 @@ import re
 import types
 
 from app.routes import skill_plans as skill_plans_mod
+from tests._mobile import ACTION_BINDING as _ACTION_BINDING
 from tests._mobile import render_page
-from tests.test_route_auth_gating import _ACTION_BINDING
 
 _NS = types.SimpleNamespace
 _TOKEN = "sample-share-token"

@@ -1650,7 +1650,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (fx !== -1) forceExpandedGroups[fx] = newName;
                     // The toggle's title names the group: refresh it.
                     var groupToggle = section.querySelector('.dash-group-toggle');
-                    var groupBody = section.querySelector('.sortable-group');
+                    var groupBody = section.querySelector('.sortable-group, .dash-compact-group-body');
                     if (groupToggle && groupBody) dashSetGroupToggle(groupToggle, groupBody.style.display !== 'none');
                     fetch('/characters/rename-group', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({old_name: oldName, new_name: newName})});
                     scheduleSave();

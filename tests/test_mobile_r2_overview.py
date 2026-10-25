@@ -36,7 +36,7 @@ import app.main  # noqa: F401 — populates every router's templates.env.globals
 from app.db.models import Base
 from app.routes import character_detail as cd
 from tests._mobile import (SITE_CSS, VOID, assert_mrow, assert_single_value_child, cells_rows,
-                           clamps, css_section, norm, render_page, row_keys, row_labelled, row_lead,
+                           clamps, css_section, has_decl, norm, phone_block, render_page, row_keys, row_labelled, row_lead,
                            rule_bodies)
 
 _ROOT = os.path.join(os.path.dirname(__file__), "..")
@@ -580,6 +580,22 @@ def test_css_can_fly_folder_key_is_capped_in_vw():
     assert "text-overflow: ellipsis" in body
 
 
+def test_css_can_fly_folder_key_is_11px_like_the_fit_name():
+    """Key 2 is a .b-row-val (12px) while key 1 carries an inline 11px, so
+    the two sat on different line heights (ISS-118)."""
+    body = _flat(rule_bodies(_sec(), '.cf-fly.m-row--link > [data-m="key"] ~ [data-m="key"]'))
+    assert has_decl(body, "font-size: 11px")
+
+
+def test_css_corp_history_keys_are_11px():
+    """The row carries an inline 10px that both key cells inherited; the
+    other overview lists use 11px (ISS-118). No !important is needed: the
+    size is on the row, not on the cells."""
+    body = _flat(rule_bodies(_sec(), '.ov-corp.m-row > [data-m="key"]'))
+    assert has_decl(body, "font-size: 11px")
+    assert "!important" not in body
+
+
 def test_css_toggles_and_location_headers_are_40px():
     sec = _sec()
     summary = _flat(rule_bodies(sec, "summary.ov-toggle"))
@@ -636,26 +652,13 @@ def test_css_wallet_range_buttons_match_the_other_range_buttons():
     assert "height" not in body
 
 
-def _phone_block(sec):
-    """The body of the section's phone @media block, found by matching its
-    braces, and whatever follows the block up to the end marker."""
-    m = re.match(r"\s*@media \(max-width: 640px\) \{", sec)
-    assert m, "the section must open with its phone @media block"
-    depth, i = 1, m.end()
-    while depth:
-        assert i < len(sec), "the phone @media block is never closed"
-        depth += (sec[i] == "{") - (sec[i] == "}")
-        i += 1
-    return sec[m.end():i - 1], sec[i:]
-
-
 _HOOKS = (".cf-fly", ".ov-toggle", ".ov-corp", ".ks-isk", ".ks-stream")
 
 
 def test_css_new_class_hooks_have_no_desktop_rules():
     with open(SITE_CSS, encoding="utf-8") as fh:
         css = fh.read()
-    phone, after = _phone_block(_sec())
+    phone, after = phone_block(_sec())
     assert after.strip() == "", f"rules after the phone block: {after.strip()[:80]!r}"
     for cls in _HOOKS:
         assert re.search(re.escape(cls) + r"\b", phone), cls
@@ -665,8 +668,9 @@ def test_css_new_class_hooks_have_no_desktop_rules():
 
 def test_css_stream_chart_box_is_taller_on_phones():
     body = _flat(rule_bodies(_sec(), ".ks-stream"))
-    assert re.search(r"height: (\d+)px !important", body)
-    assert int(re.search(r"height: (\d+)px", body).group(1)) >= 260
+    m = re.search(r"(?:^|[;\s{])height:\s*(\d+)px !important", body)
+    assert m, body
+    assert int(m.group(1)) >= 260
 
 
 def test_css_corp_logo_slot_holds_its_size_when_the_logo_fails():

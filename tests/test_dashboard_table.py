@@ -370,7 +370,8 @@ def _table_with_columns(columns):
 import re
 
 from tests._dashboard_fixture import build_context
-from tests._mobile import assert_mrow, mrows
+from tests._mobile import (assert_mrow, assert_single_value_child, cells_rows, has_decl, mrows,
+                           row_labelled)
 from tests.test_mobile_css import _css, _media_bodies
 
 ONLINE = dict(SUMMARY, is_online=True)
@@ -534,3 +535,29 @@ def test_every_row_has_its_column_cells_in_header_order():
     assert len(parsed) == 2
     for r in parsed:
         assert [k["data-col-cell"] for k in r["children"] if "data-col-cell" in k] == headers
+
+
+def test_tags_cell_has_one_wrapper_child_however_many_tags():
+    """Every labelled cell holds one value element on phones (ISS-118); the
+    badges sit inside a single .dash-tags span."""
+    tagged = build_table_row(SUMMARY, None, {"tags": ["Cyno", "Scout", "Hauler"], "note": None}, None, None)
+    html = render_full("custom", dash_mode="table", TABLE_COLUMNS=prefs_mod.TABLE_COLUMNS,
+                       table_rows=[tagged], prefs_patch={"table_columns": ["pilot", "tags"]})
+    (row,) = [r for r in cells_rows(html) if r["attrs"].get("data-char-id") == "1001"]
+    cell = row_labelled(row)["Tags"]
+    assert len(cell["kids"]) == 1 and cell["kids"][0]["class"] == "dash-tags"
+    assert cell["text"] == "CynoScoutHauler"     # no whitespace between badges
+    assert_single_value_child(row)
+
+
+def test_dash_tags_wrapper_generates_no_box_and_is_phone_only():
+    """display: contents keeps the badges individual flex items of the
+    labelled cell, so their spacing and wrapping are what they were before
+    the wrapper existed (ISS-118)."""
+    css = _css()
+    phone = _media_bodies(css, "max-width: 640px")
+    m = re.search(r"#dash-table tr\.m-row > td\[data-m-label\] > \.dash-tags\s*\{([^}]*)\}", phone)
+    assert m, "the phone rule for .dash-tags is missing"
+    assert has_decl(m.group(1), "display: contents")
+    assert len([d for d in m.group(1).split(";") if d.strip()]) == 1   # nothing else re-lays it out
+    assert css.count(".dash-tags") == phone.count(".dash-tags") == 1   # no desktop rule

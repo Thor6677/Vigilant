@@ -41,8 +41,8 @@ from app.routes import dashboard as dash_mod
 from app.routes import fittings as fit_mod
 from app.routes import journal as journal_mod
 from tests._dashboard_fixture import render_full
-from tests._mobile import (SITE_CSS, cells_rows, css_section, phone_block, render_page, row_keys,
-                           row_labelled, rule_bodies, source)
+from tests._mobile import (SITE_CSS, cells_rows, css_section, has_decl,
+                           phone_block, render_page, row_keys, row_labelled, rule_bodies, source)
 
 _ROOT = os.path.join(os.path.dirname(__file__), "..")
 _ACTIONS_JS = os.path.join(_ROOT, "static", "js", "actions.js")
@@ -139,7 +139,7 @@ def test_journal_type_badges_are_shrink_wrapped_blocks_on_phones():
         body = _flat(rule_bodies(_phone(), sel))
         for decl in ("display: block !important", "width: fit-content", "max-width: 100% !important",
                      "overflow: hidden", "text-overflow: ellipsis"):
-            assert decl in body, (sel, decl)
+            assert has_decl(body, decl), (sel, decl)
 
 
 _PILOT = NS(character_id=90000001, character_name="Pilot Alpha", corporation_name="Sample Corp",
@@ -227,7 +227,7 @@ def test_dashboard_stream_box_carries_a_class_hook_and_keeps_its_desktop_height(
 def test_dashboard_stream_box_is_taller_on_phones():
     """As on the character overview (R2 T1's .ks-stream): the legend moves
     below the plot on phones and would take half of the 200px box."""
-    assert "height: 280px !important" in _flat(rule_bodies(_phone(), ".dash-cp-stream"))
+    assert has_decl(_flat(rule_bodies(_phone(), ".dash-cp-stream")), "height: 280px !important")
 
 
 def _combat_js():
@@ -490,3 +490,14 @@ def test_fit_status_takes_its_own_full_width_line_on_phones():
     assert "flex-wrap: wrap" in row and "row-gap: 0 !important" in row
     assert "flex-basis: 100%" in _flat(rule_bodies(phone, ".fit-actions > .save-one-status"))
     assert re.search(r"margin-top: [\d.]+rem", rule_bodies(phone, ".fit-actions > .save-one-status:not(:empty)"))
+
+
+def test_dashboard_isk_row_has_the_overview_stacking_hooks():
+    """R2 T1's .ks-isk rules turn the row into label/value lines on phones;
+    the dashboard copy takes them through the same two classes (ISS-118)."""
+    html = _render_combat_profile()
+    (m,) = re.finditer(r'<div class="ks-isk" style="([^"]*)">', html)
+    assert "display:flex" in m.group(1)                      # desktop layout untouched
+    assert html.count('class="ks-isk-tile"') == 4
+    t1 = css_section("T1")
+    assert has_decl(rule_bodies(t1, ".ks-isk"), "flex-direction: column")

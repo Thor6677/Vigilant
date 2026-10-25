@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone, timedelta
 from html import escape as html_escape
 
@@ -87,21 +88,33 @@ def _fuel_remaining(fuel_expires_str: str | None) -> str | None:
         return None
 
 
+_FUEL_H = re.compile(r"(\d+)h", re.ASCII)
+_FUEL_DH = re.compile(r"(\d+)d (\d+)h", re.ASCII)
+
+
 def _fuel_level(fuel_remaining: str | None) -> str:
-    """How urgent a _fuel_remaining() value is: "danger" once it has run
-    out, "warn" with under two days left ("Nh", or "1d Nh"), otherwise "".
-    Anything else, None included, is "". Under a day reads "Nh", with no day
-    part: the template used to test startswith('0d'), which never matched,
-    so the most urgent case showed in the plain colour (ISS-113)."""
+    """How urgent a _fuel_remaining() value is, as the template's `is-{level}`
+    class: "danger" once it has run out or with under a day left ("Nh", no
+    day part), "warn" with 1-6 days left, "muted" (gray) with 7-13 days left,
+    and "" with 14 or more days, which the template draws in the normal text
+    colour (is-text) so it reads apart from the gray band. Anything else,
+    None included, is "". Under a day reads "Nh", with no day part: the
+    template used to test startswith('0d'), which never matched, so the most
+    urgent case showed in the plain colour (ISS-113); that case is now
+    "danger" (ISS-118)."""
     if fuel_remaining == "EXPIRED":
         return "danger"
     if not fuel_remaining:
         return ""
-    if fuel_remaining.endswith("h") and fuel_remaining[:-1].isdigit():
-        return "warn"
-    days, sep, hours = fuel_remaining.partition("d ")
-    if sep and days.isdigit() and hours.endswith("h") and hours[:-1].isdigit():
-        return "warn" if int(days) < 2 else ""
+    if _FUEL_H.fullmatch(fuel_remaining):
+        return "danger"
+    m = _FUEL_DH.fullmatch(fuel_remaining)
+    if m:
+        n = int(m.group(1))
+        if n < 7:
+            return "warn"
+        if n < 14:
+            return "muted"
     return ""
 
 

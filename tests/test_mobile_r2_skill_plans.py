@@ -25,7 +25,7 @@ from html.parser import HTMLParser
 
 from app.routes import skill_plans as sp_mod
 from tests._mobile import (assert_mrow, assert_single_value_child, cells_rows, css_section,
-                           mrows, render_page, row_keys, row_labelled, row_lead, rule_bodies,
+                           has_decl, mrows, phone_block, render_page, row_keys, row_labelled, row_lead, rule_bodies,
                            selectors)
 
 _NS = types.SimpleNamespace
@@ -168,7 +168,7 @@ def test_attributes_value_is_one_wrapper_with_the_rank():
     assert cell["text"] == "Int/Mem ×2"
 
 
-def test_read_only_plan_rows_have_only_the_attributes_cell():
+def test_read_only_plan_rows_show_name_and_attributes_without_remove():
     html = _render_detail(can_edit=False)
     assert_mrow(html, min_rows=12)
     rows = _skill_rows(html)
@@ -268,7 +268,7 @@ def _render_gap():
                        injectors=_injectors())
 
 
-def test_gap_rows_lead_with_status_and_key_on_time():
+def test_gap_rows_key_on_status_name_level_and_time():
     html = _render_gap()
     assert_mrow(html, min_rows=3)
     rows = cells_rows(html)
@@ -420,7 +420,7 @@ def test_css_gap_picker_puts_the_select_on_its_own_line():
     assert "flex: 1 1 100% !important" in sel and "min-width: 0" in sel
     # A percentage width keeps a long character name from widening the
     # page column (min-width alone doesn't: found at 360px).
-    assert "width: 100%" in sel
+    assert has_decl(sel, "width: 100%")
 
 
 def test_share_row_carries_its_hook():
@@ -522,31 +522,10 @@ def test_css_gap_row_keys_share_one_size():
         assert "font-size: 12px !important" in _decls(sel), sel
 
 
-def _after_phone_block(section):
-    """What follows the section's phone @media block, found by matching its
-    braces from the block's own `{` (not by the last `}` in the section,
-    which a trailing desktop rule would also end with)."""
-    m = re.match(r"\s*@media \(max-width: 640px\) \{", section)
-    assert m, "the section must open with its phone @media block"
-    depth = 1
-    for i in range(m.end(), len(section)):
-        depth += (section[i] == "{") - (section[i] == "}")
-        if depth == 0:
-            return section[i + 1:]
-    raise AssertionError("the phone @media block never closes")
-
-
-def test_after_phone_block_sees_a_trailing_desktop_rule():
-    """The guard below isn't blind: a rule after the block is reported."""
-    sample = "\n@media (max-width: 640px) {\n    .a { color: red; }\n}\n.b { color: blue; }\n"
-    assert _after_phone_block(sample).strip() == ".b { color: blue; }"
-    assert _after_phone_block("@media (max-width: 640px) {\n    .a { b: c; }\n}\n").strip() == ""
-
-
 def test_css_section_is_phone_only():
     """Desktop renders as before (D21): every T6 rule sits inside the one
     phone block, and only whitespace follows it up to the end marker."""
-    rest = _after_phone_block(css_section("T6"))
+    rest = phone_block(css_section("T6"))[1]
     assert rest.strip() == "", f"the R2 T6 section has a rule outside its phone block: {rest.strip()[:80]!r}"
 
 
