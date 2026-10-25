@@ -18,7 +18,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import get_db, Character
-from app.db.sde_models import SDEBlueprintInvention
+from app.db.sde_models import SDEBlueprintInventionProduct
 import asyncio
 from app.sde import lookup as sde
 from app.esi.market import APPRAISAL_HUBS, get_hub_prices_batch
@@ -35,8 +35,8 @@ from app.industry.manufacturing import (
 )
 from app.industry import build_finder
 from app.industry.invention import (
-    DECRYPTORS, attempt_cost, invented_bpc, invention_overhead_per_unit,
-    invention_probability,
+    DECRYPTORS, attempt_cost, cheapest_source, invented_bpc,
+    invention_overhead_per_unit, invention_probability,
 )
 from app.routes.fitting import _character_skills_map
 from app.market import lp as market_lp
@@ -551,7 +551,10 @@ async def build_finder_results(
     same source the LP tool uses.
 
     Invention: `sde.get_invention_data` resolves which of this group's
-    products are T2-inventable. When any are, per-product probability comes
+    products are inventable and every source each has (a T1 blueprint, or
+    one relic per tier for T3). When any are, the cheapest source's
+    overhead is used (a relic's market price counts as part of the
+    attempt cost), and per-product probability comes
     from either the selected character's ESI skills (ownership + scope
     checked, same pattern as `/market/pnl`) or the manual `encryption`/
     `science` selects, and expected per-unit overhead
@@ -593,7 +596,7 @@ async def build_finder_results(
             # no message needed) from "invention tables were never imported"
             # (SDE reload pending — surfaced in the footnote).
             exists_row = (await db.execute(
-                select(SDEBlueprintInvention.blueprint_type_id).limit(1)
+                select(SDEBlueprintInventionProduct.blueprint_type_id).limit(1)
             )).first()
             tables_empty = exists_row is None
 
@@ -618,7 +621,8 @@ async def build_finder_results(
                         char_skills = None
 
             all_skill_ids = sorted({
-                sid for inv in invention_data.values() for sid in inv["skill_ids"]
+                sid for inv in invention_data.values()
+                for src in inv["sources"] for sid in src["skill_ids"]
             })
             skill_names = (
                 await sde.type_ids_to_names(db, all_skill_ids) if all_skill_ids else {}
@@ -627,30 +631,40 @@ async def build_finder_results(
             decryptor_price = price_map.get(dec.type_id) if dec else None
 
             for product_id, inv in invention_data.items():
-                e, s1, s2, missing = _resolve_invention_skills(
-                    char_skills, inv["skill_ids"], skill_names, encryption, science,
-                )
-                p_final = invention_probability(
-                    inv["probability"], e, s1, s2,
-                    dec.prob_mult if dec else 1.0,
-                )
-                if dec is not None and decryptor_price is None:
-                    attempt = None
-                else:
-                    attempt = attempt_cost(
-                        inv["datacores"], price_map, decryptor_price or 0.0,
+                options = []
+                for src in inv["sources"]:
+                    e, s1, s2, missing = _resolve_invention_skills(
+                        char_skills, src["skill_ids"], skill_names, encryption, science,
                     )
-                runs, ime = invented_bpc(inv["base_runs"], dec)
-                overhead = (
-                    invention_overhead_per_unit(
-                        attempt, p_final, runs, inv["per_run_output_qty"],
-                    ) if attempt is not None else None
-                )
-                invention_map[product_id] = {
-                    "overhead_per_unit": overhead,
-                    "invented_me": ime,
-                    "skill_missing": missing,
-                }
+                    p_final = invention_probability(
+                        src["probability"], e, s1, s2,
+                        dec.prob_mult if dec else 1.0,
+                    )
+                    relic_price = (
+                        price_map.get(src["source_type_id"])
+                        if src["source_is_relic"] else 0.0
+                    )
+                    if (dec is not None and decryptor_price is None) or relic_price is None:
+                        attempt = None
+                    else:
+                        attempt = attempt_cost(
+                            src["datacores"], price_map, decryptor_price or 0.0,
+                            consumed_item_price=relic_price,
+                        )
+                    runs, ime = invented_bpc(src["base_runs"], dec)
+                    overhead = (
+                        invention_overhead_per_unit(
+                            attempt, p_final, runs, inv["per_run_output_qty"],
+                        ) if attempt is not None else None
+                    )
+                    options.append((
+                        {"overhead_per_unit": overhead, "invented_me": ime,
+                         "skill_missing": missing, "source_name": src["source_name"]},
+                        overhead,
+                    ))
+                best = cheapest_source(options)
+                # Every source unpriced: the row is unpriced, named for the first.
+                invention_map[product_id] = best[0] if best else options[0][0]
 
         ranked = build_finder.rank_builds(
             products, me, struct_info["mat"], rig_info["mat"], sec_info["mult"],
@@ -669,6 +683,7 @@ async def build_finder_results(
         "priced": r["priced"],
         "inv_str": _fmt_isk(r["invention_overhead"]) if r["invention_overhead"] is not None else None,
         "skill_missing": r["skill_missing"],
+        "inv_source": r["invention_source"],
     } for r in ranked]
 
     return templates.TemplateResponse(request, "partials/build_finder_results.html", {

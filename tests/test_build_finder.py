@@ -27,6 +27,7 @@ import asyncio
 import base64
 import json
 import os
+import re
 import tempfile
 from html.parser import HTMLParser
 
@@ -38,7 +39,8 @@ from app.db.models import Base, User, get_db
 from tests.conftest import ensure_user
 from app.db.sde_models import (
     SDEType, SDEGroup, SDEMarketGroup, SDEBlueprintInfo, SDEBlueprintMaterial,
-    SDEBlueprintInvention, SDEBlueprintInventionMaterial, SDEBlueprintInventionSkill,
+    SDEBlueprintInvention, SDEBlueprintInventionMaterial, SDEBlueprintInventionProduct,
+    SDEBlueprintInventionSkill,
 )
 from app.industry import build_finder
 from app.industry.manufacturing import STRUCTURES, RIGS, SEC_STATUS
@@ -316,6 +318,7 @@ INV_T1_BLUEPRINT_ID = 115503
 INV_ENCRYPTION_SKILL_ID = 115504
 INV_SCIENCE_A_SKILL_ID = 115505
 INV_SCIENCE_B_SKILL_ID = 115506
+INV_BP_GROUP_ID = 5502   # blueprint group (category 9) for invention sources
 
 
 def _authed_client():
@@ -332,12 +335,13 @@ def _authed_client():
     return client
 
 
-def _seeded_invention_db(with_invention_chain: bool):
+def _seeded_invention_db(with_invention_chain: bool, extra_seed=None):
     """Temp sqlite DB with one buildable T2-shaped product in a group.
     `with_invention_chain=True` also seeds the full invention chain
     (mirrors tests/test_invention_lookup.py's fixture); `False` leaves
     `sde_blueprint_invention` empty entirely, to exercise the
-    "tables not yet imported" footnote path."""
+    "tables not yet imported" footnote path. `extra_seed`, if given, is an
+    async callable that receives the open session before it commits."""
     tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
     tmp.close()
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp.name}")
@@ -368,6 +372,14 @@ def _seeded_invention_db(with_invention_chain: bool):
                     product_blueprint_type_id=INV_T2_BLUEPRINT_ID,
                     probability=0.3, base_runs=1, time=63900,
                 ))
+                db.add(SDEBlueprintInventionProduct(
+                    blueprint_type_id=INV_T1_BLUEPRINT_ID,
+                    product_blueprint_type_id=INV_T2_BLUEPRINT_ID, base_runs=1,
+                ))
+                db.add(SDEGroup(group_id=INV_BP_GROUP_ID, category_id=9,
+                                group_name="Test Blueprint Group"))
+                db.add(SDEType(type_id=INV_T1_BLUEPRINT_ID, type_name="Test T1 Blueprint",
+                               group_id=INV_BP_GROUP_ID))
                 db.add(SDEBlueprintInventionMaterial(
                     blueprint_type_id=INV_T1_BLUEPRINT_ID, material_type_id=20410, quantity=8))
                 db.add(SDEBlueprintInventionMaterial(
@@ -381,6 +393,8 @@ def _seeded_invention_db(with_invention_chain: bool):
                 db.add(SDEType(type_id=INV_ENCRYPTION_SKILL_ID, type_name="Test Encryption Methods"))
                 db.add(SDEType(type_id=INV_SCIENCE_A_SKILL_ID, type_name="Mechanical Engineering"))
                 db.add(SDEType(type_id=INV_SCIENCE_B_SKILL_ID, type_name="High Energy Physics"))
+            if extra_seed is not None:
+                await extra_seed(db)
             db.add(User(id=1))  # the session _authed_client carries
             await db.commit()
 
@@ -432,6 +446,8 @@ def test_build_finder_results_inventable_row_shows_overhead_suffix(monkeypatch):
         body = r.text
         assert "Test T2 Widget" in body
         assert "inv)" in body
+        assert 'title="Invented from Test T1 Blueprint"' in body
+        assert '<span class="m-only" data-m-label="Invented from">Test T1 Blueprint</span>' in body
         assert "character missing an invention skill" not in body
         assert "P = base_prob" in body
     finally:
@@ -457,6 +473,175 @@ def test_build_finder_results_tables_empty_shows_not_imported_note(monkeypatch):
         body = r.text
         assert "not yet imported" in body
         assert "inv)" not in body
+    finally:
+        teardown()
+
+
+def _get_results(monkeypatch, price_map, **params):
+    monkeypatch.setattr(
+        market_lp, "get_price_map",
+        lambda db: asyncio.sleep(0, result=dict(price_map)),
+    )
+    r = _authed_client().get(
+        "/industry/build-finder/results",
+        params={"market_group_id": INV_MARKET_GROUP_ID, "me": 0, **params},
+    )
+    assert r.status_code == 200
+    return r.text
+
+
+def test_build_finder_results_empty_products_table_shows_not_imported_note(monkeypatch):
+    """The note keys on the products table the lookup reads, so an activity
+    table that is filled while the products table is empty still shows it."""
+    async def only_activity(db):
+        db.add(SDEBlueprintInvention(
+            blueprint_type_id=INV_T1_BLUEPRINT_ID,
+            product_blueprint_type_id=INV_T2_BLUEPRINT_ID,
+            probability=0.3, base_runs=1, time=63900))
+
+    teardown = _seeded_invention_db(with_invention_chain=False, extra_seed=only_activity)
+    try:
+        body = _get_results(monkeypatch, _INV_PRICE_MAP)
+        assert "not yet imported" in body
+        assert "inv)" not in body
+    finally:
+        teardown()
+
+
+# Rifter Blueprint invents both Wolf Blueprint (-> Wolf) and Jaguar Blueprint
+# (-> Jaguar); the activity row keeps only the first.
+RIFTER_BP, WOLF_BP, WOLF, JAGUAR_BP, JAGUAR = 691, 11372, 11371, 11401, 11400
+
+
+def test_build_finder_results_second_invention_product_also_shows_overhead(monkeypatch):
+    async def rifter(db):
+        db.add(SDEGroup(group_id=INV_BP_GROUP_ID, category_id=9,
+                        group_name="Test Blueprint Group"))
+        db.add(SDEType(type_id=RIFTER_BP, type_name="Rifter Blueprint",
+                       group_id=INV_BP_GROUP_ID))
+        db.add(SDEBlueprintInvention(
+            blueprint_type_id=RIFTER_BP, product_blueprint_type_id=WOLF_BP,
+            probability=0.3, base_runs=1, time=63900))
+        for bp in (WOLF_BP, JAGUAR_BP):
+            db.add(SDEBlueprintInventionProduct(
+                blueprint_type_id=RIFTER_BP, product_blueprint_type_id=bp, base_runs=1))
+        db.add(SDEBlueprintInventionMaterial(
+            blueprint_type_id=RIFTER_BP, material_type_id=20410, quantity=8))
+        for sid in (INV_ENCRYPTION_SKILL_ID, INV_SCIENCE_A_SKILL_ID, INV_SCIENCE_B_SKILL_ID):
+            db.add(SDEBlueprintInventionSkill(blueprint_type_id=RIFTER_BP, skill_type_id=sid))
+        for pid, name, bp in ((WOLF, "Wolf", WOLF_BP), (JAGUAR, "Jaguar", JAGUAR_BP)):
+            db.add(SDEType(type_id=pid, type_name=name,
+                           group_id=INV_GROUP_ID,
+                           market_group_id=INV_MARKET_GROUP_ID, published=True))
+            db.add(SDEBlueprintInfo(blueprint_type_id=bp, product_type_id=pid,
+                                    product_quantity=1, manufacturing_time=600))
+            db.add(SDEBlueprintMaterial(blueprint_type_id=bp, activity_id=1,
+                                        material_type_id=34, quantity=100))
+
+    teardown = _seeded_invention_db(with_invention_chain=False, extra_seed=rifter)
+    try:
+        body = _get_results(monkeypatch, {
+            34: 5.0, 20410: 1000.0, WOLF: 2_000_000.0, JAGUAR: 2_000_000.0,
+            INV_PRODUCT_ID: 2_000_000.0,
+        })
+        assert body.count(" inv)") == 2
+        assert body.count('title="Invented from Rifter Blueprint"') == 2
+        assert body.count('data-m-label="Invented from">Rifter Blueprint<') == 2
+    finally:
+        teardown()
+
+
+RELIC_IDS = (30187, 30752, 34412)  # Intact, Malfunctioning, Wrecked (type ids)
+RELIC_NAMES = {30187: "Test Intact Relic", 30752: "Test Malfunctioning Relic",
+               34412: "Test Wrecked Relic"}
+
+
+def _relic_seed():
+    async def seed(db):
+        db.add(SDEGroup(group_id=99001, category_id=34, group_name="Test Relic Group"))
+        for rid, prob, runs in zip(RELIC_IDS, (0.26, 0.21, 0.14), (20, 10, 3)):
+            db.add(SDEType(type_id=rid, type_name=RELIC_NAMES[rid], group_id=99001))
+            db.add(SDEBlueprintInvention(
+                blueprint_type_id=rid, product_blueprint_type_id=INV_T2_BLUEPRINT_ID,
+                probability=prob, base_runs=runs, time=1))
+            db.add(SDEBlueprintInventionProduct(
+                blueprint_type_id=rid, product_blueprint_type_id=INV_T2_BLUEPRINT_ID,
+                base_runs=runs))
+            db.add(SDEBlueprintInventionMaterial(
+                blueprint_type_id=rid, material_type_id=20410, quantity=2))
+            for sid in (INV_ENCRYPTION_SKILL_ID, INV_SCIENCE_A_SKILL_ID, INV_SCIENCE_B_SKILL_ID):
+                db.add(SDEBlueprintInventionSkill(blueprint_type_id=rid, skill_type_id=sid))
+        for sid, nm in ((INV_ENCRYPTION_SKILL_ID, "Test Encryption Methods"),
+                        (INV_SCIENCE_A_SKILL_ID, "Mechanical Engineering"),
+                        (INV_SCIENCE_B_SKILL_ID, "High Energy Physics")):
+            db.add(SDEType(type_id=sid, type_name=nm))
+    return seed
+
+
+def test_build_finder_results_null_category_source_is_skipped(monkeypatch):
+    """A source whose group and type both lack a category could be a relic,
+    so it is never costed (not as a non-relic)."""
+    async def seed(db):
+        db.add(SDEType(type_id=30187, type_name="Test Unknown Source"))
+        db.add(SDEBlueprintInvention(
+            blueprint_type_id=30187, product_blueprint_type_id=INV_T2_BLUEPRINT_ID,
+            probability=0.26, base_runs=20, time=1))
+        db.add(SDEBlueprintInventionProduct(
+            blueprint_type_id=30187, product_blueprint_type_id=INV_T2_BLUEPRINT_ID,
+            base_runs=20))
+        db.add(SDEBlueprintInventionMaterial(
+            blueprint_type_id=30187, material_type_id=20410, quantity=2))
+
+    teardown = _seeded_invention_db(with_invention_chain=False, extra_seed=seed)
+    try:
+        body = _get_results(monkeypatch, _INV_PRICE_MAP)
+        assert " inv)" not in body
+        assert "Test Unknown Source" not in body
+    finally:
+        teardown()
+
+
+def test_build_finder_results_relic_source_uses_the_only_priced_relic(monkeypatch):
+    teardown = _seeded_invention_db(with_invention_chain=False, extra_seed=_relic_seed())
+    try:
+        body = _get_results(monkeypatch, {
+            34: 5.0, 20410: 1000.0, INV_PRODUCT_ID: 2_000_000.0, 34412: 500_000.0,
+        })
+        assert " inv)" in body
+        assert 'title="Invented from Test Wrecked Relic"' in body
+        assert "Test Intact Relic" not in body
+    finally:
+        teardown()
+
+
+def test_build_finder_results_relic_price_is_part_of_the_overhead(monkeypatch):
+    """Intact is far more likely and yields more runs, but a pricey relic
+    makes Wrecked the cheaper source per unit."""
+    teardown = _seeded_invention_db(with_invention_chain=False, extra_seed=_relic_seed())
+    try:
+        body = _get_results(monkeypatch, {
+            34: 5.0, 20410: 1000.0, INV_PRODUCT_ID: 2_000_000.0,
+            30187: 900_000_000.0, 30752: 900_000_000.0, 34412: 1_000.0,
+        })
+        assert 'title="Invented from Test Wrecked Relic"' in body
+        # By hand: attempt = 2 datacores x 1000 + relic 1000 = 3000;
+        # P = 0.14 x (1 + 4/40 + 8/30) = 0.14 x 1.36667 = 0.19133;
+        # 3 runs x 1 unit, so 3000 / 0.19133 / 3 = 5226.9 -> "5.23K".
+        assert "(+5.23K inv)" in body
+    finally:
+        teardown()
+
+
+def test_build_finder_results_all_relics_unpriced_leaves_the_row_unpriced(monkeypatch):
+    teardown = _seeded_invention_db(with_invention_chain=False, extra_seed=_relic_seed())
+    try:
+        body = _get_results(monkeypatch, {
+            34: 5.0, 20410: 1000.0, INV_PRODUCT_ID: 2_000_000.0,
+        })
+        assert " inv)" not in body
+        cell = re.search(r'data-m-label="Build / unit"[^>]*><span>([^<]*)', body)
+        assert cell and cell.group(1) == "—"
+        assert "Invented from" not in body, "no source shown where no overhead is"
     finally:
         teardown()
 

@@ -1592,24 +1592,34 @@ async def search_market_groups(
     return out
 
 
+# Ancient Relics: the consumed input of a T3 invention attempt (T1 sources are category 9).
+RELIC_CATEGORY_ID = 34
+
+
 async def get_invention_data(db: AsyncSession, product_type_ids: list[int]) -> dict[int, dict]:
-    """Bulk-resolve invention chain data for sellable T2 products.
+    """Bulk-resolve invention chain data for sellable T2/T3 products.
 
     Chain: product_type_id -> `SDEBlueprintInfo` row whose product_type_id
-    matches (gives the T2 blueprint id + per-run output qty) -> the
-    `SDEBlueprintInvention` row whose product_blueprint_type_id equals that T2
-    blueprint id (gives probability/base_runs and the T1 blueprint id, which
-    is the invention row's own PK) -> materials (datacores) + skills keyed off
-    that T1 blueprint id.
+    matches (gives the T2 blueprint id + per-run output qty) -> every
+    `SDEBlueprintInventionProduct` row for that blueprint (one per invention
+    source and its base_runs; a T1 blueprint can invent several products and
+    a T3 item has one relic source per tier) -> the `SDEBlueprintInvention`
+    row of each source (per-activity probability) -> materials (datacores) +
+    skills keyed off the source id, and `SDEType`/`SDEGroup` for the source's
+    name and whether it is a relic (category 34, Ancient Relics).
 
     Every step is a single bulk `IN(...)` query, stitched together in Python —
     no per-product round trips (see `get_group_buildables` for the same
-    style). Non-inventable products (no blueprint, or no matching invention
-    row) are simply absent from the returned dict.
+    style). A source is dropped when it has no activity row (no probability)
+    or no `sde_types` row (unpublished, so not known to be a relic or not);
+    a product left with no source is absent from the returned dict, as is
+    one with no blueprint.
 
-    Returns `{product_type_id: {"t1_blueprint_type_id", "t2_blueprint_type_id",
-    "probability", "base_runs", "per_run_output_qty",
-    "datacores": [{"material_type_id", "quantity"}], "skill_ids": [int, ...]}}`.
+    Returns `{product_type_id: {"t2_blueprint_type_id", "per_run_output_qty",
+    "sources": [{"source_type_id", "source_name", "source_is_relic",
+    "probability", "base_runs", "datacores": [{"material_type_id",
+    "quantity"}], "skill_ids": [int, ...]}, ...]}}`, sources ordered by
+    source_type_id ascending.
     """
     if not product_type_ids:
         return {}
@@ -1628,19 +1638,39 @@ async def get_invention_data(db: AsyncSession, product_type_ids: list[int]) -> d
     output_qty_by_product = {r.product_type_id: (r.product_quantity or 1) for r in bp_rows}
     t2_bp_ids = list(t2_bp_by_product.values())
 
-    inv_rows = (await db.execute(
+    src_rows = (await db.execute(
         select(
-            SDEBlueprintInvention.blueprint_type_id,
-            SDEBlueprintInvention.product_blueprint_type_id,
-            SDEBlueprintInvention.probability,
-            SDEBlueprintInvention.base_runs,
+            SDEBlueprintInventionProduct.blueprint_type_id,
+            SDEBlueprintInventionProduct.product_blueprint_type_id,
+            SDEBlueprintInventionProduct.base_runs,
         )
-        .where(SDEBlueprintInvention.product_blueprint_type_id.in_(t2_bp_ids))
+        .where(SDEBlueprintInventionProduct.product_blueprint_type_id.in_(t2_bp_ids))
+        .order_by(SDEBlueprintInventionProduct.blueprint_type_id)
     )).all()
-    if not inv_rows:
+    if not src_rows:
         return {}
-    inv_by_t2_bp = {r.product_blueprint_type_id: r for r in inv_rows}
-    t1_bp_ids = [r.blueprint_type_id for r in inv_rows]
+    source_ids = sorted({r.blueprint_type_id for r in src_rows})
+
+    # Probability is per activity, so it lives on the one-row-per-source table.
+    prob_by_source = {
+        r.blueprint_type_id: r.probability
+        for r in (await db.execute(
+            select(SDEBlueprintInvention.blueprint_type_id,
+                   SDEBlueprintInvention.probability)
+            .where(SDEBlueprintInvention.blueprint_type_id.in_(source_ids))
+        )).all()
+    }
+
+    type_rows = (await db.execute(
+        select(
+            SDEType.type_id,
+            SDEType.type_name,
+            func.coalesce(SDEGroup.category_id, SDEType.category_id).label("category_id"),
+        )
+        .outerjoin(SDEGroup, SDEGroup.group_id == SDEType.group_id)
+        .where(SDEType.type_id.in_(source_ids))
+    )).all()
+    type_by_source = {r.type_id: r for r in type_rows}
 
     mat_rows = (await db.execute(
         select(
@@ -1648,11 +1678,11 @@ async def get_invention_data(db: AsyncSession, product_type_ids: list[int]) -> d
             SDEBlueprintInventionMaterial.material_type_id,
             SDEBlueprintInventionMaterial.quantity,
         )
-        .where(SDEBlueprintInventionMaterial.blueprint_type_id.in_(t1_bp_ids))
+        .where(SDEBlueprintInventionMaterial.blueprint_type_id.in_(source_ids))
     )).all()
-    mats_by_t1_bp: dict[int, list[dict]] = {}
+    mats_by_source: dict[int, list[dict]] = {}
     for r in mat_rows:
-        mats_by_t1_bp.setdefault(r.blueprint_type_id, []).append(
+        mats_by_source.setdefault(r.blueprint_type_id, []).append(
             {"material_type_id": r.material_type_id, "quantity": r.quantity})
 
     skill_rows = (await db.execute(
@@ -1660,26 +1690,39 @@ async def get_invention_data(db: AsyncSession, product_type_ids: list[int]) -> d
             SDEBlueprintInventionSkill.blueprint_type_id,
             SDEBlueprintInventionSkill.skill_type_id,
         )
-        .where(SDEBlueprintInventionSkill.blueprint_type_id.in_(t1_bp_ids))
+        .where(SDEBlueprintInventionSkill.blueprint_type_id.in_(source_ids))
     )).all()
-    skills_by_t1_bp: dict[int, list[int]] = {}
+    skills_by_source: dict[int, list[int]] = {}
     for r in skill_rows:
-        skills_by_t1_bp.setdefault(r.blueprint_type_id, []).append(r.skill_type_id)
+        skills_by_source.setdefault(r.blueprint_type_id, []).append(r.skill_type_id)
+
+    sources_by_t2_bp: dict[int, dict[int, dict]] = {}
+    for r in src_rows:
+        t = type_by_source.get(r.blueprint_type_id)
+        prob = prob_by_source.get(r.blueprint_type_id)
+        if t is None or t.category_id is None or prob is None:
+            # Unpublished source, unknown category (relic or not?), or no
+            # activity row: nothing safe to cost.
+            continue
+        sources_by_t2_bp.setdefault(r.product_blueprint_type_id, {})[r.blueprint_type_id] = {
+            "source_type_id": r.blueprint_type_id,
+            "source_name": t.type_name,
+            "source_is_relic": t.category_id == RELIC_CATEGORY_ID,
+            "probability": prob,
+            "base_runs": r.base_runs or 1,
+            "datacores": mats_by_source.get(r.blueprint_type_id, []),
+            "skill_ids": skills_by_source.get(r.blueprint_type_id, []),
+        }
 
     result: dict[int, dict] = {}
     for product_id, t2_bp_id in t2_bp_by_product.items():
-        inv = inv_by_t2_bp.get(t2_bp_id)
-        if inv is None:
-            continue  # T2 blueprint exists but has no invention activity (not inventable)
-        t1_bp_id = inv.blueprint_type_id
+        by_id = sources_by_t2_bp.get(t2_bp_id)
+        if not by_id:
+            continue  # no usable invention source (not inventable)
         result[product_id] = {
-            "t1_blueprint_type_id": t1_bp_id,
             "t2_blueprint_type_id": t2_bp_id,
-            "probability": inv.probability,
-            "base_runs": inv.base_runs,
             "per_run_output_qty": output_qty_by_product[product_id],
-            "datacores": mats_by_t1_bp.get(t1_bp_id, []),
-            "skill_ids": skills_by_t1_bp.get(t1_bp_id, []),
+            "sources": [by_id[sid] for sid in sorted(by_id)],
         }
     return result
 

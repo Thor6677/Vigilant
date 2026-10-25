@@ -322,6 +322,12 @@ def _parse_invention_item(item: dict):
     products = inv.get("products") or []
     if not products:
         return None, [], []
+    # Build Finder takes one probability per activity from this row; flag an
+    # SDE that ever gives an activity's products different probabilities.
+    if len({p.get("probability") for p in products if isinstance(p, dict)}) > 1:
+        log.warning(
+            "invention activity of blueprint %s has products with differing probabilities",
+            item.get("_key"))
     try:
         bp_id = int(item["_key"])
         p0 = products[0]

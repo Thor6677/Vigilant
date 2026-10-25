@@ -61,3 +61,16 @@ def test_parse_invention_products_skips_bad_entries():
         {"quantity": 1}, "junk", {"typeID": 9, "quantity": 10}]}}}
     assert _parse_invention_products(item) == [
         {"blueprint_type_id": 2, "product_blueprint_type_id": 9, "base_runs": 10}]
+
+
+def test_parse_invention_item_warns_when_products_differ_in_probability(caplog):
+    item = {"_key": "691", "activities": {"invention": {"products": [
+        {"typeID": 11372, "probability": 0.3, "quantity": 1},
+        {"typeID": 11401, "probability": 0.2, "quantity": 1}]}}}
+    with caplog.at_level("WARNING", logger="app.sde.loader"):
+        _parse_invention_item(item)
+    assert "differing probabilities" in caplog.text
+    caplog.clear()
+    with caplog.at_level("WARNING", logger="app.sde.loader"):
+        _parse_invention_item(TWO_PRODUCTS)
+    assert "differing probabilities" not in caplog.text

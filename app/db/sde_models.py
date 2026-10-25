@@ -117,7 +117,10 @@ class SDEBlueprintInfo(Base):
 
 
 class SDEBlueprintInvention(Base):
-    """Invention activity info — T1 blueprint -> invented T2 blueprint."""
+    """Invention activity info — T1 blueprint (or T3 relic) -> invented blueprint.
+    Holds only the activity's first product; Build Finder reads the products
+    table for the product -> source mapping and uses this one only for the
+    per-activity probability."""
     __tablename__ = "sde_blueprint_invention"
 
     blueprint_type_id = Column(Integer, primary_key=True)  # T1 blueprint being invented FROM
@@ -141,7 +144,9 @@ class SDEBlueprintInventionProduct(Base):
     """Every blueprint an invention job can produce. sde_blueprint_invention
     keeps one product per T1 blueprint (its first), but many T1 blueprints
     invent several (Rifter: Jaguar and Wolf), so copy packs read this table
-    to tell whether a blueprint is invented and how many runs its BPC has."""
+    to tell whether a blueprint is invented and how many runs its BPC has.
+    Build Finder reads it too, for every source of a product (a T3 item has
+    one relic source per tier)."""
     __tablename__ = "sde_blueprint_invention_products"
 
     id = Column(Integer, primary_key=True, autoincrement=True)

@@ -15,8 +15,10 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.db.models import Base
 from app.db.sde_models import (
     SDEType,
+    SDEGroup,
     SDEBlueprintInfo,
     SDEBlueprintInvention,
+    SDEBlueprintInventionProduct,
     SDEBlueprintInventionMaterial,
     SDEBlueprintInventionSkill,
 )
@@ -24,11 +26,16 @@ from app.sde import lookup as sde
 from app.routes.industry import _resolve_invention_skills
 
 
-# Rifter (T1 blueprint 687) -> Rifter Blueprint invented into
-# Wolf-class-ish T2 blueprint 11373 -> product 11371.
-T1_BLUEPRINT_ID = 687
-T2_BLUEPRINT_ID = 11373
+# Rifter Blueprint invents two things: Wolf Blueprint (-> Wolf) and Jaguar
+# Blueprint (-> Jaguar). The activity row keeps only the first product.
+T1_BLUEPRINT_ID = 691
+T2_BLUEPRINT_ID = 11372
 PRODUCT_ID = 11371
+JAGUAR_BLUEPRINT_ID = 11401
+JAGUAR_ID = 11400
+
+BLUEPRINT_CATEGORY_ID = 9
+RELIC_CATEGORY_ID = 34
 
 ENCRYPTION_SKILL_ID = 21791   # "Minmatar Encryption Methods"
 SCIENCE_A_SKILL_ID = 3402     # "Mechanical Engineering"
@@ -60,6 +67,12 @@ async def _seed(SessionLocal):
             product_quantity=1,
             manufacturing_time=600,
         ))
+        db.add(SDEBlueprintInfo(
+            blueprint_type_id=JAGUAR_BLUEPRINT_ID,
+            product_type_id=JAGUAR_ID,
+            product_quantity=1,
+            manufacturing_time=600,
+        ))
         db.add(SDEBlueprintInvention(
             blueprint_type_id=T1_BLUEPRINT_ID,
             product_blueprint_type_id=T2_BLUEPRINT_ID,
@@ -67,6 +80,14 @@ async def _seed(SessionLocal):
             base_runs=1,
             time=63900,
         ))
+        for product_bp in (T2_BLUEPRINT_ID, JAGUAR_BLUEPRINT_ID):
+            db.add(SDEBlueprintInventionProduct(
+                blueprint_type_id=T1_BLUEPRINT_ID,
+                product_blueprint_type_id=product_bp, base_runs=1))
+        db.add(SDEGroup(group_id=105, category_id=BLUEPRINT_CATEGORY_ID,
+                        group_name="Frigate Blueprint"))
+        db.add(SDEType(type_id=T1_BLUEPRINT_ID, type_name="Rifter Blueprint",
+                       group_id=105))
         db.add(SDEBlueprintInventionMaterial(
             blueprint_type_id=T1_BLUEPRINT_ID, material_type_id=20410, quantity=8))
         db.add(SDEBlueprintInventionMaterial(
@@ -98,15 +119,19 @@ def test_get_invention_data_resolves_full_chain():
 
         assert PRODUCT_ID in data
         row = data[PRODUCT_ID]
-        assert row["t1_blueprint_type_id"] == T1_BLUEPRINT_ID
         assert row["t2_blueprint_type_id"] == T2_BLUEPRINT_ID
-        assert row["probability"] == 0.3
-        assert row["base_runs"] == 1
         assert row["per_run_output_qty"] == 1
-        assert {(d["material_type_id"], d["quantity"]) for d in row["datacores"]} == {
+        assert len(row["sources"]) == 1
+        src = row["sources"][0]
+        assert src["source_type_id"] == T1_BLUEPRINT_ID
+        assert src["source_name"] == "Rifter Blueprint"
+        assert src["source_is_relic"] is False
+        assert src["probability"] == 0.3
+        assert src["base_runs"] == 1
+        assert {(d["material_type_id"], d["quantity"]) for d in src["datacores"]} == {
             (20410, 8), (20424, 8),
         }
-        assert set(row["skill_ids"]) == {
+        assert set(src["skill_ids"]) == {
             SCIENCE_A_SKILL_ID, SCIENCE_B_SKILL_ID, ENCRYPTION_SKILL_ID,
         }
 
@@ -128,6 +153,151 @@ def test_get_invention_data_non_inventable_product_absent():
 
         assert PRODUCT_ID in data
         assert no_chain_product not in data
+
+    _run(scenario())
+
+
+def test_get_invention_data_second_product_of_a_source_resolves():
+    """Rifter Blueprint invents Wolf Blueprint and Jaguar Blueprint, but the
+    activity row keeps only the first. Both products resolve to source 691
+    with the activity's probability."""
+    engine, SessionLocal = _temp_engine()
+
+    async def scenario():
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        await _seed(SessionLocal)
+
+        async with SessionLocal() as db:
+            data = await sde.get_invention_data(db, [PRODUCT_ID, JAGUAR_ID])
+
+        assert set(data) == {PRODUCT_ID, JAGUAR_ID}
+        jaguar = data[JAGUAR_ID]
+        assert jaguar["t2_blueprint_type_id"] == JAGUAR_BLUEPRINT_ID
+        assert [s["source_type_id"] for s in jaguar["sources"]] == [T1_BLUEPRINT_ID]
+        assert jaguar["sources"][0]["probability"] == 0.3
+        assert {d["material_type_id"] for d in jaguar["sources"][0]["datacores"]} == {
+            20410, 20424,
+        }
+
+    _run(scenario())
+
+
+# Three relic tiers feeding one invented blueprint (ids of real relic types;
+# the names and the blueprint/product ids here are invented).
+RELIC_INTACT, RELIC_MALFUNCTIONING, RELIC_WRECKED = 30187, 30752, 34412
+RELIC_GROUP_ID = 99001
+T3_BLUEPRINT_ID = 99002
+T3_PRODUCT_ID = 99003
+
+
+async def _seed_relics(SessionLocal, wrecked_has_type=True, wrecked_has_activity=True):
+    async with SessionLocal() as db:
+        db.add(SDEGroup(group_id=RELIC_GROUP_ID, category_id=RELIC_CATEGORY_ID,
+                        group_name="Test Relic Group"))
+        db.add(SDEBlueprintInfo(
+            blueprint_type_id=T3_BLUEPRINT_ID, product_type_id=T3_PRODUCT_ID,
+            product_quantity=1, manufacturing_time=600))
+        tiers = [
+            (RELIC_INTACT, "Test Intact Relic", 0.26, 20),
+            (RELIC_MALFUNCTIONING, "Test Malfunctioning Relic", 0.21, 10),
+            (RELIC_WRECKED, "Test Wrecked Relic", 0.14, 3),
+        ]
+        # Added out of id order on purpose: the lookup must sort them.
+        for rid, name, prob, runs in reversed(tiers):
+            if rid != RELIC_WRECKED or wrecked_has_type:
+                db.add(SDEType(type_id=rid, type_name=name, group_id=RELIC_GROUP_ID))
+            if rid != RELIC_WRECKED or wrecked_has_activity:
+                db.add(SDEBlueprintInvention(
+                    blueprint_type_id=rid, product_blueprint_type_id=T3_BLUEPRINT_ID,
+                    probability=prob, base_runs=runs, time=1))
+            db.add(SDEBlueprintInventionProduct(
+                blueprint_type_id=rid, product_blueprint_type_id=T3_BLUEPRINT_ID,
+                base_runs=runs))
+            db.add(SDEBlueprintInventionMaterial(
+                blueprint_type_id=rid, material_type_id=20410, quantity=2))
+        await db.commit()
+
+
+def test_get_invention_data_multi_source_ordered_by_id():
+    engine, SessionLocal = _temp_engine()
+
+    async def scenario():
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        await _seed_relics(SessionLocal)
+
+        async with SessionLocal() as db:
+            data = await sde.get_invention_data(db, [T3_PRODUCT_ID])
+
+        sources = data[T3_PRODUCT_ID]["sources"]
+        assert [s["source_type_id"] for s in sources] == [
+            RELIC_INTACT, RELIC_MALFUNCTIONING, RELIC_WRECKED]
+        assert [(s["probability"], s["base_runs"]) for s in sources] == [
+            (0.26, 20), (0.21, 10), (0.14, 3)]
+        assert all(s["source_is_relic"] for s in sources)
+        assert all(s["datacores"] == [{"material_type_id": 20410, "quantity": 2}]
+                   for s in sources)
+
+    _run(scenario())
+
+
+def test_get_invention_data_source_without_a_type_row_is_skipped():
+    """sde_types holds only published types. A source with no row there (the
+    unpublished legacy Electronics relic) is skipped, never returned as a
+    non-relic that would be costed without the relic price."""
+    engine, SessionLocal = _temp_engine()
+
+    async def scenario():
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        await _seed_relics(SessionLocal, wrecked_has_type=False)
+
+        async with SessionLocal() as db:
+            data = await sde.get_invention_data(db, [T3_PRODUCT_ID])
+
+        assert [s["source_type_id"] for s in data[T3_PRODUCT_ID]["sources"]] == [
+            RELIC_INTACT, RELIC_MALFUNCTIONING]
+
+    _run(scenario())
+
+
+def test_get_invention_data_source_with_null_category_is_skipped():
+    """A type row whose group is missing and whose own category is NULL could
+    be a relic; it is skipped, never returned as a non-relic."""
+    engine, SessionLocal = _temp_engine()
+
+    async def scenario():
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        await _seed_relics(SessionLocal)
+        async with SessionLocal() as db:
+            wrecked = await db.get(SDEType, RELIC_WRECKED)
+            wrecked.group_id = None
+            await db.commit()
+
+        async with SessionLocal() as db:
+            data = await sde.get_invention_data(db, [T3_PRODUCT_ID])
+
+        assert [s["source_type_id"] for s in data[T3_PRODUCT_ID]["sources"]] == [
+            RELIC_INTACT, RELIC_MALFUNCTIONING]
+
+    _run(scenario())
+
+
+def test_get_invention_data_products_row_without_activity_row_is_skipped():
+    engine, SessionLocal = _temp_engine()
+
+    async def scenario():
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        await _seed_relics(SessionLocal, wrecked_has_activity=False)
+
+        async with SessionLocal() as db:
+            data = await sde.get_invention_data(db, [T3_PRODUCT_ID])
+
+        assert [s["source_type_id"] for s in data[T3_PRODUCT_ID]["sources"]] == [
+            RELIC_INTACT, RELIC_MALFUNCTIONING]
 
     _run(scenario())
 

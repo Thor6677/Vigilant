@@ -31,7 +31,8 @@ _section = functools.partial(css_section, release="R3")
 _SKILL_ROW = 2      # the one row whose character lacks an invention skill
 _NEGATIVE_ROW = 5   # a row that loses money
 _LABELS = ["Name", "Build / unit", "Sell / unit", "Margin", "Market"]
-_SKILL_LABELS = ["Name", "Build / unit", "Skills", "Sell / unit", "Margin", "Market"]
+_SKILL_LABELS = ["Name", "Build / unit", "Skills", "Invented from", "Sell / unit",
+                 "Margin", "Market"]
 
 
 def _result(i, n):
@@ -54,6 +55,7 @@ def _result(i, n):
         "priced": not unpriced,
         "inv_str": industry_mod._fmt_isk(inv) if inv is not None else None,
         "skill_missing": i == _SKILL_ROW,
+        "inv_source": "Sample Blueprint" if inv is not None else None,
     }
 
 
@@ -160,6 +162,9 @@ def test_opened_row_lists_name_first_then_the_desktop_values():
     for n, (row, r) in enumerate(_paired(html, rows)):
         labelled = row_labelled(row)
         assert list(labelled) == (_SKILL_LABELS if n == _SKILL_ROW else _LABELS)
+        if n == _SKILL_ROW:
+            assert labelled["Invented from"]["text"] == r["inv_source"]
+            assert "m-only" in _cls(labelled["Invented from"]["attrs"])
         assert labelled["Name"]["text"] == r["product_name"]
         assert "m-only" in _cls(labelled["Name"]["attrs"])
         assert labelled["Build / unit"]["text"].startswith(r["cost_str"])
@@ -169,6 +174,36 @@ def test_opened_row_lists_name_first_then_the_desktop_values():
     build = row_labelled(inv_row)["Build / unit"]
     assert build["text"] == f"{rows[_SKILL_ROW]['cost_str']} (+{rows[_SKILL_ROW]['inv_str']} inv)⚠"
     assert len(build["kids"]) == 1, "one wrapper holds the cost, the inv suffix and the ⚠"
+
+
+def test_invented_row_without_a_missing_skill_lists_invented_from_after_build():
+    row = _result(0, 14)
+    row.update(inv_str=industry_mod._fmt_isk(210_000.0), inv_source="Sample Blueprint")
+    html = render_page(industry_mod, "partials/build_finder_results.html",
+                       "/industry/build-finder/results",
+                       rows=[row], total_n=1, shown=1, capped=False, me=10,
+                       compute_ms=1.0, invention_active=True, tables_empty=False,
+                       selected_character_id=0, encryption=4, science=4,
+                       decryptor="none")
+    labelled = row_labelled(cells_rows(html)[0])
+    assert list(labelled) == ["Name", "Build / unit", "Invented from", "Sell / unit",
+                              "Margin", "Market"]
+    assert labelled["Invented from"]["text"] == "Sample Blueprint"
+
+
+def test_unpriced_invented_row_has_no_invented_from_line():
+    """The source is shown only where the (+N inv) overhead is, as on desktop."""
+    row = _result(0, 14)
+    row.update(inv_str=None, inv_source="Sample Blueprint", priced=False)
+    html = render_page(industry_mod, "partials/build_finder_results.html",
+                       "/industry/build-finder/results",
+                       rows=[row], total_n=1, shown=1, capped=False, me=10,
+                       compute_ms=1.0, invention_active=True, tables_empty=False,
+                       selected_character_id=0, encryption=4, science=4,
+                       decryptor="none")
+    assert "Invented from" not in list(row_labelled(cells_rows(html)[0]))
+    assert 'data-m-label="Invented from"' not in html
+    assert "Invented from" not in html
 
 
 def test_market_link_opens_inside_the_row_and_the_desktop_link_cell_is_untagged():
@@ -210,6 +245,7 @@ def test_phone_only_cells_carry_no_inline_style():
         assert "style" not in labelled["Market"]["kids"][0]
         if n == _SKILL_ROW:
             assert "style" not in labelled["Skills"]["attrs"]
+            assert "style" not in labelled["Invented from"]["attrs"]
 
 
 def test_rows_carry_no_whitespace_between_tags():
