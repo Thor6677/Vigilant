@@ -372,6 +372,17 @@ NAV_GROUPS = [
                 ],
             ),
             _item(
+                "Battle Loot", "/intel/loot",
+                [("prefix", "/intel/loot")],
+                desc="Paste a battle report link and see which wrecks are worth looting — what dropped in each wreck, priced at Jita, from the local killmail archive.",
+                features=[
+                    "zKillboard, killmail.app and evetools battle links",
+                    "Dropped vs destroyed value per wreck, best first",
+                    "Jita sell pricing with a clear fallback label",
+                    "Totals per victim group with a click filter",
+                ],
+            ),
+            _item(
                 "WH Tracker", "/intel/tracker",
                 [("prefix", "/intel/tracker")],
                 desc="Second-monitor live view for wormhole diving — polls your character's location and auto-renders the current J-system's reference plus killmail-archive intelligence.",

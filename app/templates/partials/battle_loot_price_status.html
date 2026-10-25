@@ -1,0 +1,19 @@
+{# Jita pricing progress. While the job runs this element polls itself every 2s
+   (outerHTML swap); once done it has no poll attribute and the response sends
+   HX-Trigger: loot-prices-ready, which re-fetches the results. #}
+{% if poll %}
+<div id="bl-price-status" class="bl-status"
+     hx-get="/intel/loot/prices/status?{{ scope_q }}" hx-trigger="every 2s" hx-swap="outerHTML"
+     data-htmx-no-error="1">
+    {% if job and job.state == 'queued' %}Jita pricing queued behind another report…
+    {% else %}Fetching Jita prices {{ job.done if job else 0 }}/{{ job.total if job else 0 }}…{% endif %}
+</div>
+{% else %}
+<div id="bl-price-status" class="bl-status">
+    {% if job and job.crashed %}Jita pricing failed. Prices stay at the EVE average; filter or reload to retry shortly.
+    {% elif job and job.budget_hit %}Jita pricing paused (request budget used){% if resume %}; retry after {{ resume }} EVE{% endif %}. Remaining types are at the EVE average.
+    {% elif job and job.stopped_early %}Jita pricing stopped early (ESI rate limit). Remaining types are at the EVE average.
+    {% elif job and job.failed %}Jita prices loaded; {{ job.failed }} lookup{{ 's' if job.failed != 1 }} failed and use the EVE average.
+    {% else %}Jita prices loaded.{% endif %}
+</div>
+{% endif %}

@@ -1,0 +1,88 @@
+{# Totals, price-source summary, filters, group totals and the wreck list. #}
+{% if v.poll %}
+<div id="bl-price-status" class="bl-status"
+     hx-get="/intel/loot/prices/status?{{ v.scope_q }}" hx-trigger="every 2s" hx-swap="outerHTML"
+     data-htmx-no-error="1">
+    {% if v.job and v.job.state == 'queued' %}Jita pricing queued behind another report…
+    {% else %}Fetching Jita prices {{ v.job.done if v.job else 0 }}/{{ v.job.total if v.job else 0 }}…{% endif %}
+</div>
+{% endif %}
+<div class="bl-totals">
+    <div class="bl-total"><b>{{ v.dropped|bl_isk }}</b><span>Dropped{% if v.provisional %} · provisional{% endif %}</span></div>
+    <div class="bl-total"><b>{{ v.destroyed|bl_isk }}</b><span>Destroyed</span></div>
+    <div class="bl-total"><b>{{ v.wrecks }}</b><span>Wrecks</span></div>
+</div>
+
+<div class="bl-line">
+    {% if v.dropped_type_total %}
+    Dropped: Jita 4-4 lowest sell for {{ v.jita_types }} of {{ v.dropped_type_total }} types ({{ (v.jita_share * 100)|round|int }}% of dropped value);
+    EVE global average for the rest. Destroyed: EVE global average.
+    {% if v.as_of %}Prices as of {{ v.as_of }} EVE.{% endif %}
+    {% else %}Nothing dropped in this report.{% endif %}
+    {% if v.cand_total > v.cand_cap %}Jita sell was looked up for the top {{ v.cand_cap }} of {{ v.cand_total }} types, covering {{ (v.cand_coverage * 100)|round|int }}% of dropped value (measured at EVE average).{% endif %}
+    {% if v.provisional %}<b>Provisional</b>: worth-looting flags may change when Jita prices arrive.
+    {% elif v.pending_types %}Jita prices are missing for {{ v.pending_types }} type{{ 's' if v.pending_types != 1 }} (expired or not fetched); those use the EVE average. Reload to retry.{% endif %}
+    {% if not v.avg_ok %}<b>EVE average prices could not be loaded</b>, so values are incomplete.{% endif %}
+    {% for s, n in v.type_counts.items() if s not in ('jita', 'avg') %}
+    <span class="bl-tag">{{ n }} {{ bl_source_label(s) }}</span>
+    {% endfor %}
+</div>
+<div class="bl-line">
+    Vigilant has {{ v.kill_count }} kill{{ 's' if v.kill_count != 1 }} in these windows{% if v.evetools_count is not none %}; evetools lists {{ v.evetools_count }}{% endif %}.
+    {% if v.truncated %}<b>Too many kills: showing the {{ v.kill_count }} most valuable.</b>{% endif %}
+    {% if v.no_items %}{{ v.no_items }} kill{{ 's' if v.no_items != 1 }} have no item data and are not valued.{% endif %}
+    Kills Vigilant never stored are missing.
+</div>
+
+<form id="bl-filters" class="bl-filters" hx-get="/intel/loot/results" hx-target="#bl-results" hx-swap="innerHTML"
+      hx-trigger="change" data-htmx-no-error="1">
+    {% for name, value in v.scope_pairs %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
+    {% if v.group %}<input type="hidden" name="group" value="{{ v.group }}">{% endif %}
+    <label>Worth looting from <input type="number" name="min" min="0" step="any" value="{{ '%g'|format(v.min_millions) }}"> M ISK</label>
+    <label><input type="checkbox" name="empty" value="1" {{ 'checked' if v.show_empty }}> Show wrecks with nothing dropped{% if v.hidden_empty %} ({{ v.hidden_empty }}){% endif %}</label>
+</form>
+
+{% if v.groups %}
+<div class="b-section-head"><span class="b-label">By victim group</span>
+    <span class="b-muted-sm">alliance, else corp · tap one to filter</span></div>
+{% for g in v.groups %}
+<a class="b-table-row m-row m-row--link bl-group{{ ' is-active' if g.active }}" href="#"
+   hx-get="{{ g.url }}" hx-target="#bl-results" hx-swap="innerHTML"
+   data-htmx-no-error="1" style="text-decoration:none;color:inherit;">
+    <span data-m="key" style="flex:3;font-size:11px;color:var(--text);">{{ g.label }}{% if g.active %} ✕{% endif %}</span>
+    <span style="flex:0 0 70px;text-align:right;font-size:10px;color:var(--muted);">{{ g.wrecks }} wreck{{ 's' if g.wrecks != 1 }}</span>
+    <span style="flex:0 0 100px;text-align:right;font-size:10px;color:var(--muted);">{{ g.destroyed|bl_isk }} lost</span>
+    <span data-m="key" style="flex:0 0 100px;text-align:right;font-size:11px;color:var(--text);">{{ g.dropped|bl_isk }}</span>
+</a>
+{% endfor %}
+{% endif %}
+
+<div class="b-section-head"><span class="b-label">Wrecks</span>
+    <span class="b-muted-sm">sorted by dropped value{% if v.group %} · filtered to one group{% endif %}</span></div>
+{% if v.rows %}
+<div class="b-table-row m-head" style="border-bottom:2px solid var(--border);">
+    <span style="flex:2;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Ship</span>
+    <span style="flex:3;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Pilot</span>
+    <span style="flex:3;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Top drops</span>
+    <span style="flex:0 0 90px;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Destroyed</span>
+    <span style="flex:0 0 90px;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">System · time</span>
+    <span style="flex:0 0 100px;text-align:right;font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);">Dropped</span>
+</div>
+{% for r in v.rows %}
+<div class="b-table-row m-row" data-click="toggleMRow"
+     hx-get="/intel/loot/wreck/{{ r.id }}?{{ v.scope_q }}" hx-trigger="click once" hx-target="#bl-d-{{ r.id }}" hx-swap="innerHTML"
+     data-htmx-no-error="1" style="cursor:pointer;">
+    <span data-m="key" style="flex:2;font-size:11px;color:var(--text);">{{ r.ship }}<span class="m-only"> · {{ r.pilot or 'Unknown pilot' }}</span></span>
+    <span data-m-label="Pilot" style="flex:3;font-size:11px;"><span><span style="color:var(--text);">{{ r.pilot or 'Unknown' }}</span>
+        <span class="b-muted-sm">{{ r.alliance or r.corp or '' }}</span></span></span>
+    <span data-m-label="Top drops" style="flex:3;font-size:10px;color:var(--muted);">{% if r.unknown %}<span>items unknown · <a href="https://zkillboard.com/kill/{{ r.id }}/" target="_blank" rel="noopener" style="color:var(--accent);">zKillboard ↗</a></span>{% else %}{% for name, val in r.top %}{{ name }} ({{ val }}){% if not loop.last %}, {% endif %}{% else %}nothing dropped{% endfor %}{% endif %}</span>
+    <span data-m-label="Destroyed" style="flex:0 0 90px;text-align:right;font-size:10px;color:var(--muted);">{{ r.destroyed|bl_isk }}</span>
+    <span data-m-label="System · time" style="flex:0 0 90px;text-align:right;font-size:10px;color:var(--muted);">{{ r.system }} {{ r.time }}</span>
+    <span data-m="key" style="flex:0 0 100px;text-align:right;font-size:11px;color:var(--text);">{{ r.dropped|bl_isk }}{% if r.approx %}<span title="includes items at EVE average"> ~</span>{% endif %}{% if r.worth %} <span class="bl-tag bl-worth">loot</span>{% endif %}</span>
+</div>
+<div id="bl-d-{{ r.id }}" class="bl-detail"></div>
+{% endfor %}
+{% if v.more_rows %}<div class="bl-line">+ {{ v.more_rows }} more wrecks not shown. Raise the threshold or filter by group.</div>{% endif %}
+{% else %}
+<div class="b-empty">No wrecks to show{% if v.hidden_empty and not v.show_empty %}; {{ v.hidden_empty }} with nothing dropped are hidden{% endif %}.</div>
+{% endif %}

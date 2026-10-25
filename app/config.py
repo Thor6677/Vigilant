@@ -82,6 +82,10 @@ class Settings(BaseSettings):
     killmail_dashboard_enabled: bool = False
     killmail_battles_enabled: bool = False
     killmail_stream_enabled: bool = False  # killmail.stream live consumer for big-battle banner
+    # Battle loot finder: resolve saved br.evetools.org reports (one GET to an
+    # undocumented endpoint, at paste time). Off = those links get the "paste
+    # each system's related link" message instead.
+    battle_loot_evetools_resolve: bool = True
     killmail_gc_enabled: bool = False  # off by default so /intel/kills has full history
     everef_ingest_enabled: bool = False  # historical backfill from data.everef.net
 

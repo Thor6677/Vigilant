@@ -429,7 +429,8 @@ class ESIClient:
 
         await self._throttle_if_needed()
         url = f"{self.base}{path}"
-        pub_headers = {"Accept": "application/json"}
+        # CCP asks for a contactable User-Agent on every ESI call (ISS-144).
+        pub_headers = {"Accept": "application/json", "User-Agent": user_agent()}
         resp = await self._raw_get(url, pub_headers, params or {})
         events = rate_limit_tracker.update_from_response(path, resp.status_code, dict(resp.headers))
         for e in events:

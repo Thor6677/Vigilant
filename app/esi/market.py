@@ -42,6 +42,31 @@ async def get_hub_sell_price(
         return None
 
 
+async def get_hub_sell_quote(
+    client: ESIClient, region_id: int, station_id: int, type_id: int,
+) -> tuple[str, float | None]:
+    """Lowest sell at a hub station, with the outcome told apart.
+
+    get_hub_sell_price turns every exception into None, so "nobody sells it
+    here" and "the fetch failed" look the same. The battle loot finder must not
+    label a failed fetch as "no market", so this returns one of
+    ("ok", price), ("none", None) -- a good answer with no order at the station
+    -- or ("error", None). It never raises."""
+    try:
+        orders = await client.get_public(
+            f"/markets/{region_id}/orders/",
+            params={"type_id": type_id, "order_type": "sell"},
+        )
+    except Exception:
+        return "error", None
+    if not isinstance(orders, list):
+        return "error", None
+    prices = [o["price"] for o in orders
+              if isinstance(o, dict) and o.get("location_id") == station_id
+              and isinstance(o.get("price"), (int, float))]
+    return ("ok", min(prices)) if prices else ("none", None)
+
+
 async def get_hub_buy_price(
     client: ESIClient, region_id: int, station_id: int, type_id: int,
 ) -> float | None:
