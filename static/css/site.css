@@ -2966,21 +2966,40 @@
 
 /* ── R6 T7 · account ── */
 @media (max-width: 640px) {
-    /* Account (ISS-101): each card's 25 chips and their legend fold behind
-       the m-only "N of 25 shared" button, which toggles is-expanded on the
-       card (toggleExpanded). The template opens a card when anything isn't
-       shared. The head's own count is m-hide, so it isn't shown twice. */
+    /* Account (ISS-101): a closed card is one row: portrait, name / corp and
+       the m-only "25/25" button (toggleExpanded on the card). Change
+       permissions, the chips and legend, the notes and the Remove form open
+       with it. The template opens a card when anything isn't shared and marks
+       a rejected token is-lapsed, which keeps its badge and Renew visible.
+       The head's own count is m-hide, so it isn't shown twice. */
+    .acct-list { gap: 0.5rem; }
     .acct-char:not(.is-expanded) > .acct-perms,
     .acct-char:not(.is-expanded) > .acct-legend { display: none; }
+    .acct-char:not(.is-expanded):not(.is-lapsed) .acct-char-stat,
+    .acct-char:not(.is-expanded) > .acct-note,
+    .acct-char:not(.is-expanded) > .acct-remove { display: none !important; } /* !important: the form's inline display:flex */
+    .acct-char-head { position: relative; }
+    .acct-char-head > .acct-char-id { flex: 1 1 0; min-width: 0; }
+    /* A long name wraps so the MAIN badge never clips; only the corp line
+       truncates, and only while the card is closed. */
+    .acct-char-id > .acct-name { overflow-wrap: anywhere; }
+    .acct-char:not(.is-expanded) .acct-char-id > .b-muted-sm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .acct-perms-toggle {
-        display: flex; align-items: center; gap: 0.5rem; width: 100%;
-        margin: 0; padding: 0 0.8rem; background: none; border: none;
+        display: flex; align-items: center; gap: 0.5rem; flex: none; min-width: 44px;
+        margin: 0; padding: 0 0 0 0.4rem; background: none; border: none;
         font-family: inherit; font-size: var(--fs-sm); letter-spacing: var(--ls-wider);
         text-transform: uppercase; color: var(--muted); text-align: left; cursor: pointer;
     }
+    /* The whole head row is the tap target. The stat sits above the overlay
+       but ignores pointer events itself, so only Change permissions and Renew
+       are clickable there and the rest of its row still opens the card; it
+       wraps to its own row, aligned right. */
+    .acct-perms-toggle::before { content: ""; position: absolute; inset: 0; }
+    .acct-char-head > .acct-char-stat { position: relative; z-index: 1; flex: 1 1 100%; justify-content: flex-end; margin-left: 0; pointer-events: none; }
+    .acct-char-stat > a { pointer-events: auto; }
     .acct-perms-toggle b { color: var(--accent); font-weight: 600; }
     .acct-perms-toggle::after { content: "▸"; content: "▸" / ""; margin-left: auto; color: var(--muted); }
-    .acct-char.is-expanded > .acct-perms-toggle::after { content: "▾"; content: "▾" / ""; }
+    .acct-char.is-expanded .acct-perms-toggle::after { content: "▾"; content: "▾" / ""; }
     /* Change permissions / Renew: a link styled as a button, which the 44px
        rule makes taller; centre its text in that height. */
     .acct-char-stat > .b-btn { display: inline-flex; align-items: center; }

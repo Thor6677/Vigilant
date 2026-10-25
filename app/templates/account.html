@@ -28,17 +28,22 @@
 
 <div class="acct-list">
   {% for c in characters %}
-    {# ISS-101: on phones the chips fold behind the "N of 25 shared" button
-       below (toggleExpanded on this card). A card starts open when anything
-       isn't shared. Desktop ignores is-expanded and always shows the chips. #}
+    {# ISS-101: on phones a closed card is one row, and the "25/25" button in
+       its head (toggleExpanded on this card) opens the rest. A card starts
+       open when anything isn't shared; a rejected token (is-lapsed) keeps its
+       Renew button visible while closed. Desktop ignores is-expanded and
+       always shows everything. #}
     {% set unshared = c['granted'] | length < total_permissions %}
-    <div class="b-panel acct-char{% if unshared %} is-expanded{% endif %}">
+    <div class="b-panel acct-char{% if unshared %} is-expanded{% endif %}{% if c['token_failed'] %} is-lapsed{% endif %}">
       <div class="acct-char-head">
         <img class="acct-portrait" alt="" src="https://images.evetech.net/characters/{{ c['character_id'] }}/portrait?size=64">
         <div class="acct-char-id">
           <span class="acct-name">{{ c['character_name'] }}{% if c['is_main'] %} <span class="b-badge">main</span>{% endif %}</span>
           <span class="b-muted-sm">{{ c['corporation_name'] or '' }}{% if c['alliance_name'] %} · {{ c['alliance_name'] }}{% endif %}</span>
         </div>
+        {# A rejected token shows only its badge in the stat, as on desktop, so
+           the button names the chips rather than a count nothing can read. #}
+        <button type="button" class="m-only acct-perms-toggle" data-click="toggleExpanded" data-toggle-target=".acct-char"><span>{% if c['token_failed'] %}Permissions{% else %}<b>{{ c['granted'] | length }}</b><span aria-hidden="true">/{{ total_permissions }}</span><span class="visually-hidden"> of {{ total_permissions }} shared</span>{% endif %}</span></button>
         <div class="acct-char-stat">
           {% if c['token_failed'] %}
             <span class="b-badge is-danger" title="EVE rejected this character's authorization — nothing can be read until it is renewed">authorization expired</span>
@@ -48,10 +53,6 @@
           <a href="/account/permissions/{{ c['character_id'] }}" class="b-btn is-ghost">{% if c['token_failed'] %}Renew{% else %}Change permissions{% endif %}</a>
         </div>
       </div>
-
-      {# A rejected token shows only its badge in the head, as on desktop, so
-         the button names the chips rather than a count nothing can read. #}
-      <button type="button" class="m-only acct-perms-toggle" data-click="toggleExpanded" data-toggle-target=".acct-char"><span>{% if c['token_failed'] %}Permissions{% else %}<b>{{ c['granted'] | length }}</b> of {{ total_permissions }} shared{% endif %}</span></button>
 
       <div class="acct-perms">
         {% for p in perms.PERMISSIONS %}

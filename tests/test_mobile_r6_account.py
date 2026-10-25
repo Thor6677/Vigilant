@@ -1,11 +1,13 @@
 """Mobile R6 T7: the Account page and the permission picker on phones (mobile
 design §7; ISS-101; user decision D18 A).
 
-- Account: each character card gets a phone-only summary button, "N of 25
-  shared", which folds the card's permission chips and legend through the
-  existing toggleExpanded. A card starts open (`is-expanded`) when anything
-  isn't shared, so problems show straight away. The desktop count is m-hide,
-  so phones don't show it twice; desktop keeps every chip.
+- Account: on phones a closed card is one row. Its head holds a phone-only
+  "N/25" button (accessible name "N of 25 shared") that opens the rest through
+  the existing toggleExpanded: Change permissions, the chips and legend, the
+  notes and the Remove form. A card starts open (`is-expanded`) when anything
+  isn't shared, and a rejected token (`is-lapsed`) keeps its badge and Renew
+  visible while closed. The desktop count is m-hide, so phones don't show it
+  twice; desktop keeps every chip.
 - Picker: CSS only, because it also serves the logged-out sign-up flow, where
   actions.js isn't loaded. Phones hide the "unlocks" chips (.perm-powers);
   every card keeps its switch, title, summary, role, note and ESI scopes.
@@ -144,8 +146,13 @@ def _cards(html):
     return _find(_tree(html), "acct-char")
 
 
+def _head(card):
+    (head,) = [k for k in card["kids"] if "acct-char-head" in _cls(k)]
+    return head
+
+
 def _toggles(card):
-    return [k for k in card["kids"] if "acct-perms-toggle" in _cls(k)]
+    return [k for k in _head(card)["kids"] if "acct-perms-toggle" in _cls(k)]
 
 
 # ── Account: ISS-101 ──────────────────────────────────────────────────
@@ -155,21 +162,36 @@ def test_each_card_has_one_phone_summary_with_its_shared_count():
     assert len(cards) == 3
     # A rejected token's head shows only "authorization expired", so its
     # button names the chips instead of a count nothing can read.
-    for card, want in zip(cards, (f"{TOTAL} of {TOTAL} shared", f"{TOTAL - 2} of {TOTAL} shared",
-                                  "Permissions")):
+    for card, count in zip(cards, (TOTAL, TOTAL - 2, None)):
         toggles = _toggles(card)
-        assert len(toggles) == 1, "one summary button, a direct child of the card"
+        assert len(toggles) == 1, "one summary button, a direct child of the head"
         btn = toggles[0]
         assert btn["tag"] == "button" and btn["attrs"].get("type") == "button"
         assert "m-only" in _cls(btn), "desktop keeps the chips and never shows the button"
-        assert norm(btn["text"]) == want
+        if count is None:
+            assert norm(btn["text"]) == "Permissions"
+            continue
+        (inner,) = btn["kids"]
+        b, slash, spoken = inner["kids"]
+        assert norm(b["text"]) == str(count)
+        assert slash["attrs"].get("aria-hidden") == "true" and norm(slash["text"]) == f"/{TOTAL}"
+        assert "visually-hidden" in _cls(spoken) and norm(spoken["text"]) == f"of {TOTAL} shared"
 
 
-def test_the_summary_sits_between_the_head_and_the_chips():
+def test_the_summary_sits_in_the_head_between_the_name_and_the_actions():
     for card in _cards(_account([MAIN, ALT])):
-        order = [c for k in card["kids"] for c in _cls(k)
-                 if c in ("acct-char-head", "acct-perms-toggle", "acct-perms", "acct-legend")]
-        assert order == ["acct-char-head", "acct-perms-toggle", "acct-perms", "acct-legend"]
+        head = [c for k in _head(card)["kids"] for c in _cls(k)
+                if c in ("acct-portrait", "acct-char-id", "acct-perms-toggle", "acct-char-stat")]
+        assert head == ["acct-portrait", "acct-char-id", "acct-perms-toggle", "acct-char-stat"]
+        rest = [c for k in card["kids"] for c in _cls(k)
+                if c in ("acct-char-head", "acct-perms-toggle", "acct-perms", "acct-legend")]
+        assert rest == ["acct-char-head", "acct-perms", "acct-legend"]
+
+
+def test_only_a_rejected_token_marks_the_card_lapsed():
+    main, alt, lapsed = _cards(_account([MAIN, ALT, LAPSED]))
+    assert "is-lapsed" in _cls(lapsed)
+    assert "is-lapsed" not in _cls(main) and "is-lapsed" not in _cls(alt)
 
 
 def test_a_card_starts_open_only_when_something_isnt_shared():
@@ -189,7 +211,7 @@ def test_any_unshared_state_opens_the_card(scopes, declined):
     assert any(st != perms.GRANTED for st in char["states"].values())
     (card,) = _cards(_account([char]))
     assert "is-expanded" in _cls(card)
-    assert norm(_toggles(card)[0]["text"]) == f"{TOTAL - 1} of {TOTAL} shared"
+    assert norm(_toggles(card)[0]["text"]) == f"{TOTAL - 1}/{TOTAL} of {TOTAL} shared"
 
 
 def test_the_summary_toggles_its_own_card_with_toggle_expanded():
@@ -303,10 +325,40 @@ def test_folded_cards_hide_their_chips_and_legend_on_phones():
         assert re.search(r"display:\s*none", rules), part
 
 
+def test_folded_cards_hide_actions_notes_and_remove_on_phones():
+    body, _ = _phone()
+    for sel in (".acct-char:not(.is-expanded):not(.is-lapsed) .acct-char-stat",
+                ".acct-char:not(.is-expanded) > .acct-note",
+                ".acct-char:not(.is-expanded) > .acct-remove"):
+        assert re.search(r"display:\s*none\s*!important", rule_bodies(body, sel)), sel
+
+
+def test_the_whole_head_row_is_the_tap_target():
+    body, _ = _phone()
+    overlay = rule_bodies(body, ".acct-perms-toggle::before")
+    assert re.search(r"position:\s*absolute", overlay) and re.search(r"inset:\s*0\b", overlay)
+    assert re.search(r"position:\s*relative", rule_bodies(body, ".acct-char-head"))
+    stat = rule_bodies(body, ".acct-char-head > .acct-char-stat")
+    assert re.search(r"position:\s*relative", stat) and re.search(r"z-index:\s*\d", stat), (
+        "Change permissions and Renew must stay clickable above the overlay")
+    assert re.search(r"pointer-events:\s*none", stat), "the rest of the stat row must still open the card"
+    assert re.search(r"pointer-events:\s*auto", rule_bodies(body, ".acct-char-stat > a"))
+    assert "position" not in rule_bodies(body, ".acct-perms-toggle"), (
+        "a positioned button would shrink the overlay to the button")
+
+
+def test_closed_card_name_never_clips_the_main_badge():
+    body, _ = _phone()
+    assert re.search(r"overflow-wrap:\s*anywhere", rule_bodies(body, ".acct-char-id > .acct-name"))
+    for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", body):
+        if "acct-name" in m.group(1):
+            assert "nowrap" not in m.group(2), m.group(1).strip()
+
+
 def test_the_summary_chevron_follows_the_card_state():
     body, _ = _phone()
     closed = rule_bodies(body, ".acct-perms-toggle::after")
-    opened = rule_bodies(body, ".acct-char.is-expanded > .acct-perms-toggle::after")
+    opened = rule_bodies(body, ".acct-char.is-expanded .acct-perms-toggle::after")
     assert "▸" in closed and "▾" in opened
     assert re.search(r'content:\s*"▸"\s*/\s*""', closed), "the chevron is decoration for screen readers"
     assert re.search(r'content:\s*"▾"\s*/\s*""', opened)
