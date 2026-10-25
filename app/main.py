@@ -64,6 +64,7 @@ from app.routes.discordtime import router as discordtime_router
 from app.routes.structure_age import router as structure_age_router
 from app.routes.admin_structure_age import router as admin_structure_age_router
 from app.routes.wh_tracker import router as wh_tracker_router
+from app.routes.battle_loot import router as battle_loot_router
 from app.routes.wormholes import router as wormholes_router
 from app.routes.fitting import router as fitting_router
 from app.routes.landings import router as landings_router
@@ -248,6 +249,7 @@ app.include_router(player_stats_router)
 # This previously swallowed /intel/tracker, rendering "Intel not found or has
 # expired" on the WH Tracker page. Add future literal /intel/* routes above.
 app.include_router(wh_tracker_router)
+app.include_router(battle_loot_router)
 app.include_router(dscan_router)
 app.include_router(admin_router)
 app.include_router(csp_router)

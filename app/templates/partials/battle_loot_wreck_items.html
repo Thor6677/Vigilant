@@ -1,0 +1,27 @@
+{# One wreck's items: what dropped (Jita where priced) and what was destroyed (EVE average). #}
+{% if no_items %}
+<div class="b-muted-sm">No item data stored for this kill.
+    <a href="https://zkillboard.com/kill/{{ kill_id }}/" target="_blank" rel="noopener" style="color:var(--accent);">Open on zKillboard ↗</a></div>
+{% else %}
+<div class="b-label" style="margin-bottom:0.25rem;">Dropped</div>
+{% for d in dropped %}
+<div class="bl-item">
+    <span>{{ d.qty }} × {{ d.name }}</span>
+    <span>
+        {{ d.total|bl_isk }}
+        <span class="bl-tag">{{ bl_source_label(d.source) }}</span>
+        {% if d.alt %}<span class="b-muted-sm">Jita ask {{ d.alt|bl_isk }} vs avg {{ d.unit|bl_isk }}</span>{% endif %}
+    </span>
+</div>
+{% else %}
+<div class="b-muted-sm">Nothing dropped.</div>
+{% endfor %}
+{% if destroyed %}
+<div class="b-label" style="margin:0.5rem 0 0.25rem;">Destroyed <span class="b-muted-sm">(EVE average)</span></div>
+{% for d in destroyed %}
+<div class="bl-item"><span>{{ d.qty }} × {{ d.name }}</span><span>{{ d.total|bl_isk }}</span></div>
+{% endfor %}
+{% if destroyed_more %}<div class="b-muted-sm">+ {{ destroyed_more }} more</div>{% endif %}
+{% endif %}
+<div style="margin-top:0.4rem;"><a href="https://zkillboard.com/kill/{{ kill_id }}/" target="_blank" rel="noopener" style="color:var(--accent);">zKillboard ↗</a></div>
+{% endif %}

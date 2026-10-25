@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Battle Loot — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs"><a href="/intel">Intel</a><span class="b-crumb-sep">&gt;</span><span class="b-crumb-current">Battle Loot</span></div>
+{% endblock %}
+
+{% block head %}
+<style nonce="{{ request.state.csp_nonce }}">
+    .bl-form { display:flex; gap:0.5rem; padding:0.6rem 0.75rem; flex-wrap:wrap; }
+    .bl-input { flex:1 1 320px; min-width:0; padding:0.4rem 0.6rem; background:var(--bg); border:1px solid var(--border); color:var(--text); font:inherit; font-size:12px; }
+    .bl-error { padding:0.5rem 0.75rem; font-size:11px; color:var(--danger); border-top:1px solid var(--border); }
+    .bl-note { padding:0.5rem 0.75rem; font-size:10px; color:var(--muted); border-top:1px solid var(--border); line-height:1.5; }
+    .bl-scope { padding:0.5rem 0.75rem; font-size:12px; display:flex; gap:0.75rem; flex-wrap:wrap; align-items:baseline; }
+    .bl-status { padding:0.4rem 0.75rem; font-size:10px; color:var(--muted); border-bottom:1px solid var(--border); overflow-wrap:anywhere; }
+    .bl-totals { display:flex; gap:1.5rem; flex-wrap:wrap; padding:0.6rem 0.75rem; }
+    .bl-total b { display:block; font-size:16px; color:var(--text); font-family:monospace; }
+    .bl-total span { font-size:9px; letter-spacing:0.1em; text-transform:uppercase; color:var(--muted); }
+    .bl-line { padding:0.3rem 0.75rem; font-size:10px; color:var(--muted); line-height:1.5; overflow-wrap:anywhere; }
+    .bl-filters { display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center; padding:0.5rem 0.75rem; border-top:1px solid var(--border); font-size:11px; }
+    .bl-filters input[type=number] { width:80px; padding:0.25rem 0.4rem; background:var(--bg); border:1px solid var(--border); color:var(--text); font:inherit; font-size:11px; }
+    .bl-cell { padding:0 0.3rem; min-width:0; }
+    .bl-tag { font-size:9px; padding:1px 5px; border:1px solid var(--border); color:var(--muted); letter-spacing:0.04em; white-space:nowrap; }
+    .bl-worth { color:var(--accent); border-color:var(--accent); }
+    .bl-group.is-active { background:rgba(94,177,255,0.1); }
+    .bl-detail:empty { display:none; }
+    .bl-detail { padding:0.4rem 0.75rem 0.6rem; border-bottom:1px solid var(--border); background:var(--bg); font-size:11px; }
+    .bl-item { display:flex; gap:0.5rem; justify-content:space-between; flex-wrap:wrap; padding:0.15rem 0; }
+    @media (max-width: 640px) {
+        .bl-form .b-btn { flex:1 1 100%; }
+        .bl-filters { flex-direction:column; align-items:stretch; }
+        .bl-filters input[type=number] { width:100%; }
+        .bl-totals { gap:1rem; }
+        .bl-item { flex-direction:column; gap:0; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="b-page-header">
+    <h1 class="b-page-title">Battle Loot</h1>
+    <span class="b-muted-sm">Which wrecks of a fight are worth looting, from Vigilant's own killmail archive.</span>
+</div>
+
+<div class="b-section" style="margin-bottom:1rem;">
+    <div class="b-section-head">
+        <span class="b-label">Battle Link</span>
+        <span class="b-muted-sm">zKillboard, killmail.app or evetools 'related' link, or a saved evetools report</span>
+    </div>
+    <form method="get" action="/intel/loot" class="bl-form">
+        <input class="bl-input" type="text" name="br" value="{{ pasted }}" maxlength="2000" required
+               placeholder="https://zkillboard.com/related/30000142/202601011400/" autocomplete="off">
+        <button type="submit" class="b-btn is-primary">Find loot</button>
+    </form>
+    {% if error %}<div class="bl-error">{{ error }}</div>{% endif %}
+    <div class="bl-note">
+        The killmail shows what dropped, not what is still in the wreck. Wrecks despawn about two hours after the kill,
+        salvage is not included, and looting someone else's wreck in high-sec gets you a suspect flag.
+    </div>
+</div>
+
+{% if scope %}
+<div class="b-section" style="margin-bottom:1rem;">
+    <div class="b-section-head">
+        <span class="b-label">Report</span>
+        {% if external_url %}<a href="{{ external_url }}" target="_blank" rel="noopener" class="b-muted-sm">Open on zKillboard ↗</a>{% endif %}
+    </div>
+    <div class="bl-scope"><span>Kills in {{ scope_text }}</span></div>
+
+    {# The results re-fetch themselves when the pricing job finishes. The filter
+       form and the Jita price poll travel inside the results: a re-fetch that
+       restarts pricing brings the poll back, and hx-include keeps the filters. #}
+    <div id="bl-results"
+         hx-get="/intel/loot/results" hx-trigger="loot-prices-ready from:body"
+         hx-include="#bl-filters" hx-swap="innerHTML" hx-disinherit="hx-include hx-swap hx-target"
+         data-htmx-no-error="1">
+        {% include "partials/battle_loot_results.html" %}
+    </div>
+</div>
+{% endif %}
+{% endblock %}
