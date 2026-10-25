@@ -337,7 +337,7 @@
 
 {# Add individual skill #}
 <div class="b-section">
-    <div class="b-panel">
+    <div class="b-panel skp-ta-panel">
         <div class="b-panel-head">
             <span class="b-label">Add Skill</span>
         </div>
@@ -368,7 +368,7 @@
 
 {# Add from ship #}
 <div class="b-section">
-    <div class="b-panel">
+    <div class="b-panel skp-ta-panel">
         <div class="b-panel-head">
             <span class="b-label">Add from Ship</span>
         </div>
@@ -461,10 +461,12 @@
 <script nonce="{{ request.state.csp_nonce }}">
 var planId = {{ plan.id }};
 var _skillTimer = null, _shipTimer = null;
+var _skillSeq = 0, _shipSeq = 0;   // a response only applies if no newer search, close or pick happened since
 
 /* ── Skill search ────────────────────────────────────────────────────────── */
 function searchSkills() {
     clearTimeout(_skillTimer);
+    var seq = ++_skillSeq;
     document.getElementById('skill-id').value = '';
     var q = document.getElementById('skill-search').value.trim();
     var r = document.getElementById('skill-results');
@@ -472,12 +474,16 @@ function searchSkills() {
     _skillTimer = setTimeout(function() {
         fetch('/skill-plans/search/skills?q=' + encodeURIComponent(q))
             .then(function(resp) { return resp.text(); })
-            .then(function(html) { r.innerHTML = html; r.style.display = html ? 'block' : 'none'; });
+            .then(function(html) {
+                if (seq !== _skillSeq) return;
+                r.innerHTML = html; r.style.display = html ? 'block' : 'none';
+            });
     }, 250);
 }
 function selectSkill() {
     var id = this.dataset.id;
     var name = this.dataset.name;
+    clearTimeout(_skillTimer); _skillSeq++;
     document.getElementById('skill-id').value = id;
     document.getElementById('skill-search').value = name;
     document.getElementById('skill-results').style.display = 'none';
@@ -499,6 +505,7 @@ function addSkill() {
 /* ── Ship search ─────────────────────────────────────────────────────────── */
 function searchShips() {
     clearTimeout(_shipTimer);
+    var seq = ++_shipSeq;
     document.getElementById('ship-id').value = '';
     document.getElementById('ship-link').style.display = 'none';
     var q = document.getElementById('ship-search').value.trim();
@@ -507,12 +514,16 @@ function searchShips() {
     _shipTimer = setTimeout(function() {
         fetch('/skill-plans/search/ships?q=' + encodeURIComponent(q))
             .then(function(resp) { return resp.text(); })
-            .then(function(html) { r.innerHTML = html; r.style.display = html ? 'block' : 'none'; });
+            .then(function(html) {
+                if (seq !== _shipSeq) return;
+                r.innerHTML = html; r.style.display = html ? 'block' : 'none';
+            });
     }, 250);
 }
 function selectShip() {
     var id = this.dataset.id;
     var name = this.dataset.name;
+    clearTimeout(_shipTimer); _shipSeq++;
     document.getElementById('ship-id').value = id;
     document.getElementById('ship-search').value = name;
     document.getElementById('ship-results').style.display = 'none';
@@ -682,6 +693,29 @@ function copyExportText() {
             values: { order: JSON.stringify(ids) },
         });
     }
+})();
+
+/* Click-away / Escape for the typeahead lists. Only while a list is an
+   overlay (desktop): on phones it sits in the flow and covers nothing. */
+(function () {
+    var pairs = [['skill-search', 'skill-results'], ['ship-search', 'ship-results']];
+    /* Hiding a list also cancels its pending and in-flight search, so a late
+       response cannot reopen it. */
+    var cancel = [function () { clearTimeout(_skillTimer); _skillSeq++; },
+                  function () { clearTimeout(_shipTimer); _shipSeq++; }];
+    function close(e) {
+        pairs.forEach(function (p, i) {
+            var r = document.getElementById(p[1]);
+            if (!r || r.style.display === 'none') return;
+            if (getComputedStyle(r).position !== 'absolute') return;
+            if (e.type === 'click' && e.target && e.target.closest
+                && e.target.closest('#' + p[0] + ', #' + p[1])) return;
+            r.style.display = 'none';
+            cancel[i]();
+        });
+    }
+    document.addEventListener('click', close);
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(e); });
 })();
 </script>
 

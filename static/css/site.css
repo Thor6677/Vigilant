@@ -662,6 +662,16 @@
     .upd-form > label:not(.upd-check) { margin-bottom: -0.25rem; }
 }
 
+/* ── Skill plan typeahead (skill_plan_detail.html, ISS-114) ─────────────── */
+/* Add Skill / Add from Ship results hang below their input (position:absolute,
+   max-height 200px) inside a .b-panel, which clips (overflow:hidden): desktop
+   showed ~40px of the list. These two panels may overflow at desktop widths.
+   Never on phones: there the list sits in the flow (R2 T6 .skp-results) and
+   the panel keeps the §4.2 overflow-x:auto safety net. */
+@media (min-width: 641px) {
+    .b-panel.skp-ta-panel { overflow: visible; }
+}
+
 /* ═══ Mobile R1 — phone layer (mobile design §4) ═════════════════════════
    Phone = ≤640px. Templates opt in with m-* classes and data-m attributes;
    the contract is documented in the mobile R1 plan and pinned by
