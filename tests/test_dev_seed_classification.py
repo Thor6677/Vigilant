@@ -10,7 +10,10 @@ can run inside a bare container with no app dependencies.
 """
 import importlib.util
 import pathlib
+import re
+import sys
 
+import app.db.cache  # noqa: F401 — registers esi_cache on Base
 import app.db.sde_models  # noqa: F401 — registers sde_* tables on Base
 from app.db.models import Base
 
@@ -47,3 +50,17 @@ def test_no_phantom_tables_in_classification():
                   | set(dev_seed_tables.SKIP))
     phantom = classified - set(Base.metadata.tables)
     assert not phantom, f"Classified tables that no model defines: {sorted(phantom)}"
+
+
+def test_every_model_module_is_imported_here():
+    """Base.metadata only holds tables whose module has been imported, so these
+    tests must import every module that defines a model, or they depend on
+    whichever other test happened to import it first (ISS-143)."""
+    app_dir = pathlib.Path(__file__).resolve().parents[1] / "app"
+    defining = set()
+    for path in app_dir.rglob("*.py"):
+        if re.search(r"^class \w+\(Base\)", path.read_text(), re.MULTILINE):
+            rel = path.relative_to(app_dir.parent).with_suffix("")
+            defining.add(".".join(rel.parts))
+    not_loaded = {m for m in defining if m not in sys.modules}
+    assert not not_loaded, f"model modules not imported by this test: {sorted(not_loaded)}"
