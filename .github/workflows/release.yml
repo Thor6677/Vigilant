@@ -42,21 +42,18 @@ jobs:
         run: python -m pytest tests/ -q --timeout=120 --timeout-method=thread
 
   build:
-    name: build and push
+    name: build, smoke-test and push
     # A tag on a commit with failing tests must produce NO image, so there is
     # nothing for production to be notified about.
     needs: test
     runs-on: ubuntu-latest
+    # The job had no cap, and it now runs containers: a hang would otherwise
+    # hold a release until GitHub's six-hour default (ISS-112, ISS-140).
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3.12.0
-
-      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       # GHCR paths must be lowercase; the owner/repo casing is not guaranteed
       # to be, so normalise rather than hardcoding. This also means a fork
@@ -71,6 +68,78 @@ jobs:
         id: img
         run: |
           echo "name=ghcr.io/$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      # ISS-140: build both images into the runner's own daemon and smoke-test
+      # them BEFORE the registry login or any push. A broken image then never
+      # reaches GHCR, never moves :latest, and never gets a Release for the
+      # update checker to announce. The push steps below repeat these builds
+      # with the same inputs. That build re-resolves the floating base tags and
+      # reuses cached layers only if nothing moved, so the pushed image is a
+      # cache rebuild expected, but not guaranteed, to match the tested one
+      # (the push steps' inputs are pinned by test_image_smoke.py).
+      - name: Build app image (local only, for the smoke test)
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6.19.2
+        with:
+          context: .
+          load: true
+          push: false
+          platforms: linux/amd64
+          build-args: |
+            VIGILANT_VERSION=${{ github.ref_name }}
+          tags: vigilant-smoke:app
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The script is fed over stdin: scripts/ is dockerignored, so it is not in
+      # the image, and nothing may be mounted under /app (a mount would mask the
+      # very files the check is about). Flags mirror docker-compose.yml and the
+      # real entrypoint runs, so no -u. No network, no mounts, no secrets: the
+      # credentials are dummies, like tests/conftest.py.
+      - name: Smoke-test app image (resolve and import every app module)
+        timeout-minutes: 5
+        run: |
+          # The default shell is `bash -e` without pipefail, so say it here.
+          set -o pipefail
+          docker run --rm -i --network none \
+            --read-only --tmpfs /tmp \
+            --cap-drop ALL --cap-add CHOWN --cap-add SETUID --cap-add SETGID \
+            --security-opt no-new-privileges \
+            -e EVE_CLIENT_ID=smoke -e EVE_CLIENT_SECRET=smoke -e SECRET_KEY=smoke \
+            -e DATABASE_URL=sqlite+aiosqlite:////tmp/smoke-never-opened.db \
+            -e BACKGROUND_JOBS_ENABLED=false -e SDE_AUTOLOAD_ENABLED=false \
+            vigilant-smoke:app python3 - < scripts/image_smoke.py | tee /dev/stderr | grep -q '^image-smoke: OK'
+
+      - name: Build updater image (local only, for the smoke test)
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6.19.2
+        with:
+          context: .
+          file: updater/Dockerfile
+          load: true
+          push: false
+          platforms: linux/amd64
+          build-args: |
+            VIGILANT_VERSION=${{ github.ref_name }}
+          tags: vigilant-smoke:updater
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The sidecar copies only stdlib-only files (tests/test_updater_packaging.py
+      # pins the set); this proves they import without the rest of the checkout.
+      - name: Smoke-test updater image
+        timeout-minutes: 2
+        run: |
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges \
+            vigilant-smoke:updater python3 -c 'import updater.supervisor'
+
+      # After the smoke steps on purpose: no registry credential exists on the
+      # runner while any image code executes, and nothing is pushed unless BOTH
+      # images passed.
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6.19.2
