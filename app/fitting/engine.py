@@ -74,6 +74,7 @@ from app.fitting.constants import (
 # Default skill level assumption (used as fallback when no character is
 # selected — models the EVE-standard "All V" fitting target).
 DEFAULT_SKILL_LEVEL = 5
+ATTR_SKILL_LEVEL = 280  # skillLevel: what a class skill feeds into a hull bonus
 
 
 async def _ship_scaling_skill_ids(db: AsyncSession, ship_type_id: int) -> list[int]:
@@ -113,7 +114,8 @@ def _effective_skill_level(
     scaling_skill_ids: list[int],
     skill_levels: dict[int, int] | None,
 ) -> int:
-    """Pick an effective level for a per-level bonus.
+    """Pick an effective level for a per-level bonus (the fallback when a
+    bonus cannot be tied to its own skill; see _apply_ship_hull_bonuses).
 
     - No character selected (skill_levels is None): assume All V.
     - No scaling skill IDs (shouldn't normally happen): assume All V too, so
@@ -659,6 +661,26 @@ async def _apply_ship_hull_bonuses(
         scaling_skills = await _ship_scaling_skill_ids(db, ship_type_id)
     effective_skill_level = _effective_skill_level(scaling_skills, skill_levels)
 
+    # A hull with several class skills (a carrier with two) scales each
+    # per-level bonus by its OWN skill. The link is dogma: the skill's
+    # ItemModifier/shipID effect feeds skillLevel (280) into the bonus
+    # attribute. Anything it cannot resolve cleanly keeps the MIN above.
+    attr_skill: dict[int, set[int]] = defaultdict(set)
+    if (per_level_attr_ids and skill_levels is not None
+            and scaling_skill_override is None and len(scaling_skills) > 1):
+        link_result = await db.execute(
+            select(SDEModifier.modified_attribute_id, SDETypeEffect.type_id)
+            .join(SDETypeEffect, SDEModifier.effect_id == SDETypeEffect.effect_id)
+            .join(SDEType, SDETypeEffect.type_id == SDEType.type_id)
+            .where(SDEType.category_id == 16)  # Skills
+            .where(SDEModifier.modifying_attribute_id == ATTR_SKILL_LEVEL)
+            .where(SDEModifier.domain == "shipID")
+            .where(SDEModifier.func == "ItemModifier")
+            .where(SDEModifier.modified_attribute_id.in_(per_level_attr_ids))
+        )
+        for attr_id, skill_id in link_result.fetchall():
+            attr_skill[attr_id].add(skill_id)
+
     for mod in result.scalars().all():
         src_val = ship_attrs.get(mod.modifying_attribute_id)
         if src_val is None:
@@ -666,7 +688,13 @@ async def _apply_ship_hull_bonuses(
 
         # Per-level if source attribute is named shipBonus* or eliteBonus*
         is_per_level = mod.modifying_attribute_id in per_level_attr_ids
-        effective_val = src_val * effective_skill_level if is_per_level else src_val
+        level = effective_skill_level
+        own_skills = attr_skill.get(mod.modifying_attribute_id)
+        if own_skills and len(own_skills) == 1:
+            (own_skill,) = own_skills
+            if own_skill in scaling_skills:
+                level = skill_levels.get(own_skill, 0)
+        effective_val = src_val * level if is_per_level else src_val
         target_attr = mod.modified_attribute_id
 
         # Ship-to-self modifier: target is the ship's OWN attribute (shield
