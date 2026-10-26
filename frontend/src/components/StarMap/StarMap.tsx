@@ -8,6 +8,8 @@ import {
   forwardRef,
 } from 'react';
 import { Application } from 'pixi.js';
+// The CSP forbids eval; this swaps in Pixi's eval-free shader/uniform code (ISS-151).
+import 'pixi.js/unsafe-eval';
 import { Viewport } from 'pixi-viewport';
 import { quadtree, type Quadtree } from 'd3-quadtree';
 import Graph from 'graphology';
