@@ -362,6 +362,10 @@ def test_policy_is_enforcing_and_script_src_has_no_unsafe_inline():
 
     script_src = next(d for d in header.split(";") if d.strip().startswith("script-src"))
     assert "'unsafe-inline'" not in script_src, script_src
+    # No eval either. The star map depends on that staying true: PixiJS checks
+    # for eval at startup and the map imports pixi.js/unsafe-eval to run without
+    # it (test_pixi_runs_without_eval). Loosening this would hide the need.
+    assert "'unsafe-eval'" not in script_src, script_src
     assert "'nonce-" in script_src, script_src
 
     style_src = next(d for d in header.split(";") if d.strip().startswith("style-src"))
