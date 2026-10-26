@@ -1807,11 +1807,18 @@ async def calculate_fitting_stats(
             cross_target_attrs = {cm[2] for cm in cross_mods}
             _stackable = await _get_stackable_flags(db, cross_target_attrs)
 
-            # Collect cross-module multipliers grouped by (target_tid, target_attr, source_type).
-            # Grouping by source type means copies of the same damage mod stack-penalize
-            # each other, but different module types (e.g. Bastion vs Heat Sinks)
-            # are independent groups whose products are multiplied together.
-            # Key: (target_tid, target_attr, source_type_id) → list of multipliers
+            # Collect cross-module multipliers grouped by
+            # (target_tid, target_attr, operator). Modules and rigs that modify
+            # the same attribute with the same operator penalise each other
+            # whichever module type they come from (a T2 and a Navy damage
+            # amplifier share one chain); different operators stay separate
+            # chains whose products are multiplied together (Bastion's
+            # postPercent speed bonus is independent of Heat Sinks' postMul).
+            # This approximates pyfa, which pools by attribute plus a named
+            # penalty group; pyfa names a group (e.g. 'postPerc') only for a
+            # few effects such as Bastion ROF, so (attribute, operator) is the
+            # closest stand-in available from the SDE alone.
+            # Key: (target_tid, target_attr, operator) -> list of multipliers
             cross_collectors: dict[tuple[int, int, int], list[float]] = defaultdict(list)
 
             for cm in cross_mods:
@@ -1853,10 +1860,10 @@ async def calculate_fitting_stats(
 
                         if operator == OP_POST_MUL:
                             for _ in range(copies):
-                                cross_collectors[(tid, target_attr, src_type_id)].append(src_val)
+                                cross_collectors[(tid, target_attr, operator)].append(src_val)
                         elif operator == OP_POST_PERCENT:
                             for _ in range(copies):
-                                cross_collectors[(tid, target_attr, src_type_id)].append(1.0 + src_val / 100.0)
+                                cross_collectors[(tid, target_attr, operator)].append(1.0 + src_val / 100.0)
                         elif operator == OP_MOD_ADD:
                             for attrs in targets:
                                 attrs[target_attr] = (
@@ -1866,7 +1873,7 @@ async def calculate_fitting_stats(
             # Apply multipliers per group with stacking penalties, then combine.
             # Reorganize: (target_tid, target_attr) → list of per-group products.
             combined: dict[tuple[int, int], float] = defaultdict(lambda: 1.0)
-            for (tid, target_attr, src_tid), multipliers in cross_collectors.items():
+            for (tid, target_attr, _op), multipliers in cross_collectors.items():
                 is_stackable = _stackable.get(target_attr, True)
                 if is_stackable or len(multipliers) <= 1:
                     group_product = 1.0

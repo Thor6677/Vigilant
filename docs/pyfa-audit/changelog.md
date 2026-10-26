@@ -48,6 +48,7 @@
 
 ### 3.6 — Stacking penalty groups
 - **Fixed:** Cross-module multiplier collectors now keyed by `(target_tid, target_attr, source_type_id)`. Stacking penalties applied per source type independently, then group products multiplied together. Bastion and damage mods no longer penalize each other.
+- **Corrected (ISS-141):** keying by source type was a stand-in for pyfa's penalty groups and under-penalised different module types sharing one effect (e.g. T2 and faction damage amplifiers). The key is now `(target_tid, target_attr, operator)`: same attribute and operator penalise each other regardless of source type; different operators remain separate chains.
 
 ### Shared infrastructure
 - **New:** `_apply_modifier()` helper function centralizes attribute modification logic (handles damageMultiplier defaults, operator dispatch).

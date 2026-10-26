@@ -201,6 +201,14 @@ position.
    independent.
 3. Apply stacking penalties per group, then multiply all group results together.
 
+> **Correction (ISS-141):** step 2 above, using the source module's type_id as the
+> penalty group, was a stand-in for pyfa's penalty groups and was wrong: two
+> module types sharing one effect (a tech 2 and a faction damage amplifier) landed
+> in separate groups and escaped penalising each other. Groups are now keyed by
+> `(target type, attribute, operator)`; the source type is no longer part of the
+> key. This still approximates pyfa, which pools by attribute plus a named penalty
+> group (named only for a few effects such as Bastion ROF).
+
 **Test:** Fit with Bastion + 2x Heat Sinks: Bastion damage bonus should get
 full effectiveness regardless of how many Heat Sinks are fitted.
 
