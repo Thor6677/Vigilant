@@ -8,7 +8,7 @@ viewer in New York. The API now sends an explicit UTC offset, so the page
 shows the UTC time it means to whatever the viewer's zone.
 
 ISS-129b: the rows are a template string written with innerHTML, and the
-system and region names (shipped map data), the counterparty's name (ESI),
+system and region names (SDE, sent by the API), the counterparty's name (ESI),
 the direction and the counterparty id went in unescaped. Each is now
 escaped (the id is URL-encoded in the link), so a name renders as text and
 adds no elements. Ordinary names give the same markup as before.
@@ -32,7 +32,9 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.db.models as models
+import app.db.sde_models  # noqa: F401  (registers the SDE tables)
 from app.db.models import Base, SovereigntyChangeEvent
+from app.db.sde_models import SDERegion, SDESystem
 from app.routes import starmap as starmap_mod
 from tests._mobile import cells_rows, render_page, row_keys, row_labelled, row_lead
 
@@ -86,6 +88,10 @@ def sov_db(monkeypatch):
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         async with SessionLocal() as db:
+            db.add(SDERegion(region_id=10000001, region_name="Sample Region"))
+            # 30000002 is left out of the SDE: its names come back null.
+            db.add(SDESystem(system_id=30000001, system_name="SMP-01",
+                             region_id=10000001))
             db.add(SovereigntyChangeEvent(system_id=30000001, old_alliance_id=OTHER,
                                           new_alliance_id=ALLIANCE, changed_at=_WHEN))
             db.add(SovereigntyChangeEvent(system_id=30000002, old_alliance_id=ALLIANCE,
@@ -110,12 +116,33 @@ def test_changed_at_is_sent_as_utc(sov_db):
     changes = _payload()["recent_changes"]
     assert [c["system_id"] for c in changes] == [30000001, 30000002]
     for c, stored in zip(changes, (_WHEN, _WHEN - timedelta(hours=3))):
-        assert set(c) == {"system_id", "changed_at", "old_alliance_id", "new_alliance_id", "direction"}
+        assert set(c) == {"system_id", "system_name", "region_name", "changed_at",
+                          "old_alliance_id", "new_alliance_id", "direction"}
         sent = datetime.fromisoformat(c["changed_at"])
         assert sent.utcoffset() == timedelta(0), c["changed_at"]
         assert sent == stored.replace(tzinfo=timezone.utc)
     assert changes[0]["changed_at"] == _WHEN.isoformat() + "+00:00"
     assert [c["direction"] for c in changes] == ["gain", "loss"]
+
+
+def test_names_come_from_the_sde(sov_db):
+    known, unknown = _payload()["recent_changes"]
+    assert (known["system_name"], known["region_name"]) == ("SMP-01", "Sample Region")
+    assert (unknown["system_name"], unknown["region_name"]) == (None, None)
+
+
+def test_alliance_label_slice_covers_later_rows(sov_db, monkeypatch):
+    """Names are looked up for the same rows the payload sends, not just the first."""
+    async def add():
+        async with models.AsyncSessionLocal() as db:
+            db.add(SDESystem(system_id=30000003, system_name="SMP-03", region_id=10000001))
+            db.add(SovereigntyChangeEvent(system_id=30000003, old_alliance_id=OTHER,
+                                          new_alliance_id=ALLIANCE,
+                                          changed_at=_WHEN - timedelta(hours=6)))
+            await db.commit()
+    _run(add())
+    last = _payload()["recent_changes"][2]
+    assert (last["system_id"], last["system_name"]) == (30000003, "SMP-03")
 
 
 # ── the page script under node ────────────────────────────────────────
@@ -129,18 +156,19 @@ const fx = JSON.parse(fs.readFileSync(fxPath, 'utf8'));
 
 const els = {};
 const el = id => (els[id] = els[id] || { id, textContent: '', innerHTML: '', src: '' });
+const urls = [];
 const window = { mRowInit() {}, initToggleExpandedAria() {} };
 const ok = body => Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
 function fetch(url) {
+  urls.push(url);
   if (url.startsWith('/api/map/alliance/')) return ok(fx.detail);
-  if (url === '/map/data/systems.json') return ok(fx.systems);
   if (url.startsWith('/api/map/alliances?ids=')) return ok(fx.names);
   return Promise.resolve({ ok: false, json: () => Promise.resolve(null) });
 }
 const sandbox = { window, document: { getElementById: el }, fetch, console };
 vm.createContext(sandbox);
 Promise.resolve(vm.runInContext(src, sandbox)).then(() => {
-  process.stdout.write(JSON.stringify({ html: el('changes-list').innerHTML }));
+  process.stdout.write(JSON.stringify({ html: el('changes-list').innerHTML, urls }));
 }, err => { console.error(err); process.exit(1); });
 """
 
@@ -156,7 +184,7 @@ def _page_script():
 
 @pytest.fixture(scope="module")
 def run_page(tmp_path_factory):
-    """run_page(detail, systems, names, tz) -> the list's innerHTML."""
+    """run_page(detail, names, tz) -> the list's innerHTML."""
     if not shutil.which("node"):
         pytest.skip("node not installed")
     d = tmp_path_factory.mktemp("alliance-changes")
@@ -164,26 +192,25 @@ def run_page(tmp_path_factory):
     (d / "page.js").write_text(_page_script())
     count = [0]
 
-    def run(detail, systems, names, tz="UTC"):
+    def run(detail, names, tz="UTC"):
         count[0] += 1
         fx = d / f"fx{count[0]}.json"
-        fx.write_text(json.dumps({"detail": detail, "systems": systems, "names": names}))
+        fx.write_text(json.dumps({"detail": detail, "names": names}))
         res = subprocess.run(["node", str(d / "harness.js"), str(d / "page.js"), str(fx)],
                              capture_output=True, text=True, timeout=30,
                              env={"PATH": os.environ.get("PATH", ""), "TZ": tz})
         assert res.returncode == 0, res.stderr
-        return json.loads(res.stdout)["html"]
+        out = json.loads(res.stdout)
+        # Names come from the payload: no map data file, however it is spelled.
+        assert not [u for u in out["urls"] if "systems" in u or "/map/data/" in u], out["urls"]
+        return out["html"]
     return run
-
-
-_SYSTEMS = [{"id": 30000001, "name": "SMP-01", "regName": "Sample Region"},
-            {"id": 30000002, "name": "SMP-02", "regName": "Sample Region"}]
 
 
 @pytest.mark.parametrize("tz", ["UTC", "America/New_York", "Asia/Tokyo"])
 def test_when_shows_the_utc_time_in_any_viewer_zone(sov_db, run_page, tz):
     detail = _payload()
-    html = run_page(detail, _SYSTEMS, {str(OTHER): "Sample Counterparty Alliance"}, tz)
+    html = run_page(detail, {str(OTHER): "Sample Counterparty Alliance"}, tz)
     rows = cells_rows(html)
     assert len(rows) == 2
     for row, stored in zip(rows, (_WHEN, _WHEN - timedelta(hours=3))):
@@ -199,15 +226,17 @@ HOSTILE_DIR = 'loss" onmouseover="alert(1)'
 HOSTILE_ID = '1"><img src=x id="pwn-id">'
 
 
-def _detail(second_id, second_direction):
-    """A gain from OTHER in system 30000001, then a change in 30000002 whose
-    counterparty id and direction are the caller's."""
+def _detail(second_id, second_direction, first_names=("SMP-01", "Sample Region")):
+    """A gain from OTHER in system 30000001 (named by first_names), then a
+    change in 30000002 whose counterparty id and direction are the caller's."""
     return {"name": "Sample Alliance", "ticker": "SMPL", "sov_system_count": 2,
             "sov_gained_7d": 1, "sov_lost_7d": 1, "date_founded": None,
             "recent_changes": [
-                {"system_id": 30000001, "changed_at": "2026-10-05T00:15:00+00:00",
+                {"system_id": 30000001, "system_name": first_names[0],
+                 "region_name": first_names[1], "changed_at": "2026-10-05T00:15:00+00:00",
                  "old_alliance_id": OTHER, "new_alliance_id": ALLIANCE, "direction": "gain"},
-                {"system_id": 30000002, "changed_at": "2026-10-04T21:15:00+00:00",
+                {"system_id": 30000002, "system_name": "SMP-02",
+                 "region_name": "Sample Region", "changed_at": "2026-10-04T21:15:00+00:00",
                  "old_alliance_id": ALLIANCE, "new_alliance_id": second_id,
                  "direction": second_direction},
             ]}
@@ -229,14 +258,13 @@ def _tags(html):
 
 
 def _normal(run_page):
-    return run_page(_detail(99000003, "loss"), _SYSTEMS,
+    return run_page(_detail(99000003, "loss"),
                     {str(OTHER): "Sample Counterparty Alliance"})
 
 
 def _hostile(run_page):
-    systems = [{"id": 30000001, "name": HOSTILE_SYS, "regName": HOSTILE_REG},
-               {"id": 30000002, "name": "SMP-02", "regName": "Sample Region"}]
-    return run_page(_detail(HOSTILE_ID, HOSTILE_DIR), systems, {str(OTHER): HOSTILE_ALLIANCE})
+    return run_page(_detail(HOSTILE_ID, HOSTILE_DIR, (HOSTILE_SYS, HOSTILE_REG)),
+                    {str(OTHER): HOSTILE_ALLIANCE})
 
 
 def test_hostile_names_add_no_elements_or_attributes(run_page):

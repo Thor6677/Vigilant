@@ -161,6 +161,7 @@ const fx = JSON.parse(fs.readFileSync(fxPath, 'utf8'));
 const els = {};
 const el = id => (els[id] = els[id] || { id, textContent: '', innerHTML: '', src: '' });
 const calls = [];
+const urls = [];
 const aria = [];
 const seq = [];
 const window = {
@@ -169,29 +170,31 @@ const window = {
 };
 const ok = body => Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
 function fetch(url) {
+  urls.push(url);
   if (url.startsWith('/api/map/alliance/')) return ok(fx.detail);
-  if (url === '/map/data/systems.json') return ok(fx.systems);
   if (url.startsWith('/api/map/alliances?ids=')) return ok(fx.names);
   return Promise.resolve({ ok: false, json: () => Promise.resolve(null) });
 }
 const sandbox = { window, document: { getElementById: el }, fetch, console };
 vm.createContext(sandbox);
 Promise.resolve(vm.runInContext(src, sandbox)).then(() => {
-  process.stdout.write(JSON.stringify({ html: el('changes-list').innerHTML, calls, aria, seq }));
+  process.stdout.write(JSON.stringify({ html: el('changes-list').innerHTML, calls, aria, seq, urls }));
 }, err => { console.error(err); process.exit(1); });
 """
 
 
 def _changes(n):
     """n changes: the first a gain from the counterparty, the second a loss
-    to nobody (Unclaimed), the third in a system missing from systems.json
-    (no region); the rest alternate gain/loss against the counterparty."""
+    to nobody (Unclaimed), the third in a system the payload has no name
+    for (no region); the rest alternate gain/loss against the counterparty."""
     out = []
     for i in range(n):
         gain = i % 2 == 0
         other = None if i == 1 else _OTHER
         out.append({
             "system_id": 30000099 if i == 2 else 30000001 + i,
+            "system_name": None if i == 2 else f"SMP-{i:02d}",
+            "region_name": None if i == 2 else _REGION,
             "changed_at": f"2026-09-{(i % 28) + 1:02d}T{i % 24:02d}:15:00+00:00",
             "old_alliance_id": other if gain else _ALLIANCE,
             "new_alliance_id": _ALLIANCE if gain else other,
@@ -215,8 +218,6 @@ def run_page(tmp_path_factory):
                 "detail": {"name": "Sample Alliance", "ticker": "SMPL", "sov_system_count": 3,
                            "sov_gained_7d": 2, "sov_lost_7d": 1, "date_founded": None,
                            "recent_changes": _changes(n)},
-                "systems": [{"id": 30000001 + i, "name": f"SMP-{i:02d}", "regName": _REGION}
-                            for i in range(max(n, 1)) if i != 2],
                 "names": {str(_OTHER): _OTHER_NAME},
             }
             (d / f"fx{n}.json").write_text(json.dumps(fx))
@@ -225,6 +226,8 @@ def run_page(tmp_path_factory):
                                  capture_output=True, text=True, timeout=30)
             assert res.returncode == 0, res.stderr
             cache[n] = json.loads(res.stdout)
+            # Names come from the payload: no map data file, however it is spelled.
+            assert not [u for u in cache[n]["urls"] if "systems" in u or "/map/data/" in u]
         return cache[n]
     return run
 
