@@ -206,6 +206,23 @@ async def system_ids_to_names(db: AsyncSession, system_ids: list[int]) -> dict[i
     return {row.system_id: row.system_name for row in result.fetchall()}
 
 
+async def system_labels(
+    db: AsyncSession, system_ids: list[int]
+) -> dict[int, tuple[str, str | None]]:
+    """Bulk resolve system IDs to (system_name, region_name).
+
+    Unknown IDs are absent; a system whose region row is missing maps to
+    (name, None)."""
+    if not system_ids:
+        return {}
+    result = await db.execute(
+        select(SDESystem.system_id, SDESystem.system_name, SDERegion.region_name)
+        .outerjoin(SDERegion, SDERegion.region_id == SDESystem.region_id)
+        .where(SDESystem.system_id.in_(set(system_ids)))
+    )
+    return {sid: (name, region) for sid, name, region in result.all()}
+
+
 async def system_name_to_id(db: AsyncSession, name: str) -> int | None:
     result = await db.execute(
         select(SDESystem.system_id).where(func.lower(SDESystem.system_name) == name.lower())

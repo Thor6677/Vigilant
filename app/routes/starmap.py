@@ -1730,6 +1730,17 @@ async def trending_sov(request: Request):
     })
 
 
+async def _system_labels_safe(db, system_ids):
+    """SDE names for system ids; {} on any failure so a missing or mid-import
+    SDE degrades to the pages' "System N" fallback instead of a 500."""
+    try:
+        from app.sde.lookup import system_labels
+        return await system_labels(db, system_ids)
+    except Exception:
+        log.warning("system label lookup failed", exc_info=True)
+        return {}
+
+
 @router.get("/api/map/trending/violent")
 async def trending_violent(request: Request):
     """Most violent systems in the last 3 hours, sourced from the stored
@@ -1759,12 +1770,15 @@ async def trending_violent(request: Request):
             ).desc())
             .limit(50)
         )).all()
+        labels = await _system_labels_safe(db, [r[0] for r in rows])
 
     return JSONResponse({
         "since": cutoff.isoformat(),
         "systems": [
             {
                 "system_id": sid,
+                "system_name": labels.get(sid, (None, None))[0],
+                "region_name": labels.get(sid, (None, None))[1],
                 "ship_kills": int(ship or 0),
                 "pod_kills": int(pod or 0),
                 "npc_kills": int(npc or 0),
@@ -1829,6 +1843,7 @@ async def alliance_detail(alliance_id: int, request: Request):
             )
             .order_by(SovereigntyChangeEvent.changed_at.desc())
         )).scalars().all()
+        labels = await _system_labels_safe(db, [r.system_id for r in rows[:100]])
 
     gained_7d = sum(1 for r in rows if r.new_alliance_id == alliance_id and r.old_alliance_id != alliance_id)
     lost_7d = sum(1 for r in rows if r.old_alliance_id == alliance_id and r.new_alliance_id != alliance_id)
@@ -1893,6 +1908,8 @@ async def alliance_detail(alliance_id: int, request: Request):
         "recent_changes": [
             {
                 "system_id": r.system_id,
+                "system_name": labels.get(r.system_id, (None, None))[0],
+                "region_name": labels.get(r.system_id, (None, None))[1],
                 "changed_at": _utc_iso(r.changed_at),
                 "old_alliance_id": r.old_alliance_id,
                 "new_alliance_id": r.new_alliance_id,

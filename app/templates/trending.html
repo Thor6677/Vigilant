@@ -96,6 +96,12 @@
 
     const $ = (id) => document.getElementById(id);
 
+    // Alliance names come from ESI and system and region names from the SDE
+    // (via the API): escape them before they go into the markup (ISS-129,
+    // ISS-139).
+    const esc = v => String(v).replace(/[&<>"']/g, ch =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
+
     function renderAlliance(container, rows, neg) {
         if (!rows || !rows.length) {
             container.innerHTML = '<div class="b-muted">No activity in the last 7 days.</div>';
@@ -104,7 +110,7 @@
         container.innerHTML = rows.slice(0, 15).map(([aid, count], i) => `
             <div class="b-trending-row">
                 <span class="b-trending-rank">${i + 1}</span>
-                <span class="b-trending-name"><a href="/alliance/${aid}">${names[aid] || ('Alliance ' + aid)}</a></span>
+                <span class="b-trending-name"><a href="/alliance/${aid}">${esc(names[aid] || ('Alliance ' + aid))}</a></span>
                 <span class="b-trending-count${neg ? ' neg' : ''}">${neg ? '-' : '+'}${count}</span>
             </div>
         `).join('');
@@ -116,22 +122,14 @@
         renderAlliance($('sov-lost'),   sovResp.top_lost,   true);
     }
 
-    // Resolve system names via the shared map data JSON
-    let systemMap = new Map();
-    try {
-        const systems = await fetch('/map/data/systems.json').then(r => r.ok ? r.json() : []);
-        for (const s of systems) systemMap.set(s.id, s);
-    } catch {}
-
     if (violentResp) {
         const vc = $('violent-list');
         if (!violentResp.systems || !violentResp.systems.length) {
             vc.innerHTML = '<div class="b-muted">No ship destruction reported in the last 3 hours.</div>';
         } else {
             vc.innerHTML = violentResp.systems.map((s, i) => {
-                const sys = systemMap.get(s.system_id);
-                const sysName = sys?.name || ('System ' + s.system_id);
-                const regName = sys?.regName || '';
+                const sysName = esc(s.system_name || ('System ' + s.system_id));
+                const regName = esc(s.region_name || '');
                 // Phones (D11 A): rank · system · ship kills, the rest on tap.
                 // The m-only cells carry the row there; the desktop cells
                 // after the rank are hidden.
