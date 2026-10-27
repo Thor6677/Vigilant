@@ -672,6 +672,15 @@
     .b-panel.skp-ta-panel { overflow: visible; }
 }
 
+/* ── Structure timers search lists (structure_timers.html, ISS-147) ─────── */
+/* The System / Region / Owner and ACL search results hang below their input
+   (position:absolute, max-height 200px) inside a .b-panel, which clips
+   (overflow:hidden). Same remedy as ISS-114: these two panels may overflow at
+   desktop widths only; phones keep the §4.2 overflow-x:auto safety net. */
+@media (min-width: 641px) {
+    .b-panel.tmr-ta-panel { overflow: visible; }
+}
+
 /* ═══ Mobile R1 — phone layer (mobile design §4) ═════════════════════════
    Phone = ≤640px. Templates opt in with m-* classes and data-m attributes;
    the contract is documented in the mobile R1 plan and pinned by
