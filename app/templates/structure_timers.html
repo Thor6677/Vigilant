@@ -15,7 +15,7 @@
         <span style="color:var(--accent);font-size:12px;">+</span>
         <span class="b-label">Add Timer</span>
     </summary>
-    <div class="b-panel" style="border-top:1px solid var(--border);">
+    <div class="b-panel tmr-ta-panel" style="border-top:1px solid var(--border);">
         <form method="POST" action="/structure-timers/create" class="st-form" style="padding:0.75rem;display:flex;flex-direction:column;gap:0.75rem;">
 
             <div class="m-stack" style="display:flex;gap:0.5rem;flex-wrap:wrap;">
@@ -130,7 +130,7 @@
         <span style="color:var(--muted);font-size:12px;">&#9881;</span>
         <span class="b-label b-muted">Access Control Groups</span>
     </summary>
-    <div class="b-panel" style="border-top:1px solid var(--border);">
+    <div class="b-panel tmr-ta-panel" style="border-top:1px solid var(--border);">
         {# Create new group #}
         <div style="padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);display:flex;gap:0.5rem;align-items:center;">
             <form method="POST" action="/structure-timers/acl/create" class="st-form m-stack" style="display:flex;gap:0.5rem;flex:1;align-items:center;">
@@ -455,10 +455,12 @@ function toggleTimerMode() {
 
 /* Typeahead search for system, region, owner */
 var _searchTimers = {};
+var _searchSeq = {};
 function searchField() {
     var endpoint = this.dataset.endpoint;
     var field = this.dataset.field;
     clearTimeout(_searchTimers[field]);
+    var seq = _searchSeq[field] = (_searchSeq[field] || 0) + 1;
     var input = document.getElementById(field + '-search');
     var results = document.getElementById(field + '-results');
     var q = input.value.trim();
@@ -468,6 +470,7 @@ function searchField() {
         fetch('/structure-timers/search/' + endpoint + '?q=' + encodeURIComponent(q))
             .then(function(r) { return r.text(); })
             .then(function(html) {
+                if (seq !== _searchSeq[field]) return;
                 results.innerHTML = html;
                 results.style.display = html ? 'block' : 'none';
             });
@@ -487,19 +490,33 @@ function selectOwner() {
     document.getElementById('owner-search').value = name;
     document.getElementById('owner-results').style.display = 'none';
 }
-/* Close dropdowns on outside click */
-document.addEventListener('click', function(e) {
+/* Click-away / Escape for every result list (ISS-147). Closing also cancels the
+   pending and in-flight search, so a late response cannot reopen the list. */
+function closeResultLists(e) {
+    var lists = [];
     ['system', 'region', 'owner'].forEach(function(f) {
-        var results = document.getElementById(f + '-results');
-        var input = document.getElementById(f + '-search');
-        if (results && input && !input.contains(e.target) && !results.contains(e.target)) {
-            results.style.display = 'none';
-        }
+        lists.push([document.getElementById(f + '-search'), document.getElementById(f + '-results'),
+                    function() { clearTimeout(_searchTimers[f]); _searchSeq[f] = (_searchSeq[f] || 0) + 1; }]);
     });
-});
+    document.querySelectorAll('[id^="acl-results-"]').forEach(function(r) {
+        var gid = r.id.slice('acl-results-'.length);
+        lists.push([document.getElementById('acl-search-' + gid), r,
+                    function() { clearTimeout(_aclTimers[gid]); _aclSeq[gid] = (_aclSeq[gid] || 0) + 1; }]);
+    });
+    lists.forEach(function(l) {
+        var input = l[0], results = l[1];
+        if (!results || !input) return;
+        if (e.type === 'click' && (input.contains(e.target) || results.contains(e.target))) return;
+        results.style.display = 'none';
+        l[2]();
+    });
+}
+document.addEventListener('click', closeResultLists);
+document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeResultLists(e); });
 
 /* ACL search and add */
 var _aclTimers = {};
+var _aclSeq = {};
 /* Changing the ACL group's type clears whatever entry was picked, so a
    stale id can't be submitted against the new type. Was two inline
    getElementById assignments. */
@@ -512,6 +529,7 @@ function clearACLSelection() {
 function searchACL() {
     var groupId = this.dataset.groupId;
     clearTimeout(_aclTimers[groupId]);
+    var seq = _aclSeq[groupId] = (_aclSeq[groupId] || 0) + 1;
     var input = document.getElementById('acl-search-' + groupId);
     var results = document.getElementById('acl-results-' + groupId);
     var cat = document.getElementById('acl-type-' + groupId).value;
@@ -521,6 +539,7 @@ function searchACL() {
         fetch('/structure-timers/acl/search?q=' + encodeURIComponent(q) + '&category=' + cat)
             .then(function(r) { return r.text(); })
             .then(function(html) {
+                if (seq !== _aclSeq[groupId]) return;
                 results.innerHTML = html;
                 results.style.display = html ? 'block' : 'none';
             });
