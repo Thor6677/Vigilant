@@ -2020,8 +2020,13 @@ async def calculate_fitting_stats(
                     rah_collectors[attr_id].append(resonance)
 
         for mod in mods:
-            # Only apply ship-domain modifiers (or item-domain for self-modifying)
-            if mod["domain"] != "shipID":
+            # Only an ItemModifier on shipID changes the ship itself. A
+            # Location* row on shipID means "the items fitted on this ship"
+            # (a missile guidance module boosting missile velocity); applying
+            # it here moved the hull whenever the attribute id coincided, e.g.
+            # maxVelocity, which missiles and ships share (ISS-149). Those
+            # rows are handled by the cross-module collectors below.
+            if mod["domain"] != "shipID" or mod["func"] != "ItemModifier":
                 continue
 
             # Get the source attribute value from the module
