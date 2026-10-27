@@ -505,7 +505,7 @@ function closeResultLists(e) {
     });
     lists.forEach(function(l) {
         var input = l[0], results = l[1];
-        if (!results || !input || results.style.display === 'none') return;
+        if (!results || !input) return;
         if (e.type === 'click' && (input.contains(e.target) || results.contains(e.target))) return;
         results.style.display = 'none';
         l[2]();

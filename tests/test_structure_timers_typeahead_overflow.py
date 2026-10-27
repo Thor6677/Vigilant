@@ -59,3 +59,9 @@ def test_late_search_responses_cannot_reopen_a_closed_list():
     # closing bumps the same counters the fetch callbacks compare against
     assert "_searchSeq[f] = (_searchSeq[f] || 0) + 1" in js
     assert "_aclSeq[gid] = (_aclSeq[gid] || 0) + 1" in js
+
+
+def test_closing_cancels_a_search_even_before_its_list_is_open():
+    js = _read(_TEMPLATE)
+    body = js[js.index("function closeResultLists(e)"):js.index("document.addEventListener('click', closeResultLists)")]
+    assert "display === 'none'" not in body, "an in-flight search must be cancelled while its list is still hidden"
