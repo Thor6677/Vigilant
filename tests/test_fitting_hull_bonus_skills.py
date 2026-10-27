@@ -4,8 +4,9 @@ A hull with several class skills (a carrier with Amarr Carrier for one set of
 bonuses and Caldari Carrier for another) used to scale every per-level bonus by
 the MIN of the character's levels across all of them. The dogma link from a
 bonus attribute to its skill is the skill's own ItemModifier/shipID effect
-reading skillLevel (attribute 280) into that bonus attribute; the engine now
-resolves that link and falls back to the MIN only when it cannot.
+reading skillLevel (attribute 280) into that bonus attribute. The engine
+resolves that link (ISS-150: it is also what decides whether an attribute is
+per level at all; a bonus with no link is flat, and there is no MIN fallback).
 
 Built on the SDE slice in tests/test_fitting_engine.py plus invented hulls,
 skills and attributes (9650s / 9850s / 8850s), with the hull traits as
@@ -94,12 +95,13 @@ def _rows():
         (A_BONUS_A, 5.0, SK_A, ATTR_CAPACITOR),
         (A_BONUS_B, 10.0, SK_B, ATTR_MAX_VELOCITY),
     ])
-    # A resolves to SK_A, C has no skillLevel row at all (unresolved).
+    # A resolves to SK_A, C has no skillLevel row at all (a flat bonus).
     rows += _hull(HULL_MIXED, "Test Mixed Hull", [
         (A_BONUS_A, 5.0, SK_A, ATTR_CAPACITOR),
         (A_BONUS_C, 10.0, SK_B, ATTR_MAX_VELOCITY),
     ])
-    # D resolves to SK_OTHER, which is not one of this hull's trait skills.
+    # D resolves to SK_OTHER, which is not one of this hull's trait skills
+    # (the traits are no longer consulted).
     rows += _hull(HULL_FOREIGN, "Test Foreign-Skill Hull", [
         (A_BONUS_A, 5.0, SK_A, ATTR_CAPACITOR),
         (A_BONUS_D, 10.0, SK_A, ATTR_MAX_VELOCITY),
@@ -134,16 +136,23 @@ def test_an_untrained_skill_zeroes_only_its_own_bonus():
         assert stats["max_velocity"] == pytest.approx(BASE_SPEED * 1.50, abs=0.5)
 
 
-def test_a_bonus_with_no_skill_link_still_uses_the_min_of_the_hulls_skills():
-    """C has no skillLevel row: MIN(5, 2) = 2 -> +20% on velocity. A still uses SK_A."""
+def test_a_bonus_with_no_skill_link_is_flat():
+    """C has no skillLevel row, so it is a role-style bonus: +10% on velocity at
+    its source value whatever the hull's skills are (it used to take the MIN of
+    5 and 2 and give +20%). A still uses SK_A."""
+    for levels in ({SK_A: 5, SK_B: 2}, {SK_A: 5, SK_B: 0}, None):
+        stats = _stats(HULL_MIXED, levels)
+        assert stats["max_velocity"] == pytest.approx(BASE_SPEED * 1.10, abs=0.5)
     stats = _stats(HULL_MIXED, {SK_A: 5, SK_B: 2})
     assert stats["capacitor"] == pytest.approx(BASE_CAP * 1.25, abs=0.5)
-    assert stats["max_velocity"] == pytest.approx(BASE_SPEED * 1.20, abs=0.5)
 
 
-def test_a_linked_skill_outside_the_hulls_trait_skills_falls_back_to_the_min():
-    """D links to SK_OTHER (level 5) but the hull's only trait skill is SK_A
-    (level 3): the MIN gives +30% on velocity, not +50%."""
+def test_a_linked_skill_outside_the_hulls_trait_skills_still_sets_the_level():
+    """D links to SK_OTHER, which the hull's traits do not list. The SDE link
+    decides, not the traits: SK_OTHER at 5 gives +50% on velocity (the hull's
+    SK_A at 3 only scales capacitor, +15%)."""
     stats = _stats(HULL_FOREIGN, {SK_A: 3, SK_OTHER: 5})
     assert stats["capacitor"] == pytest.approx(BASE_CAP * 1.15, abs=0.5)
-    assert stats["max_velocity"] == pytest.approx(BASE_SPEED * 1.30, abs=0.5)
+    assert stats["max_velocity"] == pytest.approx(BASE_SPEED * 1.50, abs=0.5)
+    stats = _stats(HULL_FOREIGN, {SK_A: 3})          # SK_OTHER untrained
+    assert stats["max_velocity"] == pytest.approx(BASE_SPEED, abs=0.5)
