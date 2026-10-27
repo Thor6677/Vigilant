@@ -45,7 +45,8 @@ from app.fitting.constants import (
     ATTR_HULL_KIN_RESONANCE, ATTR_HULL_EXPL_RESONANCE,
     ATTR_SHIELD_HP, ATTR_ARMOR_HP, ATTR_HP,
     ATTR_CAPACITOR, ATTR_CAP_RECHARGE,
-    ATTR_DAMAGE_MULTIPLIER, ATTR_RATE_OF_FIRE,
+    ATTR_DAMAGE_MULTIPLIER, ATTR_DAMAGE_MULTIPLIER_BONUS, EFFECT_DRONE_DMG_BONUS,
+    ATTR_RATE_OF_FIRE,
     ATTR_EM_DAMAGE, ATTR_EXPLOSIVE_DAMAGE, ATTR_KINETIC_DAMAGE, ATTR_THERMAL_DAMAGE,
     OVERLOAD_SOURCE_ATTR_PREFIX,
     ARMOR_RESONANCE_ATTRS, DAMAGE_TYPE_KEYS,
@@ -923,25 +924,15 @@ async def _apply_character_modifiers(
                                 mod.operator, src_val)
 
 
-# Drone size + racial specialization skills that have a
-# damageMultiplierBonus attr but no OwnerRequiredSkillModifier row to
-# propagate it to drones. Pyfa hard-codes these in effects.py — same
-# fix here. Each skill's bonus applies to drones requiring that skill.
-# Drone Interfacing (3442) is NOT in this list — its modifierInfo
-# already targets all drones via skill=3436 (Drones).
-_DRONE_SKILL_BONUS_GAPS: tuple[int, ...] = (
-    3441,   # Heavy Drone Operation        (5%/level)
-    33699,  # Medium Drone Operation       (5%/level)
-    24241,  # Light Drone Operation        (5%/level)
-    23594,  # Sentry Drone Interfacing     (5%/level)
-    12484,  # Amarr Drone Specialization   (2%/level)
-    12485,  # Minmatar Drone Specialization
-    12486,  # Gallente Drone Specialization
-    12487,  # Caldari Drone Specialization
-    60515,  # Mutated Drone Specialization
-)
-# damageMultiplierBonus attribute_id
-_ATTR_DAMAGE_MULT_BONUS = 64
+# Drone size + racial specialization skills carry effect 1730
+# (droneDmgBonus) and a damageMultiplierBonus (attr 292) but, unlike
+# Drone Interfacing, no SDEModifier row propagating it to drones. Pyfa
+# hard-codes this in Effect1730: damageMultiplierBonus * skill level on
+# every drone that requires the skill. The skills are found from the SDE
+# (published skills carrying effect 1730) rather than a fixed id list, so a
+# new specialization skill is picked up on the next SDE reload. Drone
+# Interfacing (3442) is not among them: its modifierInfo already targets
+# all drones via skill=3436 (Drones), 64 <- 292.
 
 
 async def _apply_drone_skill_bonuses(
@@ -952,16 +943,18 @@ async def _apply_drone_skill_bonuses(
 ) -> None:
     """Apply drone-skill damage bonuses that the SDE doesn't propagate.
 
-    Light/Medium/Heavy Drone Operation, Sentry Drone Interfacing, and the
-    four racial drone specializations each carry a `damageMultiplierBonus`
-    attr but have no SDEModifier row mapping it to actual drone damage
-    (only their internal skillLevel→damageMultiplierBonus self-modifier).
-    Pyfa works around this with hard-coded handlers in effects.py.
+    Light/Medium/Heavy Drone Operation, Sentry Drone Interfacing (the
+    Drone Interfacing row itself works through the SDE; see above), and the
+    racial drone specializations carry effect 1730 (droneDmgBonus) and a
+    `damageMultiplierBonus` (attr 292, not 64 which is the damage
+    multiplier itself) but have no SDEModifier row mapping it to actual
+    drone damage. Pyfa's Effect1730 does the same by hand.
 
-    For each gap skill, find the drones in `items` that require it and
-    multiply their damageMultiplier by (1 + bonus*level/100). Stacking
-    bonuses are not penalized — drone skills are explicitly non-stacking
-    per CCP design (matches Pyfa).
+    The gap skills are the published skills carrying effect 1730. For each,
+    find the drones in `items` that require it and multiply their
+    damageMultiplier by (1 + bonus*level/100). Stacking bonuses are not
+    penalized — drone skills are explicitly non-stacking per CCP design
+    (matches Pyfa).
     """
     drone_type_ids = {i["type_id"] for i in items if i.get("slot") == "drone"}
     if not drone_type_ids:
@@ -971,8 +964,12 @@ async def _apply_drone_skill_bonuses(
     skill_reqs: dict[int, set[int]] = defaultdict(set)
     res = await db.execute(
         select(SDETypeSkillReq.type_id, SDETypeSkillReq.skill_type_id)
+        .join(SDETypeEffect, SDETypeEffect.type_id == SDETypeSkillReq.skill_type_id)
+        .join(SDEType, SDEType.type_id == SDETypeSkillReq.skill_type_id)
         .where(SDETypeSkillReq.type_id.in_(list(drone_type_ids)))
-        .where(SDETypeSkillReq.skill_type_id.in_(_DRONE_SKILL_BONUS_GAPS))
+        .where(SDETypeEffect.effect_id == EFFECT_DRONE_DMG_BONUS)
+        .where(SDEType.category_id == CATEGORY_SKILL)
+        .where(SDEType.published.is_(True))
     )
     for tid, skill_id in res.fetchall():
         skill_reqs[skill_id].add(tid)
@@ -983,7 +980,7 @@ async def _apply_drone_skill_bonuses(
     res = await db.execute(
         select(SDETypeDogmaAttribute.type_id, SDETypeDogmaAttribute.value)
         .where(SDETypeDogmaAttribute.type_id.in_(list(skill_reqs.keys())))
-        .where(SDETypeDogmaAttribute.attribute_id == _ATTR_DAMAGE_MULT_BONUS)
+        .where(SDETypeDogmaAttribute.attribute_id == ATTR_DAMAGE_MULTIPLIER_BONUS)
     )
     bonus_pct: dict[int, float] = {tid: val for tid, val in res.fetchall()}
 
@@ -1453,6 +1450,8 @@ FIGHTER_UNSIZED_MAX = 12  # largest real squadron, for a fighter type with no si
 # 2: fighters (squadron DPS, launch accounting, Fighter Hangar Management).
 # 3: ISS-141, ISS-142 and ISS-150 changed DPS, drone damage and optimal range
 #    for existing fits (hull-bonus scaling) without a bump; this one covers all three.
+#    ISS-157 rides along: drone size and specialization skills were never
+#    applied to drone damage.
 FITTING_ENGINE_VERSION = "3"
 
 
