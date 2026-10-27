@@ -132,6 +132,38 @@ def _resist_modifier_rows(effect_id, domain, targets):
     ]
 
 
+# The six skills the engine used to hardcode for the ship's own attributes
+# (CPU Management ... Fighter Hangar Management), now read from SDE rows
+# (ISS-152): (skill type, effect id, attribute the skill raises, source
+# attribute on the skill). Each is +5% per level, a postPercent ItemModifier.
+SHIP_SELF_SKILLS = [
+    (3426, 7001, 48, 424),       # CPU Management -> cpuOutput
+    (3413, 7002, 11, 313),       # Power Grid Management -> powerOutput
+    (3419, 7003, 263, 337),      # Shield Management -> shieldCapacity
+    (3394, 7004, 265, 335),      # Hull Upgrades -> armorHP
+    (3392, 7005, 9, 327),        # Mechanics -> hp
+    (24613, 7006, 2055, 2340),   # Fighter Hangar Management -> fighterCapacity
+]
+
+
+def _ship_self_skill_rows(skills, value=5.0, operator=6):
+    """SDE rows for skills whose ItemModifier on shipID raises a hull attribute."""
+    rows = []
+    for skill_id, effect_id, target, source in skills:
+        rows += [
+            SDEType(type_id=skill_id, type_name=f"Test Skill {skill_id}", group_id=9990,
+                    category_id=16),
+            SDETypeDogmaAttribute(type_id=skill_id, attribute_id=source, value=value),
+            SDEEffect(effect_id=effect_id, effect_name=f"testShipSelfSkill{skill_id}",
+                      effect_category=0),
+            SDETypeEffect(type_id=skill_id, effect_id=effect_id),
+            SDEModifier(effect_id=effect_id, func="ItemModifier", domain="shipID",
+                        modified_attribute_id=target, modifying_attribute_id=source,
+                        operator=operator),
+        ]
+    return rows
+
+
 def _seed_rows():
     """The whole SDE slice, as ORM objects ready to add."""
     rows = []
@@ -404,6 +436,9 @@ def _seed_rows():
                     modifying_attribute_id=ATTR_OVERLOAD_SPEED_BONUS,
                     operator=OP_POST_PERCENT),
     ]
+
+
+    rows += _ship_self_skill_rows(SHIP_SELF_SKILLS)
 
     return rows
 
