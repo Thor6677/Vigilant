@@ -150,6 +150,18 @@ NON_RACK_SLOTS = ("drone", "cargo", "fighter")
 EFFECT_ADAPTIVE_ARMOR_HARDENER = 4928
 ATTR_RESISTANCE_SHIFT_AMOUNT = 1849   # resist points moved per cycle (6.0)
 
+# ── Afterburners and microwarpdrives ─────────────────────────────────────
+# Effects 6731 (moduleBonusAfterburner) and 6730 (moduleBonusMicrowarpdrive)
+# carry NO modifierInfo in the SDE; the client and Pyfa hard-code them. Both
+# add mass, scale maxVelocity by speedFactor * speedBoostFactor / mass, and an
+# MWD additionally blooms the signature radius.
+EFFECT_MWD = 6730
+EFFECT_AFTERBURNER = 6731
+ATTR_SPEED_FACTOR = 20          # percent thrust factor (skills and heat act on this)
+ATTR_SPEED_BOOST_FACTOR = 567   # thrust, divided by ship mass
+ATTR_MASS_ADDITION = 796        # kg added to the ship while the module runs
+ATTR_SIG_RADIUS_BONUS = 554     # percent signature bloom (MWD only)
+
 # ── Charges that modify their parent module ──────────────────────────────
 # Most of this is ordinary dogma: a charge's effect carries modifiers with
 # domain "otherID", meaning "the module I am loaded into". Two mechanics are

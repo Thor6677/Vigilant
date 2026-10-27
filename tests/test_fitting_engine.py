@@ -47,7 +47,7 @@ from app.fitting.constants import (
     ATTR_CHARGED_ARMOR_DAMAGE_MULTIPLIER, ATTR_CHARGE_GROUP_1, ATTR_CPU,
     ATTR_CPU_OUTPUT, ATTR_DAMAGE_MULTIPLIER, ATTR_DURATION, ATTR_EM_DAMAGE,
     ATTR_EM_RESIST_BONUS, ATTR_EXPL_RESIST_BONUS, ATTR_HP, ATTR_KIN_RESIST_BONUS,
-    ATTR_MASS, ATTR_MAX_VELOCITY, ATTR_POWER, ATTR_POWER_OUTPUT,
+    ATTR_INERTIA, ATTR_MASS, ATTR_MAX_VELOCITY, ATTR_POWER, ATTR_SIG_RADIUS, ATTR_POWER_OUTPUT,
     ATTR_RATE_OF_FIRE, ATTR_SHIELD_HP, ATTR_THERM_RESIST_BONUS,
     ATTR_TRACKING_SPEED, ATTR_TURRET_SLOTS, EFFECT_ADAPTIVE_ARMOR_HARDENER,
     EFFECT_POWER_BOOSTER,
@@ -61,10 +61,13 @@ from app.sde.loader import BLUEPRINT_COPY_MARKER, EFFECTS_USAGE_CHANCE_MARKER, n
 # ── dogma constants this fixture needs that constants.py has no name for ────
 ATTR_OVERLOAD_HARDENING_BONUS = 1208   # overloadHardeningBonus
 ATTR_OVERLOAD_ROF_BONUS = 1211         # overloadRofBonus (a reduction)
-ATTR_OVERLOAD_SPEED_BONUS = 1216       # overloadSpeedFactorBonus
+ATTR_OVERLOAD_SPEED_BONUS = 1223       # overloadSpeedFactorBonus (1216 is a different attribute)
 ATTR_TRACKING_SPEED_BONUS = 767        # trackingSpeedBonus, on a tracking computer
 ATTR_TRACKING_SCRIPT_BONUS = 1316      # the script's boost to the above
 ATTR_SPEED_FACTOR = 20                 # speedFactor, an afterburner's % speed boost
+ATTR_SPEED_BOOST_FACTOR = 567          # speedBoostFactor, the thrust divided by ship mass
+ATTR_MASS_ADDITION = 796               # massAddition, kg a running AB/MWD adds
+ATTR_SIG_RADIUS_BONUS = 554            # signatureRadiusBonus, an MWD's % bloom
 ATTR_CAP_NEED_BONUS = 317              # capNeedBonus, on a cap booster charge
 
 OP_MOD_ADD = 2
@@ -87,6 +90,7 @@ CAP_CHARGE = 9009
 ANCILLARY_REP = 9010
 PASTE = 9011
 AFTERBURNER = 9012
+MWD = 9013
 
 GROUP_AMMO = 9500
 GROUP_SCRIPT = 9501
@@ -99,7 +103,8 @@ EFF_HARDENER_OVERLOAD = 8002
 EFF_TRACKING_COMPUTER = 8003
 EFF_TRACKING_SCRIPT = 8004
 EFF_CAP_CHARGE = 8005
-EFF_AFTERBURNER = 8006
+EFF_AFTERBURNER = 6731   # real: moduleBonusAfterburner, zero modifier rows
+EFF_MWD = 6730           # real: moduleBonusMicrowarpdrive, zero modifier rows
 EFF_AFTERBURNER_OVERLOAD = 8007
 EFF_TURRET_OVERLOAD = 8008
 EFF_RAH_OVERLOAD = 8009
@@ -184,6 +189,7 @@ def _seed_rows():
         (ATTR_SPEED_FACTOR, "speedFactor", True),
         (ATTR_TRACKING_SPEED, "trackingSpeed", False),
         (ATTR_MAX_VELOCITY, "maxVelocity", False),
+        (ATTR_SIG_RADIUS, "signatureRadius", False),
         # Resonances are non-stackable in the SDE sense (the penalty is applied
         # to the modifiers, not the attribute) — the engine reads this flag.
         (ATTR_ARMOR_EM_RESONANCE, "armorEmDamageResonance", False),
@@ -220,6 +226,8 @@ def _seed_rows():
                 group_id=GROUP_PASTE, category_id=8),
         SDEType(type_id=AFTERBURNER, type_name="Test Afterburner",
                 group_id=9407, category_id=7),
+        SDEType(type_id=MWD, type_name="Test Microwarpdrive",
+                group_id=9407, category_id=7),
     ]
 
     # ── ship ────────────────────────────────────────────────────────────────
@@ -233,6 +241,8 @@ def _seed_rows():
         ATTR_CAP_RECHARGE: 200_000.0,   # ms
         ATTR_MAX_VELOCITY: 200.0,
         ATTR_MASS: 10_000_000.0,
+        ATTR_INERTIA: 3.0,
+        ATTR_SIG_RADIUS: 100.0,
         ATTR_TURRET_SLOTS: 5.0,
         # Bare hull: no resists anywhere, so every resist in a result is one
         # a module put there.
@@ -408,35 +418,50 @@ def _seed_rows():
     })
     rows += _attrs(PASTE, {})
 
-    # ── afterburner ─────────────────────────────────────────────────────────
+    # ── afterburner and microwarpdrive ──────────────────────────────────────
+    # The real shape: effects 6731 / 6730 with NO modifier rows. The engine
+    # computes mass, speed and signature in code. Ship mass 10e6 plus the
+    # module's 5e6 massAddition is 15e6, and a speedBoostFactor of 15e6 makes
+    # thrust / mass exactly 1, so the speed gain is speedFactor percent.
     rows += _attrs(AFTERBURNER, {
         ATTR_SPEED_FACTOR: 135.0,
+        ATTR_SPEED_BOOST_FACTOR: 15_000_000.0,
+        ATTR_MASS_ADDITION: 5_000_000.0,
         ATTR_OVERLOAD_SPEED_BONUS: 50.0,
         ATTR_DURATION: 10_000.0,
         ATTR_CAPACITOR_NEED: 30.0,
         ATTR_CPU: 25.0,
         ATTR_POWER: 15.0,
     })
+    rows += _attrs(MWD, {
+        ATTR_SPEED_FACTOR: 500.0,
+        ATTR_SPEED_BOOST_FACTOR: 15_000_000.0,
+        ATTR_MASS_ADDITION: 5_000_000.0,
+        ATTR_SIG_RADIUS_BONUS: 500.0,
+        ATTR_OVERLOAD_SPEED_BONUS: 50.0,
+        ATTR_DURATION: 10_000.0,
+        ATTR_CAPACITOR_NEED: 60.0,
+        ATTR_CPU: 30.0,
+        ATTR_POWER: 20.0,
+    })
     rows += [
         SDEEffect(effect_id=EFF_AFTERBURNER, effect_name="moduleBonusAfterburner",
+                  effect_category=EFFECT_CAT_ACTIVE),
+        SDEEffect(effect_id=EFF_MWD, effect_name="moduleBonusMicrowarpdrive",
                   effect_category=EFFECT_CAT_ACTIVE),
         SDEEffect(effect_id=EFF_AFTERBURNER_OVERLOAD,
                   effect_name="overloadSpeedFactor",
                   effect_category=EFFECT_CAT_OVERLOAD),
         SDETypeEffect(type_id=AFTERBURNER, effect_id=EFF_AFTERBURNER),
         SDETypeEffect(type_id=AFTERBURNER, effect_id=EFF_AFTERBURNER_OVERLOAD),
-        SDEModifier(effect_id=EFF_AFTERBURNER, func="ItemModifier",
-                    domain="shipID",
-                    modified_attribute_id=ATTR_MAX_VELOCITY,
-                    modifying_attribute_id=ATTR_SPEED_FACTOR,
-                    operator=OP_POST_PERCENT),
+        SDETypeEffect(type_id=MWD, effect_id=EFF_MWD),
+        SDETypeEffect(type_id=MWD, effect_id=EFF_AFTERBURNER_OVERLOAD),
         SDEModifier(effect_id=EFF_AFTERBURNER_OVERLOAD, func="ItemModifier",
                     domain="itemID",
                     modified_attribute_id=ATTR_SPEED_FACTOR,
                     modifying_attribute_id=ATTR_OVERLOAD_SPEED_BONUS,
                     operator=OP_POST_PERCENT),
     ]
-
 
     rows += _ship_self_skill_rows(SHIP_SELF_SKILLS)
 
@@ -749,7 +774,10 @@ def test_overheated_turret_shortens_its_cycle_and_raises_dps():
 
 
 def test_overheated_afterburner_is_faster():
-    """135% speed boost, +50% overloaded -> 202.5%, on a 200 m/s hull."""
+    """135% speed boost, +50% overloaded -> 202.5%, on a 200 m/s hull.
+
+    Thrust / mass is 1 in the seed, so the factor is 1 + speedFactor / 100.
+    """
     assert _stats([_mid(AFTERBURNER)])["max_velocity"] == pytest.approx(470.0, abs=0.5)
     assert _stats([_mid(AFTERBURNER, overheated=True)])["max_velocity"] == \
         pytest.approx(605.0, abs=0.5)

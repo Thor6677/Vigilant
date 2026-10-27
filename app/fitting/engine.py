@@ -34,7 +34,7 @@ from app.db.sde_models import SDETypeSkillReq, SDETypeBonus
 from app.fitting.constants import (
     ATTR_POWER, ATTR_CPU, ATTR_UPGRADE_COST, ATTR_VOLUME,
     ATTR_DRONE_BW_USED, SHIP_STAT_ATTRS,
-    ATTR_MASS, ATTR_INERTIA,
+    ATTR_MASS, ATTR_INERTIA, ATTR_MAX_VELOCITY,
     ATTR_CAPACITOR_NEED, ATTR_DURATION, ATTR_SHIELD_RECHARGE_RATE,
     ATTR_CPU_OUTPUT, ATTR_POWER_OUTPUT,
     ATTR_SHIELD_EM_RESONANCE, ATTR_SHIELD_THERM_RESONANCE,
@@ -50,6 +50,8 @@ from app.fitting.constants import (
     OVERLOAD_SOURCE_ATTR_PREFIX,
     ARMOR_RESONANCE_ATTRS, DAMAGE_TYPE_KEYS,
     EFFECT_ADAPTIVE_ARMOR_HARDENER, EFFECT_POWER_BOOSTER, NON_RACK_SLOTS,
+    EFFECT_MWD, EFFECT_AFTERBURNER, ATTR_SPEED_FACTOR, ATTR_SPEED_BOOST_FACTOR,
+    ATTR_MASS_ADDITION, ATTR_SIG_RADIUS_BONUS, ATTR_SIG_RADIUS,
     ATTR_FIGHTER_CAPACITY, ATTR_FIGHTER_TUBES, ATTR_FIGHTER_LIGHT_SLOTS,
     ATTR_FIGHTER_SUPPORT_SLOTS, ATTR_FIGHTER_HEAVY_SLOTS,
     ATTR_FIGHTER_ATTACK_MULT, ATTR_FIGHTER_ATTACK_EM, ATTR_FIGHTER_ATTACK_THERMAL,
@@ -151,9 +153,11 @@ EFFECT_CAT_OVERLOAD = 5
 
 # Categories whose modifiers apply as soon as the module is online. Category 1
 # (active) belongs here because this engine models a fit as "everything that
-# can be running, is" — a hardener's resonance effect (5231), a tracking
-# computer's bonus (4559) and an afterburner's speed boost are all category 1,
-# and a fitting tool that dropped them would show no resists and no speed.
+# can be running, is" — a hardener's resonance effect (5231) and a tracking
+# computer's bonus (4559) are category 1, and a fitting tool that dropped them
+# would show no resists. An afterburner or microwarpdrive is also category 1
+# but its effect has no modifier rows at all; its mass, speed and signature
+# are computed in code (see `_running_propulsion`).
 #
 # Overload (5) is deliberately absent: those modifiers target the module's own
 # attributes and only fire when the pilot overheats that specific module, so
@@ -524,6 +528,23 @@ async def _get_types_with_effect(
         .where(SDETypeEffect.effect_id == effect_id)
     )
     return {row[0] for row in result.fetchall()}
+
+
+def _running_propulsion(
+    enriched_fitted: list[tuple[dict, dict]], prop_type_ids: set[int],
+) -> tuple[dict, dict] | None:
+    """The one afterburner / microwarpdrive that is running, or None.
+
+    The propulsion group has maxGroupActive 1, so only one can run at a time.
+    There is no per-module "active" state yet, so the FIRST online propulsion
+    module in item order is taken as the running one (owner's decision); a
+    real active toggle replaces this later. `enriched_fitted` is already
+    online-only, so an offline module never qualifies.
+    """
+    for item, attrs in enriched_fitted:
+        if item["type_id"] in prop_type_ids:
+            return item, attrs
+    return None
 
 
 def _apply_modifier(attrs: dict[int, float], target_attr: int, operator: int, value: float):
@@ -2045,6 +2066,23 @@ async def calculate_fitting_stats(
     # in that group and therefore unpenalised.
     rah_collectors: dict[int, list[float]] = defaultdict(list)
 
+    # Afterburner / microwarpdrive: effects 6731 / 6730 have no modifier rows,
+    # so mass and signature are fed in here and the speed is applied after
+    # Step 2 once the final mass is known. The per-item attrs already carry
+    # Acceleration Control and overheat.
+    mwd_type_ids = await _get_types_with_effect(db, module_type_ids, EFFECT_MWD)
+    ab_type_ids = await _get_types_with_effect(db, module_type_ids, EFFECT_AFTERBURNER)
+    running_prop = _running_propulsion(enriched_fitted, mwd_type_ids | ab_type_ids)
+    if running_prop is not None:
+        prop_item, prop_attrs = running_prop
+        mass_add = prop_attrs.get(ATTR_MASS_ADDITION, 0)
+        if mass_add:
+            mod_collectors[ATTR_MASS].append((OP_MOD_ADD, mass_add))
+        if prop_item["type_id"] in mwd_type_ids:
+            sig_bonus = prop_attrs.get(ATTR_SIG_RADIUS_BONUS, 0)
+            if sig_bonus:
+                mod_collectors[ATTR_SIG_RADIUS].append((OP_POST_PERCENT, sig_bonus))
+
     for item, mod_attrs in enriched_fitted:
         tid = item["type_id"]
         qty = item.get("quantity", 1)
@@ -2170,6 +2208,27 @@ async def calculate_fitting_stats(
         modified_attrs[attr_id] = (
             modified_attrs.get(attr_id, 1.0) * apply_stacking_penalties(resonances)
         )
+
+    # Propulsion speed (Pyfa's runTime 'late' handler): the final modified
+    # mass, including this module's own massAddition and any plates, is the
+    # divisor. The factor is stacking-penalised in its OWN group, so it is
+    # applied here rather than put in `mod_collectors[37]`, where it would be
+    # penalised together with overdrives and nanofibers. A one-element list is
+    # unpenalised; the call keeps the group semantic explicit.
+    if running_prop is not None:
+        _, prop_attrs = running_prop
+        final_mass = modified_attrs.get(ATTR_MASS, 0)
+        if final_mass > 0:
+            thrust = (
+                prop_attrs.get(ATTR_SPEED_FACTOR, 0)
+                * prop_attrs.get(ATTR_SPEED_BOOST_FACTOR, 0)
+                / final_mass / 100.0
+            )
+            if thrust:
+                modified_attrs[ATTR_MAX_VELOCITY] = (
+                    modified_attrs.get(ATTR_MAX_VELOCITY, 0)
+                    * apply_stacking_penalties([1.0 + thrust])
+                )
 
     # ── Step 3: Calculate resource usage (from module attributes) ─────────
     cpu_used = 0.0
