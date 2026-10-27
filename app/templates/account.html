@@ -155,7 +155,7 @@
            Desktop ignores is-expanded and shows every group open. #}
         {% set on_count = items | selectattr(0, 'in', notify['chosen']) | list | length %}
         <fieldset class="acct-discord-group">
-          <legend class="b-label"><span>{{ group }}</span><button type="button" class="m-only acct-discord-toggle" data-click="toggleExpanded" data-toggle-target=".acct-discord-group"><b>{{ on_count }}</b><span aria-hidden="true">/{{ items | length }}</span><span class="visually-hidden"> of {{ items | length }} {{ group }} alerts on</span></button></legend>
+          <legend class="b-label"><span>{{ group }}</span><button type="button" class="m-only acct-discord-toggle" data-click="toggleExpanded" data-toggle-target=".acct-discord-group"><b>{{ on_count }}</b><span aria-hidden="true">/{{ items | length }}</span><span class="visually-hidden"> of {{ items | length }} on</span></button></legend>
           {% for key, label in items %}
             <label class="acct-discord-check">
               <input type="checkbox" name="alert_types" value="{{ key }}" class="b-check" {% if key in notify['chosen'] %}checked{% endif %}> {{ label }}
