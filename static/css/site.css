@@ -3013,6 +3013,24 @@
        rule makes taller; centre its text in that height. */
     .acct-char-stat > .b-btn { display: inline-flex; align-items: center; }
 
+    /* Discord alerts (ISS-146): each alert group is one 44px row, its name
+       and the m-only "2/6" count (toggleExpanded on the group), and opens to
+       its checkboxes. Always starts closed. The whole row is the tap target,
+       as for the cards above. Desktop is untouched: the button is m-only and
+       is-expanded is ignored there. */
+    .acct-discord-group { position: relative; }
+    .acct-discord-group > legend { display: flex; align-items: center; width: 100%; min-height: 44px; margin-bottom: 0; }
+    .acct-discord-toggle {
+        display: flex; align-items: center; gap: 0.15rem; flex: none; min-width: 44px; margin: 0 0 0 auto; padding: 0;
+        background: none; border: none; font-family: inherit; font-size: var(--fs-sm);
+        letter-spacing: var(--ls-wider); color: var(--muted); cursor: pointer;
+    }
+    .acct-discord-toggle::before { content: ""; position: absolute; inset: 0; }
+    .acct-discord-toggle b { color: var(--accent); font-weight: 600; }
+    .acct-discord-toggle::after { content: "▸"; content: "▸" / ""; margin-left: 0.5rem; color: var(--muted); }
+    .acct-discord-group.is-expanded .acct-discord-toggle::after { content: "▾"; content: "▾" / ""; }
+    .acct-discord-group:not(.is-expanded) > .acct-discord-check { display: none; }
+
     /* Permission picker (D18 A): every card stays, the "unlocks" chips go.
        CSS only: the picker also serves the logged-out sign-up flow, where
        actions.js isn't loaded. The chips were also what made it scroll
