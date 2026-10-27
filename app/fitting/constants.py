@@ -63,6 +63,8 @@ ATTR_SHIELD_BONUS = 68           # shield HP per cycle (shield boosters)
 
 # Weapon / damage attributes
 ATTR_DAMAGE_MULTIPLIER = 64    # turret/drone damage multiplier
+ATTR_DAMAGE_MULTIPLIER_BONUS = 292   # skill-side per-level % bonus to the above (NOT 64)
+EFFECT_DRONE_DMG_BONUS = 1730        # droneDmgBonus: on the drone size/specialization skills; 0 modifier rows
 ATTR_RATE_OF_FIRE = 51         # turret/launcher ROF (ms) — "speed" attribute
 
 # Character-level damage multiplier — BCU sets this via ItemModifier(charID).
