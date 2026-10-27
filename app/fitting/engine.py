@@ -58,7 +58,7 @@ from app.fitting.constants import (
     ATTR_FIGHTER_MISSILE_MULT, ATTR_FIGHTER_MISSILE_EM, ATTR_FIGHTER_MISSILE_THERMAL,
     ATTR_FIGHTER_MISSILE_KINETIC, ATTR_FIGHTER_MISSILE_EXPLOSIVE,
     ATTR_FIGHTER_MISSILE_DURATION,
-    SKILL_FIGHTER_HANGAR_MANAGEMENT,
+    SKILL_FIGHTER_HANGAR_MANAGEMENT, ATTR_CARGO_CAPACITY,
     ATTR_CAPACITOR_BONUS, ATTR_CHARGED_ARMOR_DAMAGE_MULTIPLIER,
     CHARGE_GROUP_ATTRS,
     ATTR_DMG_MULT_BONUS_PER_CYCLE, ATTR_DMG_MULT_BONUS_MAX,
@@ -1565,13 +1565,21 @@ async def calculate_fitting_stats(
     """
     # Get raw ship attributes — mass/capacity from invTypes if not in dogma
     ship_attrs = await get_type_dogma_attrs(db, ship_type_id)
-    if ATTR_MASS not in ship_attrs or ship_attrs[ATTR_MASS] == 0:
+    # Cargo capacity (attribute 38) is on no ship's dogma rows, only in the type
+    # table, so without this the Cargo stat read 0 for every hull (ISS-154).
+    # Taken before the ship-self passes so cargo rigs, expanders and hauler
+    # skills have a real base to modify.
+    if (ATTR_MASS not in ship_attrs or ship_attrs[ATTR_MASS] == 0
+            or not ship_attrs.get(ATTR_CARGO_CAPACITY)):
         type_result = await db.execute(
-            select(SDEType.mass).where(SDEType.type_id == ship_type_id)
+            select(SDEType.mass, SDEType.capacity).where(SDEType.type_id == ship_type_id)
         )
-        type_mass = type_result.scalar_one_or_none()
-        if type_mass:
-            ship_attrs[ATTR_MASS] = type_mass
+        type_row = type_result.first()
+        if type_row is not None:
+            if (ATTR_MASS not in ship_attrs or ship_attrs[ATTR_MASS] == 0) and type_row.mass:
+                ship_attrs[ATTR_MASS] = type_row.mass
+            if not ship_attrs.get(ATTR_CARGO_CAPACITY) and type_row.capacity:
+                ship_attrs[ATTR_CARGO_CAPACITY] = type_row.capacity
 
     # Modifiers to the ship's OWN attributes from everything that is not a
     # fitted module — fitting skills, implants, boosters, hull and subsystem
