@@ -74,6 +74,7 @@ from app.fitting.constants import (
 # Default skill level assumption (used as fallback when no character is
 # selected — models the EVE-standard "All V" fitting target).
 DEFAULT_SKILL_LEVEL = 5
+CATEGORY_SKILL = 16                     # SDE category of skills
 ATTR_SKILL_LEVEL = 280  # skillLevel: what a class skill feeds into a hull bonus
 
 
@@ -1505,6 +1506,44 @@ def dps_cache_key(
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+async def _collect_ship_self_skill_bonuses(
+    db: AsyncSession,
+    ship_attrs: dict[int, float],
+    skill_levels: dict[int, int] | None,
+    ship_mods: dict[int, list[tuple[int, float]]],
+) -> None:
+    """Record every skill's bonus to the ship's own attributes in `ship_mods`.
+
+    Rows are ItemModifier on shipID from a published skill, bar those whose
+    source is the skill-level attribute (ATTR_SKILL_LEVEL): those carry a
+    hull skill's per-level trait and are scaled by the hull-bonus code. Only
+    attributes the hull actually has are touched. The value is the skill's
+    source attribute times its level, and the operator is the row's own.
+    """
+    result = await db.execute(
+        select(SDEModifier.modified_attribute_id, SDEModifier.modifying_attribute_id,
+               SDEModifier.operator, SDETypeEffect.type_id)
+        .join(SDETypeEffect, SDETypeEffect.effect_id == SDEModifier.effect_id)
+        .join(SDEType, SDEType.type_id == SDETypeEffect.type_id)
+        .where(SDEType.category_id == CATEGORY_SKILL)
+        .where(SDEType.published.is_(True))
+        .where(SDEModifier.func == "ItemModifier")
+        .where(SDEModifier.domain == "shipID")
+        .where(SDEModifier.modifying_attribute_id != ATTR_SKILL_LEVEL)
+    )
+    rows = [r for r in result.fetchall() if r.modified_attribute_id in ship_attrs]
+    if not rows:
+        return
+    skill_ids = sorted({r.type_id for r in rows})
+    skill_attrs = await get_types_dogma_attrs(db, skill_ids)
+    for r in sorted(rows, key=lambda r: (r.type_id, r.modified_attribute_id)):
+        lvl = DEFAULT_SKILL_LEVEL if skill_levels is None else skill_levels.get(r.type_id, 0)
+        src = skill_attrs.get(r.type_id, {}).get(r.modifying_attribute_id)
+        if not lvl or src is None:
+            continue
+        ship_mods[r.modified_attribute_id].append((r.operator, src * lvl))
+
+
 async def calculate_fitting_stats(
     db: AsyncSession, ship_type_id: int, items: list[dict],
     damage_profile: str = "uniform",
@@ -1663,28 +1702,18 @@ async def calculate_fitting_stats(
     # implant or hull bonus changed a type-level dict nothing read any more
     # and DPS, rep and application figures lost every one of them; only
     # charges (read from charge_attrs_map directly) kept theirs.
-    # ── Apply fitting-skill bonuses to ship attributes ────────────────────
-    # These core skills use ItemModifier with domain=shipID to add +5% per
-    # level to the ship's own CPU/PG/HP attributes. They're applied outside
-    # the dogma modifier graph because the graph doesn't target the ship's
-    # own attrs (only modules/drones/charges).  When `skill_levels` is
-    # supplied, each bonus scales by the character's actual level in that
-    # specific skill; otherwise All V (× 1.25) is assumed. Collected rather
-    # than applied, so an extender's or plate's flat add lands first.
-    _FITTING_SKILLS_FIVE_PCT = [
-        (3426, ATTR_CPU_OUTPUT),       # CPU Management
-        (3413, ATTR_POWER_OUTPUT),     # Power Grid Management
-        (3419, ATTR_SHIELD_HP),        # Shield Management
-        (3394, ATTR_ARMOR_HP),         # Hull Upgrades
-        (3392, ATTR_HP),               # Mechanics
-        # Fighter Hangar Management: effect 6570 is an ItemModifier on the
-        # ship, source attr 2340 = 5.0 (verified 2026-10-23), so 5% per level.
-        (SKILL_FIGHTER_HANGAR_MANAGEMENT, ATTR_FIGHTER_CAPACITY),
-    ]
-    for skill_id, attr_id in _FITTING_SKILLS_FIVE_PCT:
-        lvl = DEFAULT_SKILL_LEVEL if skill_levels is None else skill_levels.get(skill_id, 0)
-        if lvl:
-            ship_mods[attr_id].append((OP_POST_PERCENT, 5.0 * lvl))
+    # ── Apply skill bonuses to the ship's own attributes ──────────────────
+    # A skill's ItemModifier on shipID changes the hull itself: CPU and Power
+    # Grid Management, Shield Management, Hull Upgrades, Mechanics, Navigation
+    # (speed), Evasive Maneuvering and Spaceship Command (agility), Capacitor
+    # Management and Capacitor Systems Operation, Long Range Targeting,
+    # Signature Analysis and so on. They are applied here, outside the
+    # module/charge dogma graph, read straight from the SDE rows (ISS-152; it
+    # was a hardcoded list of six). Each bonus is the skill's own source
+    # attribute times the character's level in THAT skill, or All V when no
+    # character is selected. Collected rather than applied, so an extender's
+    # or plate's flat add lands first, and never stacking-penalised.
+    await _collect_ship_self_skill_bonuses(db, ship_attrs, skill_levels, ship_mods)
 
     # ── Apply All-V weapon/support skill bonuses to module attributes ─────
     # Skills like Surgical Strike, Rapid Firing, etc. have modifiers that
