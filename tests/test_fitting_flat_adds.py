@@ -53,13 +53,15 @@ ATTR_SHIELD_ADD = 9710
 ATTR_ARMOR_ADD = 9711
 ATTR_CAP_ADD = 9712
 ATTR_CAP_IMPLANT_BONUS = 9713
-ATTR_HULL_SHIELD_BONUS = 9714      # named shipBonus*, so per level
+ATTR_HULL_SHIELD_BONUS = 9714      # per level: SKILL_HULL_CLASS feeds skillLevel into it
+SKILL_HULL_CLASS = 9715
 EFF_SHIELD_EXTENDER = 8701
 EFF_ARMOR_PLATE = 8702
 EFF_CAP_BATTERY = 8703
 EFF_CAP_IMPLANT = 8704
 EFF_CAP_SIDE_EFFECT = 8705
 EFF_HULL_SHIELD = 8706
+EFF_HULL_CLASS_SKILL = 8707
 
 EXTENDER_HP = 2600.0
 PLATE_HP = 1600.0
@@ -123,6 +125,12 @@ def _rows(hull_trait=False):
         rows += _attrs(SHIP, {ATTR_HULL_SHIELD_BONUS: HULL_SHIELD_PCT_PER_LEVEL})
         rows += _ship_self(SHIP, EFF_HULL_SHIELD, "shipShieldCapacityBonus",
                            ATTR_SHIELD_HP, ATTR_HULL_SHIELD_BONUS, OP_POST_PERCENT)
+        # The hull's class skill feeds skillLevel (280) into the bonus: that
+        # row, not the attribute's name, is what makes it per level (ISS-150).
+        rows.append(SDEType(type_id=SKILL_HULL_CLASS, type_name="Test Hull Class Skill",
+                            group_id=9422, category_id=16))
+        rows += _ship_self(SKILL_HULL_CLASS, EFF_HULL_CLASS_SKILL, "testHullClassSkill",
+                           ATTR_HULL_SHIELD_BONUS, 280, OP_POST_PERCENT)
     return rows
 
 
@@ -157,7 +165,7 @@ def test_hull_shield_trait_multiplies_after_the_extender():
     """A per-level hull bonus (5% shield HP per level, All V) and Shield
     Management V both scale the extended pool, not the bare hull."""
     stats = _stats([_mid(SHIELD_EXTENDER)], hull_trait=True,
-                   skill_levels={SKILL_SHIELD_MANAGEMENT: 5})
+                   skill_levels={SKILL_SHIELD_MANAGEMENT: 5, SKILL_HULL_CLASS: 5})
     expected = (SHIP_SHIELD_HP + EXTENDER_HP) * FITTING_SKILL_V * (1 + 5 * HULL_SHIELD_PCT_PER_LEVEL / 100)
     assert stats["shield_hp"] == pytest.approx(expected, abs=0.5)
 

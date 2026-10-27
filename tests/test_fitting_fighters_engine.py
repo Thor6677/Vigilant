@@ -54,6 +54,7 @@ A_FSU = 2337                                          # real: Fighter Support Un
 
 EFF_SK_FIGHTERS, EFF_SK_INTERFACING, EFF_SK_SPEC = 8101, 8102, 8103
 EFF_HULL_LVL, EFF_HULL_ROLE, EFF_DDA, EFF_FSU = 8201, 8202, 8301, 8302
+EFF_SK_HULL = 8203
 
 ALL_V = {SK_FIGHTERS: 5, SK_INTERFACING: 5, SK_SPEC: 5}
 NO_SKILLS = {}   # no skill trained: every skill and hull per-level bonus is 0
@@ -126,6 +127,16 @@ def _fighter_rows():
                  for target in (ATTR_FIGHTER_ATTACK_MULT, ATTR_FIGHTER_MISSILE_MULT)]
     rows.append(SDETypeBonus(type_id=HULL_LVL, bonus_value=5.0, is_role_bonus=False,
                              scaling_skill_id=SK_HULL))
+    # SK_HULL feeds skillLevel (280) into the hull's bonus: that link is what
+    # makes it per level, and SK_HULL's level is the one it multiplies by.
+    rows += [SDEType(type_id=SK_HULL, type_name="Test Hull Class Skill",
+                     group_id=9711, category_id=16),
+             SDEEffect(effect_id=EFF_SK_HULL, effect_name="testHullClassSkill",
+                       effect_category=0),
+             SDETypeEffect(type_id=SK_HULL, effect_id=EFF_SK_HULL),
+             SDEModifier(effect_id=EFF_SK_HULL, func="ItemModifier", domain="shipID",
+                         modified_attribute_id=A_HULL_LVL, modifying_attribute_id=280,
+                         operator=OP_POST_PERCENT)]
     rows.append(SDETypeBonus(type_id=HULL_ROLE, bonus_value=100.0, is_role_bonus=True))
 
     # ── modules: a damage amplifier (+10% on 2226) and a support unit ───────
