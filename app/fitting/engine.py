@@ -1451,7 +1451,9 @@ FIGHTER_UNSIZED_MAX = 12  # largest real squadron, for a fighter type with no si
 # change — is what forces every cached value to recompute instead of
 # quietly serving a number from before the change.
 # 2: fighters (squadron DPS, launch accounting, Fighter Hangar Management).
-FITTING_ENGINE_VERSION = "2"
+# 3: ISS-141, ISS-142 and ISS-150 changed DPS, drone damage and optimal range
+#    for existing fits (hull-bonus scaling) without a bump; this one covers all three.
+FITTING_ENGINE_VERSION = "3"
 
 
 def dps_cache_key(
