@@ -120,7 +120,8 @@ def test_afterburner_is_not_stacking_penalised_with_an_overdrive():
 
 
 def test_only_the_first_propulsion_module_applies():
-    """maxGroupActive is 1 and there is no active toggle yet: first in order wins.
+    """maxGroupActive is 1 and no module carries an `active` choice: both rest
+    at the default (active), and the first in item order is the one running.
 
     [AB, MWD] -> AB only: 200 * 2.35 = 470, mass 15e6, signature unchanged.
     [MWD, AB] -> MWD only: 200 * 6 = 1200, signature 600.
@@ -150,3 +151,48 @@ def test_overheated_microwarpdrive():
     stats = _stats([_mid(MWD, overheated=True)])
     assert stats["max_velocity"] == pytest.approx(1700.0, abs=0.5)
     assert stats["sig_radius"] == pytest.approx(600.0, abs=0.1)
+
+
+def test_explicit_active_choice_beats_item_order():
+    """Choosing a module makes it the running one, whatever its position.
+
+    With the group limit seeded (maxGroupActive 1, as in the real SDE) the
+    resolver keeps the module the user switched on and rests the default one.
+    [AB, MWD active] -> MWD: 1200 m/s, signature 600.
+    [AB active:false, MWD] -> MWD (the AB is held online).
+    [AB, MWD active:false] -> AB.
+    """
+    def run(items):
+        async def _calc(db):
+            return await calculate_fitting_stats(db, SHIP, items)
+        rows = _rows_with_extras()
+        rows += [SDETypeDogmaAttribute(type_id=t, attribute_id=763, value=1.0)
+                 for t in (AFTERBURNER, MWD)]
+        return _Slice().run(_calc, rows=rows)
+
+    mwd_chosen = run([_mid(AFTERBURNER), _mid(MWD, active=True)])
+    assert mwd_chosen["max_velocity"] == pytest.approx(1200.0, abs=0.5)
+    assert mwd_chosen["sig_radius"] == pytest.approx(600.0, abs=0.1)
+    assert mwd_chosen["module_states"] == [0, 1]
+
+    ab_held = run([_mid(AFTERBURNER, active=False), _mid(MWD)])
+    assert ab_held["max_velocity"] == pytest.approx(1200.0, abs=0.5)
+
+    mwd_held = run([_mid(AFTERBURNER), _mid(MWD, active=False)])
+    assert mwd_held["max_velocity"] == pytest.approx(470.0, abs=0.5)
+    assert mwd_held["sig_radius"] == pytest.approx(100.0, abs=0.1)
+
+
+def test_a_propulsion_module_held_at_online_adds_nothing():
+    """Online but not running: no mass, no speed, no signature."""
+    stats = _stats([_mid(MWD, active=False)])
+    assert stats["mass"] == 10_000_000
+    assert stats["max_velocity"] == pytest.approx(200.0, abs=0.5)
+    assert stats["sig_radius"] == pytest.approx(100.0, abs=0.1)
+
+
+def test_without_the_group_limit_the_first_running_module_still_wins():
+    """A seed lacking attribute 763 must still run only one propulsion module."""
+    stats = _stats([_mid(AFTERBURNER, active=False), _mid(MWD), _mid(AFTERBURNER)])
+    assert stats["max_velocity"] == pytest.approx(1200.0, abs=0.5)
+    assert stats["mass"] == 15_000_000

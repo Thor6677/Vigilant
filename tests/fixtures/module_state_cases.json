@@ -1,0 +1,1040 @@
+[
+ {
+  "name": "empty fit",
+  "items": [],
+  "caps": {},
+  "states": [],
+  "warnings": []
+ },
+ {
+  "name": "passive module is online",
+  "items": [
+   {
+    "type_id": 1,
+    "slot": "low"
+   }
+  ],
+  "caps": {
+   "1": {
+    "can_activate": false,
+    "can_overheat": false,
+    "default_active": false,
+    "group_id": null,
+    "max_group_active": 0
+   }
+  },
+  "states": [
+   0
+  ],
+  "warnings": []
+ },
+ {
+  "name": "activatable defaults to active",
+  "items": [
+   {
+    "type_id": 1,
+    "slot": "mid"
+   }
+  ],
+  "caps": {
+   "1": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": null,
+    "max_group_active": 0
+   }
+  },
+  "states": [
+   1
+  ],
+  "warnings": []
+ },
+ {
+  "name": "online-resting type defaults to online",
+  "items": [
+   {
+    "type_id": 1,
+    "slot": "mid"
+   }
+  ],
+  "caps": {
+   "1": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": false,
+    "group_id": null,
+    "max_group_active": 0
+   }
+  },
+  "states": [
+   0
+  ],
+  "warnings": []
+ },
+ {
+  "name": "explicit active true on online-resting type",
+  "items": [
+   {
+    "type_id": 1,
+    "slot": "mid",
+    "active": true
+   }
+  ],
+  "caps": {
+   "1": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": false,
+    "group_id": null,
+    "max_group_active": 0
+   }
+  },
+  "states": [
+   1
+  ],
+  "warnings": []
+ },
+ {
+  "name": "explicit active false beats default active",
+  "items": [
+   {
+    "type_id": 1,
+    "slot": "mid",
+    "active": false
+   }
+  ],
+  "caps": {
+   "1": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": null,
+    "max_group_active": 0
+   }
+  },
+  "states": [
+   0
+  ],
+  "warnings": []
+ },
+ {
+  "name": "offline wins over everything",
+  "items": [
+   {
+    "type_id": 1,
+    "slot": "mid",
+    "online": false,
+    "active": true,
+    "overheated": true
+   }
+  ],
+  "caps": {
+   "1": {
+    "can_activate": true,
+    "can_overheat": true,
+    "default_active": true,
+    "group_id": null,
+    "max_group_active": 0
+   }
+  },
+  "states": [
+   -1
+  ],
+  "warnings": []
+ },
+ {
+  "name": "offline passive module",
+  "items": [
+   {
+    "type_id": 1,
+    "slot": "low",
+    "online": false
+   }
+  ],
+  "caps": {
+   "1": {
+    "can_activate": false,
+    "can_overheat": false,
+    "default_active": false,
+    "group_id": null,
+    "max_group_active": 0
+   }
+  },
+  "states": [
+   -1
+  ],
+  "warnings": []
+ },
+ {
+  "name": "active flag ignored on module that cannot activate",
+  "items": [
+   {
+    "type_id": 1,
+    "slot": "low",
+    "active": true
+   }
+  ],
+  "caps": {
+   "1": {
+    "can_activate": false,
+    "can_overheat": false,
+    "default_active": false,
+    "group_id": null,
+    "max_group_active": 0
+   }
+  },
+  "states": [
+   0
+  ],
+  "warnings": []
+ },
+ {
+  "name": "overheated on heatable module",
+  "items": [
+   {
+    "type_id": 1,
+    "slot": "mid",
+    "overheated": true
+   }
+  ],
+  "caps": {
+   "1": {
+    "can_activate": true,
+    "can_overheat": true,
+    "default_active": true,
+    "group_id": null,
+    "max_group_active": 0
+   }
+  },
+  "states": [
+   2
+  ],
+  "warnings": []
+ },
+ {
+  "name": "overheated implies active even when active is false",
+  "items": [
+   {
+    "type_id": 1,
+    "slot": "mid",
+    "overheated": true,
+    "active": false
+   }
+  ],
+  "caps": {
+   "1": {
+    "can_activate": true,
+    "can_overheat": true,
+    "default_active": true,
+    "group_id": null,
+    "max_group_active": 0
+   }
+  },
+  "states": [
+   2
+  ],
+  "warnings": []
+ },
+ {
+  "name": "overheated on online-resting heatable module",
+  "items": [
+   {
+    "type_id": 1,
+    "slot": "mid",
+    "overheated": true
+   }
+  ],
+  "caps": {
+   "1": {
+    "can_activate": true,
+    "can_overheat": true,
+    "default_active": false,
+    "group_id": null,
+    "max_group_active": 0
+   }
+  },
+  "states": [
+   2
+  ],
+  "warnings": []
+ },
+ {
+  "name": "invalid overheat falls back to default active",
+  "items": [
+   {
+    "type_id": 1,
+    "slot": "mid",
+    "overheated": true
+   }
+  ],
+  "caps": {
+   "1": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": null,
+    "max_group_active": 0
+   }
+  },
+  "states": [
+   1
+  ],
+  "warnings": []
+ },
+ {
+  "name": "invalid overheat falls back to explicit false",
+  "items": [
+   {
+    "type_id": 1,
+    "slot": "mid",
+    "overheated": true,
+    "active": false
+   }
+  ],
+  "caps": {
+   "1": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": null,
+    "max_group_active": 0
+   }
+  },
+  "states": [
+   0
+  ],
+  "warnings": []
+ },
+ {
+  "name": "overheated on module that cannot activate stays online",
+  "items": [
+   {
+    "type_id": 1,
+    "slot": "low",
+    "overheated": true
+   }
+  ],
+  "caps": {
+   "1": {
+    "can_activate": false,
+    "can_overheat": true,
+    "default_active": false,
+    "group_id": null,
+    "max_group_active": 0
+   }
+  },
+  "states": [
+   0
+  ],
+  "warnings": []
+ },
+ {
+  "name": "non-boolean active values mean no choice",
+  "items": [
+   {
+    "type_id": 1,
+    "slot": "mid",
+    "active": 1
+   },
+   {
+    "type_id": 1,
+    "slot": "mid",
+    "active": "false"
+   },
+   {
+    "type_id": 1,
+    "slot": "mid",
+    "active": null
+   },
+   {
+    "type_id": 1,
+    "slot": "mid",
+    "active": 0
+   }
+  ],
+  "caps": {
+   "1": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": null,
+    "max_group_active": 0
+   }
+  },
+  "states": [
+   1,
+   1,
+   1,
+   1
+  ],
+  "warnings": []
+ },
+ {
+  "name": "non-boolean active on online-resting type",
+  "items": [
+   {
+    "type_id": 1,
+    "slot": "mid",
+    "active": 1
+   }
+  ],
+  "caps": {
+   "1": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": false,
+    "group_id": null,
+    "max_group_active": 0
+   }
+  },
+  "states": [
+   0
+  ],
+  "warnings": []
+ },
+ {
+  "name": "unknown type is online",
+  "items": [
+   {
+    "type_id": 99,
+    "slot": "mid"
+   }
+  ],
+  "caps": {},
+  "states": [
+   0
+  ],
+  "warnings": []
+ },
+ {
+  "name": "rigs are always online",
+  "items": [
+   {
+    "type_id": 1,
+    "slot": "rig",
+    "online": false
+   }
+  ],
+  "caps": {
+   "1": {
+    "can_activate": false,
+    "can_overheat": false,
+    "default_active": false,
+    "group_id": null,
+    "max_group_active": 0
+   }
+  },
+  "states": [
+   0
+  ],
+  "warnings": []
+ },
+ {
+  "name": "drones cargo and fighters have no state",
+  "items": [
+   {
+    "type_id": 1,
+    "slot": "drone"
+   },
+   {
+    "type_id": 1,
+    "slot": "cargo"
+   },
+   {
+    "type_id": 1,
+    "slot": "fighter"
+   },
+   {
+    "type_id": 1,
+    "slot": "mid"
+   }
+  ],
+  "caps": {
+   "1": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": null,
+    "max_group_active": 0
+   }
+  },
+  "states": [
+   null,
+   null,
+   null,
+   1
+  ],
+  "warnings": []
+ },
+ {
+  "name": "subsystem follows module rules",
+  "items": [
+   {
+    "type_id": 1,
+    "slot": "subsystem",
+    "online": false
+   },
+   {
+    "type_id": 2,
+    "slot": "subsystem"
+   }
+  ],
+  "caps": {
+   "1": {
+    "can_activate": false,
+    "can_overheat": false,
+    "default_active": false,
+    "group_id": null,
+    "max_group_active": 0
+   },
+   "2": {
+    "can_activate": false,
+    "can_overheat": false,
+    "default_active": false,
+    "group_id": null,
+    "max_group_active": 0
+   }
+  },
+  "states": [
+   -1,
+   0
+  ],
+  "warnings": []
+ },
+ {
+  "name": "two copies of one type differ by state",
+  "items": [
+   {
+    "type_id": 1,
+    "slot": "mid",
+    "active": false
+   },
+   {
+    "type_id": 1,
+    "slot": "mid"
+   },
+   {
+    "type_id": 1,
+    "slot": "mid",
+    "overheated": true
+   }
+  ],
+  "caps": {
+   "1": {
+    "can_activate": true,
+    "can_overheat": true,
+    "default_active": true,
+    "group_id": null,
+    "max_group_active": 0
+   }
+  },
+  "states": [
+   0,
+   1,
+   2
+  ],
+  "warnings": []
+ },
+ {
+  "name": "no limit when max_group_active is 0",
+  "items": [
+   {
+    "type_id": 1,
+    "slot": "mid"
+   },
+   {
+    "type_id": 2,
+    "slot": "mid"
+   },
+   {
+    "type_id": 3,
+    "slot": "mid"
+   }
+  ],
+  "caps": {
+   "1": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": 7,
+    "max_group_active": 0
+   },
+   "2": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": 7,
+    "max_group_active": 0
+   },
+   "3": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": 7,
+    "max_group_active": 0
+   }
+  },
+  "states": [
+   1,
+   1,
+   1
+  ],
+  "warnings": []
+ },
+ {
+  "name": "group limit keeps first by item order",
+  "items": [
+   {
+    "type_id": 1,
+    "slot": "mid"
+   },
+   {
+    "type_id": 2,
+    "slot": "mid"
+   }
+  ],
+  "caps": {
+   "1": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": 7,
+    "max_group_active": 1
+   },
+   "2": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": 7,
+    "max_group_active": 1
+   }
+  },
+  "states": [
+   1,
+   0
+  ],
+  "warnings": [
+   "At most 1 module(s) of group 7 can be active at once; 1 set to online."
+  ]
+ },
+ {
+  "name": "explicit choice outranks defaulted module",
+  "items": [
+   {
+    "type_id": 1,
+    "slot": "mid"
+   },
+   {
+    "type_id": 2,
+    "slot": "mid",
+    "active": true
+   }
+  ],
+  "caps": {
+   "1": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": 7,
+    "max_group_active": 1
+   },
+   "2": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": 7,
+    "max_group_active": 1
+   }
+  },
+  "states": [
+   0,
+   1
+  ],
+  "warnings": [
+   "At most 1 module(s) of group 7 can be active at once; 1 set to online."
+  ]
+ },
+ {
+  "name": "explicit overheat outranks defaulted module",
+  "items": [
+   {
+    "type_id": 1,
+    "slot": "mid"
+   },
+   {
+    "type_id": 2,
+    "slot": "mid",
+    "overheated": true
+   }
+  ],
+  "caps": {
+   "1": {
+    "can_activate": true,
+    "can_overheat": true,
+    "default_active": true,
+    "group_id": 7,
+    "max_group_active": 1
+   },
+   "2": {
+    "can_activate": true,
+    "can_overheat": true,
+    "default_active": true,
+    "group_id": 7,
+    "max_group_active": 1
+   }
+  },
+  "states": [
+   0,
+   2
+  ],
+  "warnings": [
+   "At most 1 module(s) of group 7 can be active at once; 1 set to online."
+  ]
+ },
+ {
+  "name": "explicit modules keep item order among themselves",
+  "items": [
+   {
+    "type_id": 1,
+    "slot": "mid",
+    "active": true
+   },
+   {
+    "type_id": 2,
+    "slot": "mid",
+    "active": true
+   },
+   {
+    "type_id": 3,
+    "slot": "mid"
+   }
+  ],
+  "caps": {
+   "1": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": 7,
+    "max_group_active": 2
+   },
+   "2": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": 7,
+    "max_group_active": 2
+   },
+   "3": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": 7,
+    "max_group_active": 2
+   }
+  },
+  "states": [
+   1,
+   1,
+   0
+  ],
+  "warnings": [
+   "At most 2 module(s) of group 7 can be active at once; 1 set to online."
+  ]
+ },
+ {
+  "name": "explicit false does not take a group slot",
+  "items": [
+   {
+    "type_id": 1,
+    "slot": "mid",
+    "active": false
+   },
+   {
+    "type_id": 2,
+    "slot": "mid"
+   }
+  ],
+  "caps": {
+   "1": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": 7,
+    "max_group_active": 1
+   },
+   "2": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": 7,
+    "max_group_active": 1
+   }
+  },
+  "states": [
+   0,
+   1
+  ],
+  "warnings": []
+ },
+ {
+  "name": "offline module does not take a group slot",
+  "items": [
+   {
+    "type_id": 1,
+    "slot": "mid",
+    "online": false
+   },
+   {
+    "type_id": 2,
+    "slot": "mid"
+   }
+  ],
+  "caps": {
+   "1": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": 7,
+    "max_group_active": 1
+   },
+   "2": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": 7,
+    "max_group_active": 1
+   }
+  },
+  "states": [
+   -1,
+   1
+  ],
+  "warnings": []
+ },
+ {
+  "name": "limit counts per group",
+  "items": [
+   {
+    "type_id": 1,
+    "slot": "mid"
+   },
+   {
+    "type_id": 2,
+    "slot": "mid"
+   },
+   {
+    "type_id": 3,
+    "slot": "mid"
+   }
+  ],
+  "caps": {
+   "1": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": 7,
+    "max_group_active": 1
+   },
+   "2": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": 8,
+    "max_group_active": 1
+   },
+   "3": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": 7,
+    "max_group_active": 1
+   }
+  },
+  "states": [
+   1,
+   1,
+   0
+  ],
+  "warnings": [
+   "At most 1 module(s) of group 7 can be active at once; 1 set to online."
+  ]
+ },
+ {
+  "name": "two groups over their limits warn separately",
+  "items": [
+   {
+    "type_id": 1,
+    "slot": "mid"
+   },
+   {
+    "type_id": 2,
+    "slot": "mid"
+   },
+   {
+    "type_id": 3,
+    "slot": "mid"
+   },
+   {
+    "type_id": 4,
+    "slot": "mid"
+   }
+  ],
+  "caps": {
+   "1": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": 7,
+    "max_group_active": 1
+   },
+   "2": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": 8,
+    "max_group_active": 1
+   },
+   "3": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": 7,
+    "max_group_active": 1
+   },
+   "4": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": 8,
+    "max_group_active": 1
+   }
+  },
+  "states": [
+   1,
+   1,
+   0,
+   0
+  ],
+  "warnings": [
+   "At most 1 module(s) of group 7 can be active at once; 1 set to online.",
+   "At most 1 module(s) of group 8 can be active at once; 1 set to online."
+  ]
+ },
+ {
+  "name": "group with no group id is never limited",
+  "items": [
+   {
+    "type_id": 1,
+    "slot": "mid"
+   },
+   {
+    "type_id": 2,
+    "slot": "mid"
+   }
+  ],
+  "caps": {
+   "1": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": null,
+    "max_group_active": 1
+   },
+   "2": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": null,
+    "max_group_active": 1
+   }
+  },
+  "states": [
+   1,
+   1
+  ],
+  "warnings": []
+ },
+ {
+  "name": "limit of two with three defaulted",
+  "items": [
+   {
+    "type_id": 1,
+    "slot": "mid"
+   },
+   {
+    "type_id": 2,
+    "slot": "mid"
+   },
+   {
+    "type_id": 3,
+    "slot": "mid"
+   }
+  ],
+  "caps": {
+   "1": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": 7,
+    "max_group_active": 2
+   },
+   "2": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": 7,
+    "max_group_active": 2
+   },
+   "3": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": 7,
+    "max_group_active": 2
+   }
+  },
+  "states": [
+   1,
+   1,
+   0
+  ],
+  "warnings": [
+   "At most 2 module(s) of group 7 can be active at once; 1 set to online."
+  ]
+ },
+ {
+  "name": "online-resting modules do not fill the limit",
+  "items": [
+   {
+    "type_id": 1,
+    "slot": "mid"
+   },
+   {
+    "type_id": 2,
+    "slot": "mid"
+   }
+  ],
+  "caps": {
+   "1": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": false,
+    "group_id": 7,
+    "max_group_active": 1
+   },
+   "2": {
+    "can_activate": true,
+    "can_overheat": false,
+    "default_active": true,
+    "group_id": 7,
+    "max_group_active": 1
+   }
+  },
+  "states": [
+   0,
+   1
+  ],
+  "warnings": []
+ }
+]

@@ -350,7 +350,7 @@ _LOGIN_ONLY_GETS = (
     "/tools/fitting/ship-slots/587", "/tools/fitting/browse/groups",
     "/tools/fitting/browse/items/1", "/tools/fitting/browse/path/1",
     "/tools/fitting/check-fit?module_type_id=1&ship_type_id=587",
-    "/tools/fitting/can-overheat?type_ids=1", "/tools/fitting/charges/1",
+    "/tools/fitting/module-caps?type_ids=1", "/tools/fitting/charges/1",
     "/tools/fitting/info/587",
     "/intel/gatecheck/systems?q=jita", "/intel/gatecheck/finder",
     "/character/1/can-fly",   # T-072

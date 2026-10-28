@@ -169,6 +169,15 @@ def _rows():
     rows += _attrs(MISSILE, {ATTR_KINETIC_DAMAGE: MISSILE_DAMAGE, ATTR_AOE_CLOUD_SIZE: 100.0})
     rows += [SDEModuleSlot(type_id=LAUNCHER, slot_type="high", is_turret=False,
                            is_launcher=True)]
+    # A module with no activation effect cannot run, so it would rest at
+    # online and neither boost shields nor fire. Real ids: shieldBoosting
+    # (category 1) and missileLaunching (category 2).
+    rows += [
+        SDEEffect(effect_id=4, effect_name="shieldBoosting", effect_category=1),
+        SDETypeEffect(type_id=SHIELD_BOOSTER, effect_id=4),
+        SDEEffect(effect_id=9, effect_name="missileLaunching", effect_category=2),
+        SDETypeEffect(type_id=LAUNCHER, effect_id=9),
+    ]
 
     # ── Blue Pill: slot 1 ───────────────────────────────────────────────────
     rows += _attrs(BLUE_PILL, {

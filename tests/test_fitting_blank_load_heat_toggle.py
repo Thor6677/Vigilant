@@ -15,7 +15,7 @@ Why these specific assertions:
   the init() IIFE, which would silently undo the blank-slate behavior without
   touching anything a human would think to grep for.
 * overheatCache (state toggle capability) is populated by a dedicated
-  /tools/fitting/can-overheat fetch, keyed by type_id. It must be refreshed
+  /tools/fitting/module-caps fetch, keyed by type_id. It must be refreshed
   after every code path that can introduce a NEW type_id into state.items --
   miss one and a module that can be overheated silently shows no overheat
   step. addModule() (search/click) already called it; doImportEFT() and
@@ -151,12 +151,14 @@ def test_clear_fitting_still_clears_both_page_and_saved_state():
 # ── Item 2a: discoverability (tooltips, aria-label, legend) ─────────────
 
 
-def test_state_dot_tooltips_cover_all_four_cases():
+def test_state_dot_tooltips_cover_all_six_cases():
     html = _read()
     render_body = _function_body(html, "renderSlots")
     for expected in [
-        "Online — click to overheat",
+        "Active — click to overheat",
+        "Active — click to offline",
         "Overheated — click to offline",
+        "Online — click to activate",
         "Online — click to offline",
         "Offline — click to online",
     ]:
@@ -189,6 +191,9 @@ def test_slot_layout_has_a_state_legend():
     # unrelated text elsewhere in the page.
     idx = html.index('id="slot-layout"')
     legend_region = html[idx : idx + 1000]
+    assert "active" in legend_region
+    assert "&#9675;" in legend_region      # the hollow ring for online-only
+    assert "flex-wrap" in legend_region
     assert "online" in legend_region
     assert "overheated" in legend_region
     assert "offline" in legend_region

@@ -18,7 +18,7 @@ from tests._mobile import render_page
 from tests.test_fighter_page_logic import NAMES as LOGIC_NAMES, _fn
 
 NAMES = LOGIC_NAMES + ["selectShip", "applyState", "fetchShipSlots", "recalcStats", "renderSlots",
-                       "_resetFighterShipData", "getSlotCount", "getSlotLimit"]
+                       "_resetFighterShipData", "getSlotCount", "getSlotLimit", "moduleStates"]
 
 HARNESS = r"""
 const names = %(names)s;
