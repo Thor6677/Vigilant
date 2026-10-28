@@ -205,6 +205,10 @@
     <span><span style="color:var(--danger);">&#9679;</span> overheated</span>
     <span><span style="color:var(--border);">&#9679;</span> offline</span>
 </div>
+{# Shown on every screen size: the Module Browser panel that holds the other
+   limit notes is collapsed on phones. #}
+<div id="fit-state-note" role="status" aria-live="polite" hidden
+     style="font-size:11px;color:var(--warning, var(--muted));margin-bottom:0.4rem;"></div>
 
 {% for slot_key, slot_label in [("high", "High Slots"), ("med", "Mid Slots"), ("low", "Low Slots"), ("rig", "Rigs"), ("subsystem", "Subsystems")] %}
 <div class="b-section" id="section-{{ slot_key }}" style="display:none;">
@@ -963,7 +967,7 @@ function toggleOnline(index) {
                 state.items[i].overheated = false;
             });
             _limitNote('Only ' + cap.max_group_active + ' of this kind can be active at once · ' +
-                drop + ' set to online');
+                drop + ' set to online', true);
         }
     }
     saveState();
@@ -984,8 +988,10 @@ function _fmtM3(v) {
     return (Math.round(v * 10) / 10).toString();
 }
 
-function _limitNote(text) {
-    ['fit-limit-note', 'drone-limit-note', 'fighter-limit-note'].forEach(function(id) {
+function _limitNote(text, nearLegend) {
+    var ids = ['fit-limit-note', 'drone-limit-note', 'fighter-limit-note'];
+    if (nearLegend || !text) ids.push('fit-state-note');
+    ids.forEach(function(id) {
         var el = document.getElementById(id);
         if (!el) return;
         el.textContent = text;

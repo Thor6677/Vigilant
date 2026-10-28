@@ -27,7 +27,7 @@ global.state = {items: []};
 global.overheatCache = {};
 const notes = [];
 global.saveState = () => {}; global.renderSlots = () => {}; global.recalcStats = () => {};
-global._limitNote = (t) => notes.push(t);
+global._limitNote = (t, near) => notes.push(near ? t + "|near" : t);
 eval(src + '\nglobal.moduleStates = moduleStates; global.toggleOnline = toggleOnline;');
 
 const out = {parity: cases.map((c) => moduleStates(c.items, c.caps)), cycles: {}};
@@ -131,6 +131,15 @@ def test_group_limit_switches_the_other_module_off_with_a_note(result):
     assert g["states"] == [0, 1]
     assert g["items"][0]["active"] is False and g["items"][1]["active"] is True
     assert len(g["notes"]) == 1 and "1" in g["notes"][0]
+    # Shown beside the legend too: the browser panel is collapsed on phones.
+    assert g["notes"][0].endswith("|near")
+
+
+def test_legend_note_element_is_outside_the_collapsed_browser_panel():
+    src = (Path(__file__).parents[1] / "app" / "templates" / "fitting_tool.html").read_text()
+    note = src.index('id="fit-state-note"')
+    assert note > src.index("Module state:")
+    assert note > src.index('id="slot-layout"') > src.index('id="browser-panel"')
 
 
 def test_group_limit_only_demotes_as_many_as_needed(result):
