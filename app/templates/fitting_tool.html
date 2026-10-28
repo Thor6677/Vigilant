@@ -12,7 +12,12 @@
                 title="Check fit against a character's trained skills"
                 style="padding:3px 10px;font-size:10px;border:1px solid var(--border);background:var(--surface);color:var(--muted);font-family:inherit;cursor:pointer;white-space:nowrap;">
             <option value="">All V (default)</option>
-            {# populated via JS on init #}
+            <option value="lvl:4">All skills - Level 4</option>
+            <option value="lvl:3">All skills - Level 3</option>
+            <option value="lvl:2">All skills - Level 2</option>
+            <option value="lvl:1">All skills - Level 1</option>
+            <option value="lvl:0">All skills - Level 0</option>
+            {# characters populated via JS on init #}
         </select>
         <select id="dmg-profile-select" data-change="onProfileChange"
                 title="Drives BOTH defensive EHP (incoming damage type) and offensive resist-weighted DPS (target's resists)"
@@ -1796,6 +1801,7 @@ function recalcStats() {
             ship_type_id: state.shipTypeId,
             items: state.items,
             character_id: charId,
+            skill_preset: getSelectedSkillPreset(),
             damage_profile: profile,
             /* "custom" isn't a target-resist preset — treat the target as
                unresisted (uniform) when custom EHP weights are in play. */
@@ -1832,7 +1838,16 @@ function getSelectedSkillCharId() {
     var sel = document.getElementById('skill-char-select');
     if (!sel) return null;
     var v = sel.value;
-    return v ? parseInt(v, 10) : null;
+    if (!v || v.indexOf('lvl:') === 0) return null;
+    return parseInt(v, 10);
+}
+
+/* "All skills - Level N" preset (value "lvl:N"), or null for All V / a character. */
+function getSelectedSkillPreset() {
+    var sel = document.getElementById('skill-char-select');
+    if (!sel || sel.value.indexOf('lvl:') !== 0) return null;
+    var n = parseInt(sel.value.slice(4), 10);
+    return isNaN(n) ? null : n;
 }
 
 /* GET /tools/fitting/characters is the one query behind every character
@@ -1854,8 +1869,15 @@ function fetchFittingCharacters() {
 function loadSkillCharList() {
     var sel = document.getElementById('skill-char-select');
     if (!sel) return;
+    var saved = '';
+    try { saved = localStorage.getItem(SKILL_CHAR_KEY) || ''; } catch (e) {}
+    /* A preset option is static, so it restores without waiting for the
+       character list (which may be slow or fail). */
+    if (saved.indexOf('lvl:') === 0) {
+        sel.value = saved;
+        if (sel.value === saved) onSkillCharChange();
+    }
     fetchFittingCharacters().then(function(characters) {
-        var saved = localStorage.getItem(SKILL_CHAR_KEY) || '';
         characters.filter(function(c) { return c.has_skills_scope; }).forEach(function(c) {
             var opt = document.createElement('option');
             opt.value = String(c.id);
@@ -1863,17 +1885,19 @@ function loadSkillCharList() {
             if (String(c.id) === saved) opt.selected = true;
             sel.appendChild(opt);
         });
-        if (saved) onSkillCharChange();
+        if (saved && saved.indexOf('lvl:') !== 0) onSkillCharChange();
     });
 }
 
 function onSkillCharChange() {
-    var id = getSelectedSkillCharId();
-    if (id) {
-        localStorage.setItem(SKILL_CHAR_KEY, String(id));
-    } else {
-        localStorage.removeItem(SKILL_CHAR_KEY);
-    }
+    var sel = document.getElementById('skill-char-select');
+    try {
+        if (sel && sel.value) {
+            localStorage.setItem(SKILL_CHAR_KEY, sel.value);
+        } else {
+            localStorage.removeItem(SKILL_CHAR_KEY);
+        }
+    } catch (e) {}
     /* Stats must re-run under the new skill set; warnings too. */
     if (state.shipTypeId) {
         recalcStats();  /* recalcStats also calls refreshSkillWarnings */

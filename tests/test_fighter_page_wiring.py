@@ -44,7 +44,7 @@ global.state = {shipTypeId: 593, items: []};
 global.shipSlots = {high: 8, med: 8, low: 8, rig: 3, subsystem: 0};
 global.saveState = () => {}; global.recalcStats = () => {};
 global.escapeHtml = (s) => String(s);
-global.getSelectedSkillCharId = () => null; global.getSelectedProfile = () => 'uniform';
+global.getSelectedSkillCharId = () => null; global.getSelectedSkillPreset = () => null; global.getSelectedProfile = () => 'uniform';
 global.getCustomWeights = () => null; global.getImplantTypeIds = () => []; global.getBoosterPayload = () => [];
 global._fitCheckOk = (r) => r; global._fitErrorHtml = (s) => 'ERROR ' + s;
 global._syncDroneVolumes = () => {}; global._fitSumBarUpdate = () => {}; global.refreshSkillWarnings = () => {};
