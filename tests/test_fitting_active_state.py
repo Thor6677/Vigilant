@@ -294,6 +294,21 @@ def test_micro_jump_drive_rests_without_drain_and_blooms_unpenalised_when_active
     assert two["sig_radius"] == pytest.approx(625.0, abs=0.05)
 
 
+def test_rack_module_quantity_is_clamped_to_the_slot_count():
+    """A request can carry any `quantity` for a rack module; the per-copy
+    loops must not run once per unit. 8 is the most slots one rack has, so a
+    huge number counts as 8 (1.0 + 1.5 compounds 8 times) and returns."""
+    huge = _mid(MJD, active=True)
+    huge["quantity"] = 10 ** 9
+    eight = _mid(MJD, active=True)
+    eight["quantity"] = 8
+    junk = _mid(MJD, active=True)
+    junk["quantity"] = "many"
+    assert (_stats([huge])["sig_radius"]
+            == pytest.approx(_stats([eight])["sig_radius"], rel=1e-9))
+    assert _stats([junk])["sig_radius"] == pytest.approx(250.0, abs=0.05)
+
+
 def test_micro_jump_field_generator_bloom_is_stacking_penalised():
     """6208 goes through the module collectors: two blooms of x2.5 become
     2.5 * (1 + 1.5 * 0.8691) = 5.759, not 6.25."""

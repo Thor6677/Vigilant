@@ -144,6 +144,12 @@ SKILL_FIGHTER_HANGAR_MANAGEMENT = 24613
 # module-modifier pass, so they stay out of the fitted-module lists.
 NON_RACK_SLOTS = ("drone", "cargo", "fighter")
 
+# A ship has at most 8 slots per rack, so no module type can be fitted more
+# than 8 times. The engine clamps a rack item's `quantity` to this: the
+# per-copy loops (cross-module, booster, signature bloom) would otherwise run
+# once per unit of an attacker-supplied number.
+MAX_RACK_MODULE_COPIES = 8
+
 # ── Module state (offline / online / active / overheated) ────────────────
 # Effect 16 (online) is the one effect every fittable module carries; it is
 # category 4 and is NOT an activation. A module can be switched to ACTIVE only

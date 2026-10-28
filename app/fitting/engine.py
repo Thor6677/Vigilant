@@ -52,7 +52,7 @@ from app.fitting.constants import (
     OVERLOAD_SOURCE_ATTR_PREFIX,
     ARMOR_RESONANCE_ATTRS, DAMAGE_TYPE_KEYS,
     EFFECT_ADAPTIVE_ARMOR_HARDENER, EFFECT_POWER_BOOSTER, NON_RACK_SLOTS,
-    ACTIVATION_EFFECT_CATS, EFFECT_MJD, EFFECT_MJFG, EFFECT_MJFG_CAPITAL,
+    ACTIVATION_EFFECT_CATS, MAX_RACK_MODULE_COPIES, EFFECT_MJD, EFFECT_MJFG, EFFECT_MJFG_CAPITAL,
     ATTR_SIG_RADIUS_BONUS_PERCENT, STATE_ACTIVE, STATE_OVERHEATED,
     EFFECT_MWD, EFFECT_AFTERBURNER, ATTR_SPEED_FACTOR, ATTR_SPEED_BOOST_FACTOR,
     ATTR_MASS_ADDITION, ATTR_SIG_RADIUS_BONUS, ATTR_SIG_RADIUS,
@@ -1684,6 +1684,10 @@ async def calculate_fitting_stats(
     )
     module_states, state_warnings = resolve_states(items, module_caps)
     items = [dict(i, _state=st) for i, st in zip(items, module_states)]
+    for i in items:
+        if i.get("slot") not in NON_RACK_SLOTS:
+            i["quantity"] = min(max(as_int(i.get("quantity", 1)), 1),
+                                MAX_RACK_MODULE_COPIES)
     fitted_items = [i for i in items
                     if i.get("slot") not in NON_RACK_SLOTS
                     and i.get("online", True)]
