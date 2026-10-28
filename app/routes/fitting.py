@@ -15,7 +15,9 @@ from sqlalchemy import select, update
 
 from app.db.models import get_db, UserFitting, UserFittingFolder, Character
 from app.sde import lookup as sde
-from app.fitting.engine import calculate_fitting_stats, get_type_dogma_attrs, dps_cache_key
+from app.fitting.engine import (
+    calculate_fitting_stats, get_type_dogma_attrs, dps_cache_key, preset_skill_levels,
+)
 from app.fitting.compare import build_compare_sections
 from app.fitting.constants import ATTR_CPU, ATTR_POWER, ATTR_UPGRADE_COST, ATTR_DRONE_BW_USED
 from app.fitting.boosters import ATTR_BOOSTERNESS, get_booster_info
@@ -651,6 +653,7 @@ async def fitting_stats(
     character_id = body.get("character_id")
     skill_levels: dict[int, int] | None = None
     character_name: str | None = None
+    skill_preset_label: str | None = None
     if character_id and user_id:
         r = await db.execute(
             select(Character)
@@ -664,6 +667,15 @@ async def fitting_stats(
                 character_name = char.character_name
             except Exception as e:
                 logger.info("fitting_stats: skills fetch failed for %s: %s", character_id, e)
+
+    # Optional "All skills - Level N" preset (ISS-158). A character that
+    # produced skill levels wins; only ints 0-4 count (5 is All V, the
+    # default, so it stays None). _bounded_int rejects 0, so it can't be used.
+    skill_preset = body.get("skill_preset")
+    if (skill_levels is None and isinstance(skill_preset, int)
+            and not isinstance(skill_preset, bool) and 0 <= skill_preset <= 4):
+        skill_levels = await preset_skill_levels(db, int(ship_type_id), skill_preset)
+        skill_preset_label = f"All skills - Level {skill_preset}"
 
     stats = await calculate_fitting_stats(
         db, int(ship_type_id), items, damage_profile,
@@ -680,7 +692,8 @@ async def fitting_stats(
     return templates.TemplateResponse(request, "partials/fitting_stats.html", {"stats": stats,
         "ship_name": ship_name or f"Ship {ship_type_id}",
         "ship_type_id": ship_type_id,
-        "character_name": character_name})
+        "character_name": character_name,
+        "skill_preset_label": skill_preset_label})
 
 
 @router.get("/tools/fitting/ship-slots/{ship_type_id}")

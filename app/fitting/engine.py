@@ -133,6 +133,34 @@ def _linked_skill_level(
     return min(skill_levels.get(sid, 0) for sid in linked_skill_ids)
 
 
+async def preset_skill_levels(
+    db: AsyncSession, ship_type_id: int, level: int,
+) -> dict[int, int]:
+    """skill_levels for an "All skills - Level N" preset (ISS-158).
+
+    Every published skill sits at `level`, except the skills the SHIP itself
+    directly requires, which count as at least level 1 (EVE Workbench does
+    this, so an all-zero preset still pilots the hull). The floor is a flat 1,
+    not the required level, and only the hull's own requirements get it:
+    module, drone and charge skills stay at `level`. Every skill is written
+    out because a missing key reads as 0. Characters and skill_levels=None
+    (All V) never go through here.
+    """
+    skills = await db.execute(
+        select(SDEType.type_id)
+        .where(SDEType.category_id == CATEGORY_SKILL)
+        .where(SDEType.published.is_(True))
+    )
+    levels = {sid: level for (sid,) in skills.fetchall()}
+    reqs = await db.execute(
+        select(SDETypeSkillReq.skill_type_id)
+        .where(SDETypeSkillReq.type_id == ship_type_id)
+    )
+    for (sid,) in reqs.fetchall():
+        levels[sid] = max(level, 1)
+    return levels
+
+
 # CCP JSONL SDE operator IDs (0-indexed from "operation" field in modifierInfo)
 OP_PRE_ASSIGN = -1   # Override base value
 OP_PRE_MUL = 0       # Multiply before additions

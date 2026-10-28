@@ -29,8 +29,8 @@
         </span>
         {% endif %}
     </div>
-    <span style="font-size:9px;color:{{ 'var(--accent)' if character_name else 'var(--muted)' }};">
-        {% if character_name %}as {{ character_name }}{% else %}All V{% endif %}
+    <span style="font-size:9px;color:{{ 'var(--accent)' if (character_name or skill_preset_label) else 'var(--muted)' }};">
+        {% if character_name %}as {{ character_name }}{% elif skill_preset_label %}{{ skill_preset_label }}{% else %}All V{% endif %}
     </span>
 </div>
 

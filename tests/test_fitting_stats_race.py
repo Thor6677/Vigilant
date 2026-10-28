@@ -22,7 +22,7 @@ const panel = {innerHTML: ''};
 const pending = [];
 global.document = {getElementById: (id) => id === 'stats-panel' ? panel : null};
 global.state = {shipTypeId: 593, items: []};
-global.getSelectedSkillCharId = () => null; global.getSelectedProfile = () => 'uniform';
+global.getSelectedSkillCharId = () => null; global.getSelectedSkillPreset = () => null; global.getSelectedProfile = () => 'uniform';
 global.getCustomWeights = () => null; global.getImplantTypeIds = () => []; global.getBoosterPayload = () => [];
 global._fitCheckOk = (r) => r;
 global._fitErrorHtml = (s) => 'ERROR ' + s;
