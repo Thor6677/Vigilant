@@ -20,6 +20,7 @@ from typing import NamedTuple
 from sqlalchemy import select, text
 
 from app.fitting.cap_sim import simulate_cap
+from app.fitting.module_state import get_module_caps, resolve_states
 from app.fitting.boosters import apply_booster_bonuses
 from app.fitting.fighters import as_int
 from app.sde.lookup import get_fighter_info_bulk
@@ -51,6 +52,8 @@ from app.fitting.constants import (
     OVERLOAD_SOURCE_ATTR_PREFIX,
     ARMOR_RESONANCE_ATTRS, DAMAGE_TYPE_KEYS,
     EFFECT_ADAPTIVE_ARMOR_HARDENER, EFFECT_POWER_BOOSTER, NON_RACK_SLOTS,
+    ACTIVATION_EFFECT_CATS, MAX_RACK_MODULE_COPIES, EFFECT_MJD, EFFECT_MJFG, EFFECT_MJFG_CAPITAL,
+    ATTR_SIG_RADIUS_BONUS_PERCENT, STATE_ACTIVE, STATE_OVERHEATED,
     EFFECT_MWD, EFFECT_AFTERBURNER, ATTR_SPEED_FACTOR, ATTR_SPEED_BOOST_FACTOR,
     ATTR_MASS_ADDITION, ATTR_SIG_RADIUS_BONUS, ATTR_SIG_RADIUS,
     ATTR_FIGHTER_CAPACITY, ATTR_FIGHTER_TUBES, ATTR_FIGHTER_LIGHT_SLOTS,
@@ -297,6 +300,14 @@ def _apply_self_modifiers(attrs: dict[int, float], rows: list[tuple[int, int, in
     """
     for target_attr, source_attr, operator in rows:
         source_val = attrs.get(source_attr)
+        if operator == OP_POST_ASSIGN:
+            # Assault Damage Control's activation effect (7012) copies its
+            # "active" resist values onto the resist attributes its passive
+            # effect then reads. An assignment of zero is a real value, and
+            # the target need not exist yet, so it skips the guards below.
+            if source_val is not None:
+                attrs[target_attr] = source_val
+            continue
         if source_val is None or source_val == 0:
             continue
         if target_attr not in attrs and target_attr != ATTR_DAMAGE_MULTIPLIER:
@@ -443,22 +454,29 @@ async def _get_module_modifiers(
 
     Returns {type_id: [modifier_dicts]} where each modifier has:
       modified_attribute_id, modifying_attribute_id, operator, func,
-      filter_type, filter_value
+      filter_type, filter_value, effect_category
+
+    ``effect_category`` lets the caller gate per copy: a category-1 (active)
+    row applies only while that copy is running, categories 0 and 4 whenever
+    it is online.
     """
     if not type_ids:
         return {}
 
     # Get passive effects for these types
     result = await db.execute(
-        select(SDETypeEffect.type_id, SDETypeEffect.effect_id)
+        select(SDETypeEffect.type_id, SDETypeEffect.effect_id,
+               SDEEffect.effect_category)
         .join(SDEEffect, SDETypeEffect.effect_id == SDEEffect.effect_id)
         .where(SDETypeEffect.type_id.in_(type_ids))
         .where(SDEEffect.effect_category.in_(MODULE_EFFECT_CATS))
     )
     type_effects: dict[int, list[int]] = defaultdict(list)
+    effect_category: dict[int, int] = {}
     all_effect_ids = set()
     for row in result.fetchall():
         type_effects[row.type_id].append(row.effect_id)
+        effect_category[row.effect_id] = row.effect_category
         all_effect_ids.add(row.effect_id)
 
     if not all_effect_ids:
@@ -480,6 +498,7 @@ async def _get_module_modifiers(
             "domain": m.domain,
             "filter_type": m.filter_type,
             "filter_value": m.filter_value,
+            "effect_category": effect_category.get(m.effect_id),
         })
 
     # Map back to type_ids
@@ -537,6 +556,57 @@ async def _get_self_modifiers(
     return out
 
 
+async def _get_activation_self_modifiers(
+    db: AsyncSession, type_ids: list[int],
+) -> dict[int, list[tuple[int, int, int]]]:
+    """A module's own rows from its ACTIVATION effects (categories 1-3).
+
+    Same shape as ``_get_self_modifiers``: domain itemID, ItemModifier, but
+    taken from the effects a module runs only while active, and without the
+    overload rows (those apply on heat, not on activation). Today this is
+    Assault Damage Control (effect 7012), which assigns its active resist
+    values onto its own attributes for its passive effect to hand to the ship.
+    """
+    if not type_ids:
+        return {}
+    result = await db.execute(
+        select(SDETypeEffect.type_id, SDEModifier.modified_attribute_id,
+               SDEModifier.modifying_attribute_id, SDEModifier.operator,
+               SDEDogmaAttribute.attribute_name)
+        .join(SDEEffect, SDEEffect.effect_id == SDETypeEffect.effect_id)
+        .join(SDEModifier, SDEModifier.effect_id == SDETypeEffect.effect_id)
+        .outerjoin(
+            SDEDogmaAttribute,
+            SDEDogmaAttribute.attribute_id == SDEModifier.modifying_attribute_id,
+        )
+        .where(SDETypeEffect.type_id.in_(type_ids))
+        .where(SDEEffect.effect_category.in_(ACTIVATION_EFFECT_CATS))
+        .where(SDEModifier.domain == DOMAIN_SELF)
+        .where(SDEModifier.func == "ItemModifier")
+    )
+    out: dict[int, list[tuple[int, int, int]]] = defaultdict(list)
+    for row in result.fetchall():
+        if (row.attribute_name or "").startswith(OVERLOAD_SOURCE_ATTR_PREFIX):
+            continue
+        out[row.type_id].append(
+            (row.modified_attribute_id, row.modifying_attribute_id, row.operator)
+        )
+    return out
+
+
+def _is_running(item: dict) -> bool:
+    """True when this copy is switched on: ACTIVE or OVERHEATED.
+
+    ``_state`` is put on every item by calculate_fitting_stats (resolved once
+    per calculation); None means drone / cargo / fighter, which have no module
+    state. Cap use, active tank, weapon fire and the reactive hardener's
+    resists all hang off this, while CPU/PG and passive effects stay
+    online-only.
+    """
+    state = item.get("_state")
+    return state is not None and state >= STATE_ACTIVE
+
+
 async def _get_types_with_effect(
     db: AsyncSession, type_ids: list[int], effect_id: int,
 ) -> set[int]:
@@ -563,13 +633,13 @@ def _running_propulsion(
     """The one afterburner / microwarpdrive that is running, or None.
 
     The propulsion group has maxGroupActive 1, so only one can run at a time.
-    There is no per-module "active" state yet, so the FIRST online propulsion
-    module in item order is taken as the running one (owner's decision); a
-    real active toggle replaces this later. `enriched_fitted` is already
-    online-only, so an offline module never qualifies.
+    The first propulsion module in item order whose state is ACTIVE or above
+    is taken as the running one; the state resolver already keeps the group to
+    its limit, and this keeps it to one even where the limit attribute is
+    missing. A module held at online (or offline) never qualifies.
     """
     for item, attrs in enriched_fitted:
-        if item["type_id"] in prop_type_ids:
+        if item["type_id"] in prop_type_ids and _is_running(item):
             return item, attrs
     return None
 
@@ -1361,6 +1431,7 @@ async def _build_item_attrs(
     charge_rows = await _get_self_modifiers(
         db, charge_type_ids, DOMAIN_PARENT_MODULE, overload_only=False,
     )
+    activation_rows = await _get_activation_self_modifiers(db, slotted_type_ids)
     rah_type_ids = await _get_types_with_effect(
         db, slotted_type_ids, EFFECT_ADAPTIVE_ARMOR_HARDENER,
     )
@@ -1395,6 +1466,9 @@ async def _build_item_attrs(
         # it still gets its own dict so downstream code can treat all items
         # uniformly.
         if item.get("online", True):
+            # Charge effects are gated at ONLINE, not at ACTIVE. Known
+            # divergence: pyfa applies an active-type charge effect only once
+            # the module is active. Nothing in the live SDE depends on it yet.
             charge_type_id = item.get("charge_type_id")
             if charge_type_id:
                 _apply_charge_to_module(
@@ -1427,7 +1501,14 @@ async def _build_item_attrs(
                         f"reactive armor hardener"
                     )
 
-            if item.get("overheated"):
+            state = item.get("_state")
+            if state is not None and state >= STATE_ACTIVE:
+                _apply_self_modifiers(attrs, activation_rows.get(type_id, []))
+
+            # Heat only when the resolved state is OVERHEATED: an overheated
+            # flag on a module that cannot be overheated, or that is held at
+            # online, does nothing.
+            if state == STATE_OVERHEATED:
                 _apply_self_modifiers(attrs, overload_rows.get(type_id, []))
 
         enriched.append((item, attrs))
@@ -1480,7 +1561,11 @@ FIGHTER_UNSIZED_MAX = 12  # largest real squadron, for a fighter type with no si
 #    for existing fits (hull-bonus scaling) without a bump; this one covers all three.
 #    ISS-157 rides along: drone size and specialization skills were never
 #    applied to drone damage.
-FITTING_ENGINE_VERSION = "3"
+# 4: ISS-156 module active state. Cynosural fields, cloaks, signature
+#    suppressors, micro jump drives and the like now rest at online as pyfa has
+#    them, so speed, signature, scan resolution and cap use change for existing
+#    fits; turrets, repairers and other cap users count only while running.
+FITTING_ENGINE_VERSION = "4"
 
 
 def dps_cache_key(
@@ -1590,6 +1675,19 @@ async def calculate_fitting_stats(
 
     # Collect all module type IDs (excluding drones, cargo and fighters)
     # Only online modules contribute to fitting (offline modules skip CPU/PG/effects)
+    #
+    # Module state (offline / online / active / overheated) is resolved ONCE
+    # here and rides on shallow per-position copies as `_state`, so every site
+    # below reads the same answer and two copies of one type can differ.
+    module_caps = await get_module_caps(
+        db, {i["type_id"] for i in items if i.get("slot") not in NON_RACK_SLOTS},
+    )
+    module_states, state_warnings = resolve_states(items, module_caps)
+    items = [dict(i, _state=st) for i, st in zip(items, module_states)]
+    for i in items:
+        if i.get("slot") not in NON_RACK_SLOTS:
+            i["quantity"] = min(max(as_int(i.get("quantity", 1)), 1),
+                                MAX_RACK_MODULE_COPIES)
     fitted_items = [i for i in items
                     if i.get("slot") not in NON_RACK_SLOTS
                     and i.get("online", True)]
@@ -1780,6 +1878,7 @@ async def calculate_fitting_stats(
     enriched_items, rah_type_ids, warnings = await _build_item_attrs(
         db, items, module_attrs_map, charge_attrs_map,
     )
+    warnings.extend(state_warnings)
     enriched_fitted = [
         (item, attrs) for item, attrs in enriched_items
         if item.get("slot") not in NON_RACK_SLOTS and item.get("online", True)
@@ -1807,7 +1906,8 @@ async def calculate_fitting_stats(
         mod_cross_result = await db.execute(
             select(SDETypeEffect.type_id, SDEModifier.modifying_attribute_id,
                    SDEModifier.modified_attribute_id, SDEModifier.operator,
-                   SDEModifier.func, SDEModifier.filter_type, SDEModifier.filter_value)
+                   SDEModifier.func, SDEModifier.filter_type, SDEModifier.filter_value,
+                   SDEEffect.effect_category)
             .join(SDEEffect, SDETypeEffect.effect_id == SDEEffect.effect_id)
             .join(SDEModifier, SDEModifier.effect_id == SDETypeEffect.effect_id)
             .where(SDETypeEffect.type_id.in_(non_sub_module_type_ids))
@@ -1826,10 +1926,10 @@ async def calculate_fitting_stats(
             # computers can hold different scripts, and only one of a pair of
             # damage mods may be overheated, so each contributes its own
             # source value.
-            source_items: dict[int, list[tuple[int, dict[int, float]]]] = defaultdict(list)
+            source_items: dict[int, list[tuple[int, dict[int, float], bool]]] = defaultdict(list)
             for _item, _attrs in enriched_fitted:
                 source_items[_item["type_id"]].append(
-                    (_item.get("quantity", 1), _attrs)
+                    (_item.get("quantity", 1), _attrs, _is_running(_item))
                 )
 
             # Build skill/group lookups for all module types
@@ -1899,7 +1999,12 @@ async def calculate_fitting_stats(
                     if not targets:
                         continue
 
-                    for copies, src_attrs in sources:
+                    for copies, src_attrs, src_running in sources:
+                        # A category-1 row (siege, bastion, triage, guidance
+                        # and tracking computers, sensor arrays) is the
+                        # module's activation: this copy must be running.
+                        if cm[7] == 1 and not src_running:
+                            continue
                         src_val = src_attrs.get(cm[1])
                         if src_val is None:
                             continue
@@ -1946,7 +2051,7 @@ async def calculate_fitting_stats(
     if module_type_ids:
         bcu_result = await db.execute(
             select(SDETypeEffect.type_id, SDEModifier.modifying_attribute_id,
-                   SDEModifier.operator)
+                   SDEModifier.operator, SDEEffect.effect_category)
             .join(SDEEffect, SDETypeEffect.effect_id == SDEEffect.effect_id)
             .join(SDEModifier, SDEModifier.effect_id == SDETypeEffect.effect_id)
             .where(SDETypeEffect.type_id.in_(module_type_ids))
@@ -1958,9 +2063,14 @@ async def calculate_fitting_stats(
         bcu_mods = bcu_result.fetchall()
         if bcu_mods:
             # Count copies and collect multipliers
+            # A category-1 row counts only the copies that are running; the
+            # passive (0) and online (4) rows count every online copy.
             module_copies: dict[int, int] = defaultdict(int)
+            running_copies: dict[int, int] = defaultdict(int)
             for item in fitted_items:
                 module_copies[item["type_id"]] += item.get("quantity", 1)
+                if _is_running(item):
+                    running_copies[item["type_id"]] += item.get("quantity", 1)
             bcu_multipliers: list[float] = []
             for row in bcu_mods:
                 src_tid = row.type_id
@@ -1969,7 +2079,8 @@ async def calculate_fitting_stats(
                 src_val = module_attrs_map.get(src_tid, {}).get(src_attr_id)
                 if src_val is None or src_val == 0:
                     continue
-                copies = module_copies.get(src_tid, 0)
+                copies = (running_copies if row.effect_category == 1
+                          else module_copies).get(src_tid, 0)
                 for _ in range(copies):
                     if operator == OP_PRE_MUL:
                         bcu_multipliers.append(src_val)
@@ -2043,18 +2154,47 @@ async def calculate_fitting_stats(
             if sig_bonus:
                 mod_collectors[ATTR_SIG_RADIUS].append((OP_POST_PERCENT, sig_bonus))
 
+    # Micro jump drives bloom the ship's signature while active (attribute 973,
+    # a percent). The drive (4921) is applied without a stacking penalty, as
+    # pyfa does; the field generators (6208, and the capital one 12126) go in
+    # with the other modules' rows and are penalised like them. None of the
+    # three effects carries modifier rows, so it is fed in here.
+    mjd_type_ids = await _get_types_with_effect(db, module_type_ids, EFFECT_MJD)
+    mjfg_type_ids = (
+        await _get_types_with_effect(db, module_type_ids, EFFECT_MJFG)
+        | await _get_types_with_effect(db, module_type_ids, EFFECT_MJFG_CAPITAL)
+    )
+    for item, mod_attrs in enriched_fitted:
+        if not _is_running(item):
+            continue
+        bloom = mod_attrs.get(ATTR_SIG_RADIUS_BONUS_PERCENT, 0)
+        if not bloom:
+            continue
+        for _ in range(item.get("quantity", 1)):
+            if item["type_id"] in mjd_type_ids:
+                ship_mods[ATTR_SIG_RADIUS].append((OP_POST_PERCENT, bloom))
+            elif item["type_id"] in mjfg_type_ids:
+                mod_collectors[ATTR_SIG_RADIUS].append((OP_POST_PERCENT, bloom))
+
     for item, mod_attrs in enriched_fitted:
         tid = item["type_id"]
         qty = item.get("quantity", 1)
         mods = module_modifiers.get(tid, [])
+        running = _is_running(item)
 
-        if tid in rah_type_ids:
+        if tid in rah_type_ids and running:
             for attr_id in ARMOR_RESONANCE_ATTRS:
                 resonance = mod_attrs.get(attr_id)
                 if resonance is not None and resonance != 1.0:
                     rah_collectors[attr_id].append(resonance)
 
         for mod in mods:
+            # A category-1 row is the module's activation effect: it applies
+            # only to a copy that is running. Categories 0 and 4 apply from
+            # online. Decided per copy, since two of a type can differ.
+            if mod["effect_category"] == 1 and not running:
+                continue
+
             # Only an ItemModifier on shipID changes the ship itself. A
             # Location* row on shipID means "the items fitted on this ship"
             # (a missile guidance module boosting missile velocity); applying
@@ -2273,6 +2413,8 @@ async def calculate_fitting_stats(
     # Build module drain list for the simulator
     cap_sim_modules: list[dict] = []
     for item, mod_attrs in enriched_fitted:
+        if not _is_running(item):
+            continue  # an idle module draws no capacitor
         tid = item["type_id"]
         qty = item.get("quantity", 1)
         # Negative for a capacitor booster with a charge loaded — cap_sim
@@ -2304,6 +2446,8 @@ async def calculate_fitting_stats(
     armor_rep_rate = 0.0
     shield_rep_rate = 0.0
     for item, mod_attrs in enriched_fitted:
+        if not _is_running(item):
+            continue  # a repairer held at online repairs nothing
         qty = item.get("quantity", 1)
         duration = mod_attrs.get(ATTR_DURATION, 0)
         if duration <= 0:
@@ -2503,8 +2647,8 @@ async def calculate_fitting_stats(
         if slot in NON_RACK_SLOTS:
             continue
 
-        # Offline weapons don't fire
-        if not item.get("online", True):
+        # Only a running weapon fires: offline and online-only ones don't
+        if not _is_running(item):
             continue
 
         # Turret/Launcher DPS: charge damage × module damageMultiplier / cycleTime
@@ -2751,6 +2895,11 @@ async def calculate_fitting_stats(
         # reactive hardener). Surfaced rather than raised: a fitting tool that
         # 400s on a rounding error is worse than one that says what it did.
         "warnings": warnings,
+        # Resolved state of every item in request order: -1 offline, 0 online,
+        # 1 active, 2 overheated, None for drones, cargo and fighters. The page
+        # does not render it; it is there so a client or test can see what the
+        # engine decided.
+        "module_states": module_states,
     }
 
 

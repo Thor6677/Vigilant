@@ -144,6 +144,62 @@ SKILL_FIGHTER_HANGAR_MANAGEMENT = 24613
 # module-modifier pass, so they stay out of the fitted-module lists.
 NON_RACK_SLOTS = ("drone", "cargo", "fighter")
 
+# A ship has at most 8 slots per rack, so no module type can be fitted more
+# than 8 times. The engine clamps a rack item's `quantity` to this: the
+# per-copy loops (cross-module, booster, signature bloom) would otherwise run
+# once per unit of an attacker-supplied number.
+MAX_RACK_MODULE_COPIES = 8
+
+# ── Module state (offline / online / active / overheated) ────────────────
+# Effect 16 (online) is the one effect every fittable module carries; it is
+# category 4 and is NOT an activation. A module can be switched to ACTIVE only
+# if it has some other effect in an activation category: 1 (active), 2
+# (target) or 3 (area). Category 5 is the overload effect (heat).
+EFFECT_ONLINE = 16
+ACTIVATION_EFFECT_CATS = frozenset({1, 2, 3})
+EFFECT_CAT_OVERLOAD = 5
+
+# Module states, ordered so `state >= STATE_ACTIVE` means "running".
+STATE_OFFLINE = -1
+STATE_ONLINE = 0
+STATE_ACTIVE = 1
+STATE_OVERHEATED = 2
+
+# Modules whose natural resting state is ONLINE: pyfa's default state for a
+# type carrying any of these effects (same effect ids, names as pyfa has them).
+# Every other activatable module defaults to ACTIVE. 12126
+# (microJumpPortalDriveCapital) is deliberately absent: pyfa defaults it to
+# active.
+DEFAULT_ONLINE_EFFECTS = frozenset({
+    7012,   # moduleBonusAssaultDamageControl
+    6719,   # (name not in the pyfa sample copy)
+    4921,   # microJumpDrive
+    6208,   # microJumpPortalDrive
+    6484,   # emergencyHullEnergizer
+    2857,   # cynosuralGeneration
+    2152,   # jumpPortalGeneration
+    3674,   # jumpPortalGenerationBO
+    2858,   # cloneJumpAccepting
+    980,    # cloakingWarpSafe
+    5945,   # cloakingPrototype
+    607,    # cloaking
+    7142,   # massEntanglerEffect5
+    118,    # electronicAttributeModifyOnline
+    54,     # targetPassively
+    47,     # cargoScan
+    46,     # shipScan
+    81,     # (name not in the pyfa sample copy)
+    8109,   # targetSpectrumBreakerBonus
+    8117,   # interdictionNullifierBonus
+    8121,   # warpCoreStabilizerActive
+    8364,   # industrialItemCompression
+})
+EFFECT_MJD = 4921
+EFFECT_MJFG = 6208
+EFFECT_MJFG_CAPITAL = 12126
+ATTR_SIG_RADIUS_BONUS_PERCENT = 973
+ATTR_MAX_GROUP_ACTIVE = 763     # 0 or absent = no limit on simultaneously active
+
 # ── Reactive Armor Hardener ──────────────────────────────────────────────
 # Effect 4928 (adaptiveArmorHardener) is the module's defining effect and
 # carries NO modifierInfo — CCP models the redistribution in the game server,

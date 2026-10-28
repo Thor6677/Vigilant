@@ -198,12 +198,17 @@
 {# State-dot legend (T-ISS: discoverability) — kept to one low-weight line
    since this is a dense tool; the per-dot title/aria-label carries the
    click affordance, this just explains the color coding at a glance. #}
-<div style="display:flex;gap:0.6rem;align-items:center;font-size:9px;color:var(--muted);margin-bottom:0.4rem;">
+<div style="display:flex;flex-wrap:wrap;gap:0.2rem 0.6rem;align-items:center;font-size:9px;color:var(--muted);margin-bottom:0.4rem;">
     <span>Module state:</span>
-    <span><span style="color:var(--success);">&#9679;</span> online</span>
+    <span><span style="color:var(--success);">&#9679;</span> active</span>
+    <span><span style="color:var(--success);">&#9675;</span> online</span>
     <span><span style="color:var(--danger);">&#9679;</span> overheated</span>
     <span><span style="color:var(--border);">&#9679;</span> offline</span>
 </div>
+{# Shown on every screen size: the Module Browser panel that holds the other
+   limit notes is collapsed on phones. #}
+<div id="fit-state-note" role="status" aria-live="polite" hidden
+     style="font-size:11px;color:var(--warning, var(--muted));margin-bottom:0.4rem;"></div>
 
 {% for slot_key, slot_label in [("high", "High Slots"), ("med", "Mid Slots"), ("low", "Low Slots"), ("rig", "Rigs"), ("subsystem", "Subsystems")] %}
 <div class="b-section" id="section-{{ slot_key }}" style="display:none;">
@@ -415,7 +420,7 @@ var state = {
 /* Ship slot limits — populated from stats response */
 var shipSlots = {high: 8, med: 8, low: 8, rig: 3, subsystem: 0, drone_bay: null, drone_bandwidth: null,
                  fighter_tubes: null, fighter_light: null, fighter_support: null, fighter_heavy: null};
-var overheatCache = {};  // type_id -> bool
+var overheatCache = {};  // type_id -> module caps {can_activate, can_overheat, default_active, group_id, max_group_active}
 
 function getSlotCount(slot) {
     return state.items.filter(function(i) { return i.slot === slot; }).length;
@@ -469,7 +474,7 @@ function restoreSavedFit() {
     hideRestoreNotice();
     // applyState() (called by restoreState()) doesn't know about overheat
     // capability — the restored items may include ones never checked
-    // against /tools/fitting/can-overheat yet (see refreshOverheatCache).
+    // against /tools/fitting/module-caps yet (see refreshOverheatCache).
     refreshOverheatCache();
 }
 
@@ -867,24 +872,103 @@ function removeItem(index) {
     recalcStats();
 }
 
+/* Module state (ISS-156). A pure mirror of app/fitting/module_state.py
+   resolve_states(); tests/fixtures/module_state_cases.json drives both.
+   States: -1 offline, 0 online, 1 active, 2 overheated, null = no module state.
+   `caps` maps type_id -> {can_activate, can_overheat, default_active, group_id,
+   max_group_active}; a type missing from it can only be online. */
+function moduleStates(items, caps) {
+    var states = [];
+    var explicitRun = new Map();   // group_id -> positions running by choice
+    var defaultRun = new Map();    // group_id -> positions running by default
+    var limits = new Map();
+    items.forEach(function(item, pos) {
+        if (item.slot === 'drone' || item.slot === 'cargo' || item.slot === 'fighter') { states.push(null); return; }
+        if (item.slot === 'rig') { states.push(0); return; }
+        if (item.online !== undefined && !item.online) { states.push(-1); return; }
+        var cap = caps[item.type_id];
+        if (!cap || !cap.can_activate) { states.push(0); return; }
+        var state, byChoice;
+        if (item.overheated && cap.can_overheat) {
+            state = 2; byChoice = true;
+        } else if (item.active === true || item.active === false) {
+            state = item.active ? 1 : 0; byChoice = true;
+        } else {
+            state = cap.default_active ? 1 : 0; byChoice = false;
+        }
+        states.push(state);
+        var group = cap.group_id, limit = cap.max_group_active;
+        if (state >= 1 && limit > 0 && group !== null && group !== undefined) {
+            limits.set(group, limit);
+            var run = byChoice ? explicitRun : defaultRun;
+            if (!run.has(group)) run.set(group, []);
+            run.get(group).push(pos);
+        }
+    });
+    var warnings = [];
+    limits.forEach(function(limit, group) {
+        var ranked = (explicitRun.get(group) || []).concat(defaultRun.get(group) || []);
+        var extra = ranked.slice(limit);
+        extra.forEach(function(pos) { states[pos] = 0; });
+        if (extra.length) {
+            warnings.push('At most ' + limit + ' module(s) of group ' + group +
+                ' can be active at once; ' + extra.length + ' set to online.');
+        }
+    });
+    return {states: states, warnings: warnings};
+}
+
+/* Tap cycle: offline -> online -> active -> overheated -> offline, skipping
+   steps the module cannot take. `active` is written only here, on a tap. */
 function toggleOnline(index) {
     if (this && this.dataset && this.dataset.itemIdx !== undefined) {
         index = parseInt(this.dataset.itemIdx, 10);
     }
     var item = state.items[index];
     if (!item) return;
-    var canOH = overheatCache[item.type_id] === true;
-    // Cycle: online → overheated (if capable) → offline → online
-    if (item.overheated) {
+    var cap = overheatCache[item.type_id] || {};
+    var before = moduleStates(state.items, overheatCache).states;
+    var cur = before[index];
+    var goesActive = false;
+    if (cur === 2) {
         item.overheated = false;
         item.online = false;
-    } else if (item.online === false) {
+    } else if (cur === 1) {
+        if (cap.can_overheat) {
+            item.overheated = true;
+            item.active = true;
+        } else {
+            item.overheated = false;
+            item.online = false;
+        }
+    } else if (cur === 0 && cap.can_activate) {
         item.online = true;
         item.overheated = false;
-    } else if (canOH) {
-        item.overheated = true;
-    } else {
+        item.active = true;
+        goesActive = true;
+    } else if (cur === 0) {
         item.online = false;
+    } else {
+        item.online = true;
+        item.overheated = false;
+        if (cap.can_activate) item.active = false;
+    }
+    if (goesActive && cap.max_group_active > 0 && cap.group_id != null) {
+        // The group allows only so many running modules: switch the others off.
+        var others = [];
+        state.items.forEach(function(o, i) {
+            var oc = overheatCache[o.type_id];
+            if (i !== index && before[i] >= 1 && oc && oc.group_id === cap.group_id) others.push(i);
+        });
+        var drop = others.length - (cap.max_group_active - 1);
+        if (drop > 0) {
+            others.slice(others.length - drop).forEach(function(i) {
+                state.items[i].active = false;
+                state.items[i].overheated = false;
+            });
+            _limitNote('Only ' + cap.max_group_active + ' of this kind can be active at once · ' +
+                drop + ' set to online', true);
+        }
     }
     saveState();
     renderSlots();
@@ -904,8 +988,10 @@ function _fmtM3(v) {
     return (Math.round(v * 10) / 10).toString();
 }
 
-function _limitNote(text) {
-    ['fit-limit-note', 'drone-limit-note', 'fighter-limit-note'].forEach(function(id) {
+function _limitNote(text, nearLegend) {
+    var ids = ['fit-limit-note', 'drone-limit-note', 'fighter-limit-note'];
+    if (nearLegend || !text) ids.push('fit-state-note');
+    ids.forEach(function(id) {
         var el = document.getElementById(id);
         if (!el) return;
         el.textContent = text;
@@ -1247,6 +1333,7 @@ function renderFighters() {
 
 /* ── Render Slots ─────────────────────────────────────────────────────────── */
 function renderSlots() {
+    var modStates = moduleStates(state.items, overheatCache).states;
     var slotTypes = ['high', 'med', 'low', 'rig', 'subsystem'];
     slotTypes.forEach(function(slot) {
         var container = document.getElementById('slots-' + slot);
@@ -1274,17 +1361,21 @@ function renderSlots() {
             }
             var chargeBtn = (slot === 'high' || slot === 'med') ?
                 '<button class="fit-ctl" data-click="openChargeSelector" data-item-idx="' + globalIdx + '" style="background:none;border:none;color:' + (item.charge_type_id ? 'var(--accent)' : 'var(--border)') + ';cursor:pointer;font-size:10px;padding:0 0.15rem;" title="' + (item.charge_type_id ? 'Change charge' : 'Load charge') + '">&#9679;</button>' : '';
-            // State toggle: green=online, red=overheated, grey=offline. The
-            // dot alone has no affordance (T-ISS: discoverability) — title
-            // gives a hover tooltip and aria-label carries the same text to
-            // screen readers, since the dot has no visible text of its own.
-            var canOH = overheatCache[item.type_id] === true;
-            var stateColor = isOverheated ? 'var(--danger)' : (isOnline ? 'var(--success)' : 'var(--border)');
-            var stateTitle = isOverheated ? 'Overheated — click to offline' :
-                (isOnline && canOH ? 'Online — click to overheat' :
-                    (isOnline ? 'Online — click to offline' : 'Offline — click to online'));
+            // State toggle (ISS-156): filled green = active (or online, for a
+            // module with no active state), hollow green ring = online only,
+            // red = overheated, grey = offline. The glyph alone has no
+            // affordance, so title gives a hover tooltip and aria-label the
+            // same text for screen readers.
+            var mcap = overheatCache[item.type_id] || {};
+            var mstate = modStates[globalIdx];
+            var stateColor = mstate === 2 ? 'var(--danger)' : (mstate === -1 ? 'var(--border)' : 'var(--success)');
+            var stateGlyph = (mstate === 0 && mcap.can_activate) ? '&#9675;' : '&#9679;';
+            var stateTitle = mstate === 2 ? 'Overheated — click to offline' :
+                (mstate === 1 ? (mcap.can_overheat ? 'Active — click to overheat' : 'Active — click to offline') :
+                    (mstate === 0 ? (mcap.can_activate ? 'Online — click to activate' : 'Online — click to offline') :
+                        'Offline — click to online'));
             var onlineBtn = slot !== 'rig' ?
-                '<button class="fit-ctl" data-click="toggleOnline" data-item-idx="' + globalIdx + '" aria-label="' + stateTitle + '" style="background:none;border:none;color:' + stateColor + ';cursor:pointer;font-size:8px;padding:0 0.15rem;" title="' + stateTitle + '">&#9679;</button>' : '';
+                '<button class="fit-ctl" data-click="toggleOnline" data-item-idx="' + globalIdx + '" aria-label="' + stateTitle + '" style="background:none;border:none;color:' + stateColor + ';cursor:pointer;font-size:10px;padding:0 0.15rem;" title="' + stateTitle + '">' + stateGlyph + '</button>' : '';
             container.innerHTML += '<div class="b-table-row" data-type-id="' + item.type_id + '" style="padding:0.2rem 0.75rem;display:flex;align-items:center;gap:0.4rem;opacity:' + opacity + ';">' +
                 onlineBtn +
                 '<img src="https://images.evetech.net/types/' + item.type_id + '/icon?size=32" style="width:20px;height:20px;border:1px solid var(--border);cursor:pointer;" data-click="showModuleInfo" data-type-id="' + item.type_id + '" title="Show info" data-on-error="hide">' +
@@ -2231,7 +2322,7 @@ function doImportEFT() {
         saveState();
         applyState();
         // EFT-imported items were never checked against
-        // /tools/fitting/can-overheat — without this, a hardener imported
+        // /tools/fitting/module-caps — without this, a hardener imported
         // via EFT would show no overheat step at all.
         refreshOverheatCache();
         _importWarnings(data);
@@ -2725,11 +2816,11 @@ function refreshOverheatCache() {
     var typeIds = [];
     state.items.forEach(function(item) {
         if (item.slot !== 'drone' && item.slot !== 'cargo' && item.slot !== 'rig' && item.slot !== 'fighter') {
-            if (overheatCache[item.type_id] === undefined) typeIds.push(item.type_id);
+            if (overheatCache[item.type_id] === undefined && typeIds.indexOf(item.type_id) < 0) typeIds.push(item.type_id);
         }
     });
     if (typeIds.length === 0) return;
-    fetch('/tools/fitting/can-overheat?type_ids=' + typeIds.join(','))
+    fetch('/tools/fitting/module-caps?type_ids=' + typeIds.join(','))
         .then(function(r) { return r.json(); })
         .then(function(data) {
             for (var k in data) overheatCache[parseInt(k)] = data[k];

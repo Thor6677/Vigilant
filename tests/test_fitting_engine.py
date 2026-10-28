@@ -75,6 +75,7 @@ OP_POST_PERCENT = 6
 
 EFFECT_CAT_PASSIVE = 0
 EFFECT_CAT_ACTIVE = 1
+EFFECT_CAT_TARGET = 2
 EFFECT_CAT_OVERLOAD = 5
 
 # ── fixture-local type IDs ──────────────────────────────────────────────────
@@ -108,6 +109,8 @@ EFF_MWD = 6730           # real: moduleBonusMicrowarpdrive, zero modifier rows
 EFF_AFTERBURNER_OVERLOAD = 8007
 EFF_TURRET_OVERLOAD = 8008
 EFF_RAH_OVERLOAD = 8009
+EFF_TARGET_ATTACK = 10   # real: targetAttack, category 2 (a turret's activation)
+EFF_FUELED_ARMOR_REPAIR = 5275  # real: fueledArmorRepair, category 1
 
 # The hardener gives 30% to every damage type, and overloads for +20%.
 # Overload is postPercent on the BONUS, so -30 * 1.2 = -36 -> 36% resist.
@@ -336,6 +339,11 @@ def _seed_rows():
         SDEEffect(effect_id=EFF_TURRET_OVERLOAD, effect_name="overloadTurret",
                   effect_category=EFFECT_CAT_OVERLOAD),
         SDETypeEffect(type_id=TURRET, effect_id=EFF_TURRET_OVERLOAD),
+        # Without a category 1-3 effect a turret cannot be activated, rests at
+        # online, and fires nothing.
+        SDEEffect(effect_id=EFF_TARGET_ATTACK, effect_name="targetAttack",
+                  effect_category=EFFECT_CAT_TARGET),
+        SDETypeEffect(type_id=TURRET, effect_id=EFF_TARGET_ATTACK),
         SDEModifier(effect_id=EFF_TURRET_OVERLOAD, func="ItemModifier",
                     domain="itemID", modified_attribute_id=ATTR_RATE_OF_FIRE,
                     modifying_attribute_id=ATTR_OVERLOAD_ROF_BONUS,
@@ -417,6 +425,12 @@ def _seed_rows():
         ATTR_POWER: 15.0,
     })
     rows += _attrs(PASTE, {})
+    rows += [
+        SDEEffect(effect_id=EFF_FUELED_ARMOR_REPAIR,
+                  effect_name="fueledArmorRepair",
+                  effect_category=EFFECT_CAT_ACTIVE),
+        SDETypeEffect(type_id=ANCILLARY_REP, effect_id=EFF_FUELED_ARMOR_REPAIR),
+    ]
 
     # ── afterburner and microwarpdrive ──────────────────────────────────────
     # The real shape: effects 6731 / 6730 with NO modifier rows. The engine

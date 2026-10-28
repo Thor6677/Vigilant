@@ -19,6 +19,7 @@ from app.fitting.engine import (
     calculate_fitting_stats, get_type_dogma_attrs, dps_cache_key, preset_skill_levels,
 )
 from app.fitting.compare import build_compare_sections
+from app.fitting.module_state import get_module_caps
 from app.fitting.constants import ATTR_CPU, ATTR_POWER, ATTR_UPGRADE_COST, ATTR_DRONE_BW_USED
 from app.fitting.boosters import ATTR_BOOSTERNESS, get_booster_info
 from app.fitting.fighters import (
@@ -2215,31 +2216,38 @@ async def check_module_fit(
     return {"can_fit": can_fit, "restrictions": restrictions}
 
 
-OVERLOAD_ATTR_IDS = [1210, 1205, 1223, 1208, 1230, 1231, 1206, 1222]
+MODULE_CAPS_MAX_IDS = 200
 
 
-@router.get("/tools/fitting/can-overheat")
-async def can_overheat(
+@router.get("/tools/fitting/module-caps")
+async def module_caps(
     request: Request,
     type_ids: str = Query(""),
     db: AsyncSession = Depends(get_db),
 ):
-    """Check which module types can be overheated."""
+    """What each module type can do state-wise (ISS-156).
+
+    Returns {"<type_id>": {can_activate, can_overheat, default_active,
+    group_id, max_group_active}} for every requested id. Replaces the old
+    can-overheat route, whose bool per id is the can_overheat field here.
+    """
     if not request.session.get("user_id"):   # ISS-044: login-only tool
         return HTMLResponse("", status_code=401)
-    if not type_ids:
-        return {}
-    ids = [int(x) for x in type_ids.split(",") if x.strip()]
+    ids = []
+    for part in type_ids.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if not part.isdigit():
+            raise HTTPException(status_code=400, detail="type_ids must be integers")
+        ids.append(int(part))
+    ids = list(dict.fromkeys(ids))
+    if len(ids) > MODULE_CAPS_MAX_IDS:
+        raise HTTPException(status_code=400, detail="too many type_ids")
     if not ids:
         return {}
-    result = await db.execute(
-        select(SDETypeDogmaAttribute.type_id)
-        .where(SDETypeDogmaAttribute.type_id.in_(ids))
-        .where(SDETypeDogmaAttribute.attribute_id.in_(OVERLOAD_ATTR_IDS))
-        .distinct()
-    )
-    overheatable = {row[0] for row in result.fetchall()}
-    return {str(tid): tid in overheatable for tid in ids}
+    caps = await get_module_caps(db, ids)
+    return {str(tid): caps[tid] for tid in ids}
 
 
 # ── Character skills + fit skill-check ──────────────────────────────────
