@@ -199,6 +199,8 @@ EFFECT_MJFG = 6208
 EFFECT_MJFG_CAPITAL = 12126
 ATTR_SIG_RADIUS_BONUS_PERCENT = 973
 ATTR_MAX_GROUP_ACTIVE = 763     # 0 or absent = no limit on simultaneously active
+ATTR_MAX_GROUP_FITTED = 1544    # most modules of one group that may be fitted; absent = no limit
+ATTR_MAX_TYPE_FITTED = 2431     # most modules of one type that may be fitted; absent = no limit
 
 # ── Reactive Armor Hardener ──────────────────────────────────────────────
 # Effect 4928 (adaptiveArmorHardener) is the module's defining effect and
