@@ -20,7 +20,10 @@ from app.fitting.engine import (
 )
 from app.fitting.compare import build_compare_sections
 from app.fitting.module_state import get_module_caps
-from app.fitting.constants import ATTR_CPU, ATTR_POWER, ATTR_UPGRADE_COST, ATTR_DRONE_BW_USED
+from app.fitting.constants import (
+    ATTR_CPU, ATTR_POWER, ATTR_UPGRADE_COST, ATTR_DRONE_BW_USED,
+    ATTR_MAX_GROUP_FITTED, ATTR_MAX_TYPE_FITTED,
+)
 from app.fitting.boosters import ATTR_BOOSTERNESS, get_booster_info
 from app.fitting.fighters import (
     assign_fighter_squadrons, fighter_order_key, order_fighters_for_export,
@@ -767,7 +770,8 @@ async def ship_slots(
     }
 
 
-def _autoload_cargo_charges(items: list[dict], compat_by_weapon: dict[int, set[int]]) -> list[dict]:
+def _autoload_cargo_charges(items: list[dict], compat_by_weapon: dict[int, set[int]],
+                            keep_cargo: bool = False) -> list[dict]:
     """Load a compatible cargo charge onto each empty weapon, then drop the
     cargo stacks that got used — shared by import_eft (a hand-pasted EFT fit
     can carry suggested ammo in its Cargo section) and the character
@@ -779,6 +783,13 @@ def _autoload_cargo_charges(items: list[dict], compat_by_weapon: dict[int, set[i
     — callers batch this once via sde.get_compatible_charges_bulk rather
     than querying per weapon (see import_eft and _prepare_bulk_import_cache
     below).
+
+    `keep_cargo` (T-086): leave every cargo stack in place. import_eft sets it,
+    because export_eft now writes loaded ammo inline ("Module, Charge") and the
+    Cargo block is the real hold, so dropping a stack that matches a loaded
+    charge lost the player's spare ammo on a round trip. The ESI character
+    import leaves it False: an in-game fitting stores its loaded ammo AS cargo,
+    so a used stack there is the loaded charge, not spare ammo.
 
     Pure — no DB access here, so it's cheap to call once per fit even
     inside a loop over 173 of them.
@@ -797,6 +808,8 @@ def _autoload_cargo_charges(items: list[dict], compat_by_weapon: dict[int, set[i
                     weapon["charge_name"] = cargo["type_name"]
                     break
 
+    if keep_cargo:
+        return items
     loaded_charge_ids = {i.get("charge_type_id") for i in items if i.get("charge_type_id")}
     return [i for i in items if not (i["slot"] == "cargo" and i["type_id"] in loaded_charge_ids)]
 
@@ -947,7 +960,7 @@ async def import_eft(
     ]
     compat_by_weapon = await sde.get_compatible_charges_bulk(db, weapon_type_ids)
     compat_ids_by_weapon = {tid: {c["type_id"] for c in chs} for tid, chs in compat_by_weapon.items()}
-    items = _autoload_cargo_charges(items, compat_ids_by_weapon)
+    items = _autoload_cargo_charges(items, compat_ids_by_weapon, keep_cargo=True)
 
     return {
         "ship_type_id": ship_type_id,
@@ -983,7 +996,8 @@ async def export_eft(
         ship_name = f"Ship {ship_type_id}"
 
     # Resolve item names
-    type_ids = list({i["type_id"] for i in items})
+    type_ids = list({i["type_id"] for i in items}
+                    | {i["charge_type_id"] for i in items if i.get("charge_type_id")})
     type_names = await sde.type_ids_to_names(db, type_ids)
 
     lines = [f"[{ship_name}, {fitting_name}]"]
@@ -992,6 +1006,10 @@ async def export_eft(
         slot_items = [i for i in items if i.get("slot") == slot]
         for item in slot_items:
             name = type_names.get(item["type_id"], f"Type {item['type_id']}")
+            # T-086: loaded ammo goes inline ("Module, Charge"), the form
+            # import_eft reads back; the Cargo block below stays the real hold.
+            if slot in ("high", "med") and item.get("charge_type_id"):
+                name += ", " + type_names.get(item["charge_type_id"], f"Type {item['charge_type_id']}")
             lines.append(name)
         lines.append("")
 
@@ -2228,8 +2246,11 @@ async def module_caps(
     """What each module type can do state-wise (ISS-156).
 
     Returns {"<type_id>": {can_activate, can_overheat, default_active,
-    group_id, max_group_active}} for every requested id. Replaces the old
-    can-overheat route, whose bool per id is the can_overheat field here.
+    group_id, max_group_active, hardpoint, max_group_fitted,
+    max_type_fitted}} for every requested id. Replaces the old can-overheat
+    route, whose bool per id is the can_overheat field here. hardpoint is
+    'turret', 'launcher' or null; the two max_*_fitted fields are 0 for no
+    limit (T-086).
     """
     if not request.session.get("user_id"):   # ISS-044: login-only tool
         return HTMLResponse("", status_code=401)
@@ -2247,7 +2268,32 @@ async def module_caps(
     if not ids:
         return {}
     caps = await get_module_caps(db, ids)
-    return {str(tid): caps[tid] for tid in ids}
+    out = {str(tid): dict(caps[tid]) for tid in ids}
+    # T-086 (fill): what the Fill button needs beyond module state. Read here
+    # so get_module_caps (and the engine's use of it) stays as it was.
+    for entry in out.values():
+        entry["hardpoint"] = None
+        entry["max_group_fitted"] = 0
+        entry["max_type_fitted"] = 0
+    result = await db.execute(
+        select(SDEModuleSlot.type_id, SDEModuleSlot.is_turret, SDEModuleSlot.is_launcher)
+        .where(SDEModuleSlot.type_id.in_(ids))
+    )
+    for type_id, is_turret, is_launcher in result.fetchall():
+        out[str(type_id)]["hardpoint"] = (
+            "turret" if is_turret else "launcher" if is_launcher else None)
+    result = await db.execute(
+        select(SDETypeDogmaAttribute.type_id, SDETypeDogmaAttribute.attribute_id,
+               SDETypeDogmaAttribute.value)
+        .where(SDETypeDogmaAttribute.type_id.in_(ids))
+        .where(SDETypeDogmaAttribute.attribute_id.in_(
+            (ATTR_MAX_GROUP_FITTED, ATTR_MAX_TYPE_FITTED)))
+    )
+    for type_id, attr_id, value in result.fetchall():
+        key = ("max_group_fitted" if attr_id == ATTR_MAX_GROUP_FITTED
+               else "max_type_fitted")
+        out[str(type_id)][key] = int(value or 0)
+    return out
 
 
 # ── Character skills + fit skill-check ──────────────────────────────────

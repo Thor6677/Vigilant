@@ -9,6 +9,8 @@
      data-drone-vols='{{ stats.drone_volumes | tojson }}'
      data-fighter-info='{{ stats.fighter_info | tojson }}'
      data-fighter-hangar="{{ stats.fighter_hangar_total }}"
+     data-cargo-cap="{{ stats.cargo_capacity | default(0) }}"
+     data-cargo-vols='{{ stats.cargo_volumes | default({}) | tojson }}'
      data-sum-dps="{{ "{:,.0f}".format(stats.total_dps) }}{% if stats.spool_time_s > 0 %} / {{ "{:,.0f}".format(stats.total_dps_max_spool) }}{% endif %}"
      data-sum-ehp="{{ "{:,.0f}".format(stats.total_ehp) }}"
      data-sum-cap="{% if stats.cap_stable %}{{ stats.cap_stable_pct }}%{% elif stats.cap_drain_rate > 0 %}{% if stats.cap_lasts_s >= 60 %}{{ (stats.cap_lasts_s // 60)|int }}m{{ (stats.cap_lasts_s % 60)|int }}s{% else %}{{ stats.cap_lasts_s }}s{% endif %}{% else %}100%{% endif %}"
@@ -405,7 +407,7 @@
             </tr>
             <tr>
                 <td style="color:var(--muted);padding:2px 0;">Cargo</td>
-                <td style="text-align:right;color:var(--text);">{{ "{:,.1f}".format(stats.cargo_capacity) }} m&sup3;</td>
+                <td style="text-align:right;color:{{ 'var(--danger)' if stats.cargo_used | default(0) > stats.cargo_capacity else 'var(--text)' }};"{% if stats.cargo_used | default(0) > stats.cargo_capacity %} title="Over the cargo hold"{% endif %}>{% if stats.cargo_used | default(0) > 0 %}{{ "{:,.1f}".format(stats.cargo_used) }} / {% endif %}{{ "{:,.1f}".format(stats.cargo_capacity) }} m&sup3;</td>
             </tr>
         </table>
     </div>

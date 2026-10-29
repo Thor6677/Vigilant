@@ -3117,6 +3117,38 @@ button.cp-chip { cursor: pointer; }
     .cp-row:not(.m-row) { flex-wrap: wrap; }
 }
 
+/* ── T-086 · fill a rack ── */
+/* The Browse name never widens the 300px overlay: it truncates. A row that
+   cannot fit the ship keeps its wrapped "Cannot fit" reason. The Fill button
+   itself is a .fit-ctl (40px wide, 44px tall from the global button floor on
+   phones), so it needs no size rule here. */
+.fit-bname { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.fit-bname-1 { white-space: nowrap; }
+.fit-fill { flex-shrink: 0; }
+/* ── end T-086 ── */
+/* ── T-086 · ammo: load in all / unload all ── */
+/* Unload all sits at the end of the module-state legend row. It is a .fit-ctl
+   (40px wide, 44px tall from the global phone button floor). */
+.fit-unload { margin-left: auto; background: none; border: 1px solid var(--border); color: var(--muted); font-size: 9px; padding: 0.1rem 0.4rem; cursor: pointer; font-family: inherit; }
+.fit-unload:hover { color: var(--accent); border-color: var(--accent); }
+/* Load-in-all toggle in the charge selector: pressed means on. */
+.fit-all-toggle { background: none; border: 1px solid var(--border); color: var(--muted); font-size: 10px; padding: 0.15rem 0.5rem; cursor: pointer; font-family: inherit; }
+.fit-all-toggle[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+/* ── end T-086 ammo ── */
+/* ── T-086 · cargo ── */
+/* A row is icon, a truncating name, a quantity box, Max and remove. The name
+   gives way (min-width 0) so the row never scrolls sideways at 360px. Max and
+   Empty cargo are .fit-ctl: 40px wide, 44px tall from the phone button floor.
+   The quantity box is 16px on phones (iOS zooms the page below that). */
+.fit-cname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fit-cqty { width: 5.5rem; flex-shrink: 0; box-sizing: border-box; text-align: right; padding: 0.2rem 0.4rem; font-size: 11px; background: var(--bg); border: 1px solid var(--border); color: var(--text); font-family: inherit; }
+.fit-empty-cargo { margin-left: auto; background: none; border: 1px solid var(--border); color: var(--muted); font-size: 9px; padding: 0.1rem 0.4rem; cursor: pointer; font-family: inherit; }
+.fit-empty-cargo:hover { color: var(--accent); border-color: var(--accent); }
+@media (max-width: 640px) {
+    .fit-cqty { font-size: 16px; width: 4.5rem; }
+}
+/* ── end T-086 cargo ── */
+
 /* ── m-hide wins ties: keep this the last phone rule in the file ── */
 @media (max-width: 640px) {
     .m-hide, .m-tabs-desktop { display: none !important; }

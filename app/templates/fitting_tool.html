@@ -204,6 +204,7 @@
     <span><span style="color:var(--success);">&#9675;</span> online</span>
     <span><span style="color:var(--danger);">&#9679;</span> overheated</span>
     <span><span style="color:var(--border);">&#9679;</span> offline</span>
+    <button type="button" class="fit-ctl fit-unload" data-click="unloadAllCharges" title="Clear the loaded charge on every module (modules stay fitted)">Unload all charges</button>
 </div>
 {# Shown on every screen size: the Module Browser panel that holds the other
    limit notes is collapsed on phones. #}
@@ -306,6 +307,30 @@
                    style="width:100%;padding:0.3rem 0.5rem;font-size:10px;background:var(--bg);border:1px solid var(--border);color:var(--muted);font-family:inherit;"
                    data-input="searchDrone">
             <div class="module-results" data-slot="drone"
+                 style="position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--surface);border:1px solid var(--border);display:none;max-height:200px;overflow-y:auto;"></div>
+        </div>
+    </div>
+</div>
+
+{# Cargo (T-086). Ammo and other stacks: each row is one type with a typed
+   quantity, merged by type. Always shown. Capacity and per-unit volumes come
+   from the stats panel (data-cargo-cap / data-cargo-vols). #}
+<div class="b-section" id="section-cargo">
+    <div class="b-section-head">
+        <span class="b-label">Cargo</span>
+        <span id="cargo-summary" class="b-muted-sm"></span>
+        <button type="button" class="fit-ctl fit-empty-cargo" data-click="emptyCargo" title="Remove every stack from the cargo hold">Empty cargo</button>
+    </div>
+    <div id="cargo-limit-note" class="fit-limit-note" role="status" aria-live="polite" hidden></div>
+    <div id="slots-cargo"></div>
+    <div style="padding:0.25rem 0;">
+        <div style="position:relative;">
+            <input type="text" class="module-search" data-slot="cargo"
+                   placeholder="+ Add ammo to cargo..."
+                   autocomplete="off"
+                   style="width:100%;padding:0.3rem 0.5rem;font-size:10px;background:var(--bg);border:1px solid var(--border);color:var(--muted);font-family:inherit;"
+                   data-input="searchCargo">
+            <div class="module-results" data-slot="cargo"
                  style="position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--surface);border:1px solid var(--border);display:none;max-height:200px;overflow-y:auto;"></div>
         </div>
     </div>
@@ -420,7 +445,7 @@ var state = {
 /* Ship slot limits — populated from stats response */
 var shipSlots = {high: 8, med: 8, low: 8, rig: 3, subsystem: 0, drone_bay: null, drone_bandwidth: null,
                  fighter_tubes: null, fighter_light: null, fighter_support: null, fighter_heavy: null};
-var overheatCache = {};  // type_id -> module caps {can_activate, can_overheat, default_active, group_id, max_group_active}
+var overheatCache = {};  // type_id -> module caps {can_activate, can_overheat, default_active, group_id, max_group_active, hardpoint, max_group_fitted, max_type_fitted}
 
 function getSlotCount(slot) {
     return state.items.filter(function(i) { return i.slot === slot; }).length;
@@ -718,6 +743,7 @@ function _resetFighterShipData() {
     shipSlots.fighter_support = null;
     shipSlots.fighter_heavy = null;
     fighterHangarTotal = null;
+    cargoCapacity = null;
 }
 
 function fetchShipSlots(typeId) {
@@ -989,7 +1015,7 @@ function _fmtM3(v) {
 }
 
 function _limitNote(text, nearLegend) {
-    var ids = ['fit-limit-note', 'drone-limit-note', 'fighter-limit-note'];
+    var ids = ['fit-limit-note', 'drone-limit-note', 'fighter-limit-note', 'cargo-limit-note'];
     if (nearLegend || !text) ids.push('fit-state-note');
     ids.forEach(function(id) {
         var el = document.getElementById(id);
@@ -1048,6 +1074,185 @@ function changeDroneQty(index, delta) {
     saveState();
     renderSlots();
     recalcStats();
+}
+
+/* ── Cargo (T-086) ──────────────────────────────────────────────────────────
+   One stack per type, merged: adding the same type again raises its quantity.
+   A new stack starts at 1; the quantity is typed in the row (or set with Max).
+   The hold is a hard limit: a quantity that does not fit is cut to the most
+   that does, with a note. Capacity (Cargohold Optimization and expanders
+   included) and each type's per-unit volume come from the stats response, so
+   nothing is refused until the first answer lands, the same rule as the
+   fighter hangar. A volume of 0 or an unknown one refuses nothing. */
+var cargoCapacity = null;   // m3, from the stats response
+var cargoVolumes = {};      // type_id -> m3 per unit
+
+function _cargoUsed(skipIdx) {
+    var used = 0;
+    state.items.forEach(function(i, n) {
+        if (i.slot === 'cargo' && n !== skipIdx) used += (cargoVolumes[i.type_id] || 0) * (parseInt(i.quantity, 10) || 0);
+    });
+    return used;
+}
+
+/* Most units of this type the hold can take, not counting the stack at
+   skipIdx (so a stack can be resized). Infinity when nothing can be judged. */
+function _cargoMaxQty(typeId, skipIdx) {
+    var vol = cargoVolumes[typeId];
+    if (cargoCapacity == null || !(vol > 0)) return Infinity;
+    return Math.max(0, Math.floor((cargoCapacity - _cargoUsed(skipIdx)) / vol + 1e-9));
+}
+
+function _cargoFull() {
+    return 'cargo hold full (' + _fmtM3(_cargoUsed()) + ' / ' + _fmtM3(cargoCapacity) + ' m³)';
+}
+
+function _cargoStackIndex(typeId) {
+    for (var i = 0; i < state.items.length; i++) {
+        if (state.items[i].slot === 'cargo' && state.items[i].type_id === typeId) return i;
+    }
+    return -1;
+}
+
+function _syncCargo() {
+    var src = document.querySelector('#stats-panel [data-cargo-vols]');
+    if (!src) return;
+    try {
+        var vols = JSON.parse(src.getAttribute('data-cargo-vols') || '{}');
+        if (vols && typeof vols === 'object') {
+            Object.keys(vols).forEach(function(k) { cargoVolumes[parseInt(k, 10)] = vols[k]; });
+        }
+    } catch (e) { /* keep what we have */ }
+    // A hull with no hold (0) is unknown, not "full", so a stale answer from
+    // the previous ship refuses nothing.
+    var cap = parseFloat(src.getAttribute('data-cargo-cap'));
+    cargoCapacity = cap > 0 ? cap : null;
+    renderCargo();
+}
+
+function searchCargo() {
+    var q = this.value;
+    var inputEl = this;
+    clearTimeout(moduleSearchTimers['cargo']);
+    var resultsEl = inputEl.parentElement.querySelector('.module-results');
+    if (q.length < 2) { resultsEl.style.display = 'none'; return; }
+    moduleSearchTimers['cargo'] = setTimeout(function() {
+        fetch('/tools/fitting/search/charges?q=' + encodeURIComponent(q))
+            .then(_fitCheckOk)
+            .then(function(r) { return r.text(); })
+            .then(function(html) {
+                resultsEl.innerHTML = html;
+                resultsEl.style.display = html.trim() ? '' : 'none';
+            })
+            .catch(function(e) {
+                resultsEl.innerHTML = _fitErrorHtml(e.status);
+                resultsEl.style.display = '';
+            });
+    }, 200);
+}
+
+/* Add one unit: a new quantity-1 stack, or +1 on the stack of that type. */
+function addCargo(typeId, typeName, volume) {
+    if (this && this.dataset && this.dataset.typeId !== undefined) {
+        typeId = parseInt(this.dataset.typeId, 10);
+        typeName = this.dataset.typeName;
+        if (this.dataset.volume !== undefined) volume = parseFloat(this.dataset.volume);
+    }
+    if (volume > 0) cargoVolumes[typeId] = volume;
+    var at = _cargoStackIndex(typeId);
+    var want = at >= 0 ? (parseInt(state.items[at].quantity, 10) || 0) + 1 : 1;
+    if (_cargoMaxQty(typeId, at) < want) {
+        _limitNote('Not added · ' + _cargoFull());
+        return false;
+    }
+    if (at >= 0) {
+        state.items[at].quantity = want;
+    } else {
+        state.items.push({type_id: typeId, type_name: typeName, slot: 'cargo', quantity: 1});
+        at = state.items.length - 1;
+    }
+    saveState();
+    renderSlots();
+    recalcStats();
+    document.querySelectorAll('.module-search[data-slot="cargo"]').forEach(function(el) { el.value = ''; });
+    document.querySelectorAll('.module-results[data-slot="cargo"]').forEach(function(el) { el.style.display = 'none'; });
+    var qty = document.querySelector('#slots-cargo .fit-cqty[data-item-idx="' + at + '"]');
+    if (qty) { qty.focus(); if (qty.select) qty.select(); }
+    return true;
+}
+
+/* The quantity field's change handler (data-change, not data-input: a
+   re-render per keystroke would drop the focus). */
+function setCargoQty(index, value) {
+    if (this && this.dataset && this.dataset.itemIdx !== undefined) {
+        index = parseInt(this.dataset.itemIdx, 10);
+        value = this.value;
+    }
+    var item = state.items[index];
+    if (!item || item.slot !== 'cargo') return;
+    var q = parseInt(value, 10);
+    if (!(q >= 1)) q = 1;
+    var max = _cargoMaxQty(item.type_id, index);
+    var note = '';
+    var cut = q > max;
+    if (cut) q = Math.max(1, max);
+    item.quantity = q;
+    if (cut) note = (max >= 1 ? 'Cut to ' + q : 'Over capacity') + ' · ' + _cargoFull();
+    saveState();
+    renderSlots();
+    recalcStats();
+    if (note) _limitNote(note, true);
+}
+
+function maxCargo(index) {
+    if (this && this.dataset && this.dataset.itemIdx !== undefined) {
+        index = parseInt(this.dataset.itemIdx, 10);
+    }
+    var item = state.items[index];
+    if (!item || item.slot !== 'cargo') return;
+    var max = _cargoMaxQty(item.type_id, index);
+    if (max === Infinity) { _limitNote('Capacity not known yet', true); return; }
+    if (max < 1) { _limitNote('No room · ' + _cargoFull(), true); return; }
+    item.quantity = max;
+    saveState();
+    renderSlots();
+    recalcStats();
+    _limitNote('Set to ' + max + ' · hold now ' + _fmtM3(_cargoUsed()) + ' / ' + _fmtM3(cargoCapacity) + ' m³', true);
+}
+
+/* Empty cargo: every stack goes (charges live here), modules are never touched. */
+function emptyCargo() {
+    var n = state.items.filter(function(i) { return i.slot === 'cargo'; }).length;
+    if (!n) { _limitNote('Cargo is already empty', true); return; }
+    state.items = state.items.filter(function(i) { return i.slot !== 'cargo'; });
+    saveState();
+    renderSlots();
+    recalcStats();
+    _limitNote('Emptied cargo · ' + n + ' stack' + (n === 1 ? '' : 's'), true);
+}
+
+function renderCargo() {
+    var host = document.getElementById('slots-cargo');
+    if (!host) return;
+    var html = '';
+    var used = 0;
+    state.items.forEach(function(item, idx) {
+        if (item.slot !== 'cargo') return;
+        used += (cargoVolumes[item.type_id] || 0) * (parseInt(item.quantity, 10) || 0);
+        html += '<div class="b-table-row fit-cargo-row" data-type-id="' + item.type_id + '" style="padding:0.2rem 0.75rem;display:flex;align-items:center;gap:0.4rem;">' +
+            '<img src="https://images.evetech.net/types/' + item.type_id + '/icon?size=32" style="width:20px;height:20px;border:1px solid var(--border);cursor:pointer;" data-click="showModuleInfo" data-type-id="' + item.type_id + '" title="Show info" data-on-error="hide">' +
+            '<span class="fit-cname" style="flex:1;font-size:11px;color:var(--text);">' + escapeHtml(item.type_name) + '</span>' +
+            '<input type="number" class="fit-cqty" inputmode="numeric" min="1" step="1" value="' + (parseInt(item.quantity, 10) || 1) + '" data-change="setCargoQty" data-item-idx="' + idx + '" aria-label="Quantity of ' + escapeHtml(item.type_name) + '">' +
+            '<button class="fit-ctl fit-cmax" data-click="maxCargo" data-item-idx="' + idx + '" style="background:none;border:1px solid var(--border);color:var(--accent);cursor:pointer;font-size:10px;padding:0 0.3rem;" title="Fill the rest of the hold with this">Max</button>' +
+            '<button class="fit-ctl" data-click="removeItem" data-item-idx="' + idx + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:0 0.25rem;" title="Remove">&times;</button>' +
+            '</div>';
+    });
+    host.innerHTML = html;
+    var sum = document.getElementById('cargo-summary');
+    if (sum) {
+        sum.textContent = _fmtM3(used) + ' / ' + (cargoCapacity == null ? '—' : _fmtM3(cargoCapacity)) + ' m³';
+        sum.style.color = (cargoCapacity != null && used > cargoCapacity + 1e-9) ? 'var(--danger)' : '';
+    }
 }
 
 /* ── Fighters (ISS-136) ─────────────────────────────────────────────────────
@@ -1420,6 +1625,7 @@ function renderSlots() {
     document.getElementById('section-drone').style.display = _droneSectionHidden() ? 'none' : '';
 
     renderFighters();
+    renderCargo();
 }
 
 /* ── Implants (10 slots, auto-routed by implantness) ───────────────── */
@@ -1909,12 +2115,14 @@ function recalcStats() {
         document.getElementById('stats-panel').innerHTML = html;
         _syncDroneVolumes();
         _syncFighterInfo();
+        _syncCargo();
         _fitSumBarUpdate();
     })
     .catch(function(e) {
         if (seq !== _statsSeq) return;
         document.getElementById('stats-panel').innerHTML = _fitErrorHtml(e.status);
         fighterHangarTotal = null;   // no answer, so no known total
+        cargoCapacity = null;
         _fitSumBarUpdate();
     });
     /* Skill check runs in parallel with the stats fetch — warnings don't
@@ -2496,6 +2704,57 @@ document.getElementById('ship-name').addEventListener('click', function() {
 /* ── Charge Selector ──────────────────────────────────────────────────────── */
 var chargeModal = null;
 
+/* T-086 · "Load in all N that fit". A weapon matches when it is a fitted high
+   or med item of the same module group as the one opened (overheatCache holds
+   group_id) and the chosen charge is in its own compatible list. Those lists
+   are fetched once per distinct fitted type from the existing charges route
+   and kept in _chargeFits (type_id -> [charge type ids]); compatibility does
+   not change within a page. _chargeCtx lives only while the selector is open. */
+var _chargeFits = {};
+var _chargeCtx = null;
+
+function _chargeCandidates(itemIndex) {
+    var item = state.items[itemIndex];
+    var out = [];
+    if (!item) return out;
+    var g = (overheatCache[item.type_id] || {}).group_id;
+    state.items.forEach(function(it, i) {
+        if (i !== itemIndex) {
+            if (it.slot !== 'high' && it.slot !== 'med') return;
+            var sameGroup = g != null && (overheatCache[it.type_id] || {}).group_id === g;
+            if (it.type_id !== item.type_id && !sameGroup) return;
+        }
+        out.push(i);
+    });
+    return out;
+}
+
+function _chargeTargets(itemIndex, chargeTypeId) {
+    var item = state.items[itemIndex];
+    var cands = _chargeCandidates(itemIndex);
+    var targets = cands.filter(function(i) {
+        var t = state.items[i].type_id;
+        if (i === itemIndex || t === item.type_id) return true;
+        return (_chargeFits[t] || []).indexOf(chargeTypeId) >= 0;
+    });
+    return {total: cands.length, targets: targets};
+}
+
+function _loadChargeFits(itemIndex) {
+    var seen = {};
+    var jobs = [];
+    _chargeCandidates(itemIndex).forEach(function(i) {
+        var t = state.items[i].type_id;
+        if (_chargeFits[t] !== undefined || seen[t]) return;
+        seen[t] = true;
+        jobs.push(fetch('/tools/fitting/charges/' + t)
+            .then(function(r) { return r.json(); })
+            .then(function(list) { _chargeFits[t] = list.map(function(c) { return c.type_id; }); })
+            .catch(function() {}));
+    });
+    return Promise.all(jobs);
+}
+
 function openChargeSelector(itemIndex) {
     if (this && this.dataset && this.dataset.itemIdx !== undefined) {
         itemIndex = parseInt(this.dataset.itemIdx, 10);
@@ -2506,7 +2765,10 @@ function openChargeSelector(itemIndex) {
         .then(function(r) { return r.json(); })
         .then(function(charges) {
             if (charges.length === 0) return;
-            showChargeDropdown(itemIndex, charges);
+            _chargeFits[item.type_id] = charges.map(function(c) { return c.type_id; });
+            _loadChargeFits(itemIndex).then(function() {
+                showChargeDropdown(itemIndex, charges);
+            });
         });
 }
 
@@ -2526,6 +2788,14 @@ function showChargeDropdown(itemIndex, charges) {
     var header = '<div style="padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">' +
         '<span style="font-size:11px;font-weight:600;color:var(--text);">Select Charge</span>' +
         '<button data-click="clearCharge" data-item-idx="' + itemIndex + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:9px;">Clear</button></div>';
+
+    var nCand = _chargeCandidates(itemIndex).length;
+    _chargeCtx = {itemIndex: itemIndex, all: nCand >= 2};
+    if (nCand >= 2) {
+        header += '<div style="padding:0.25rem 0.75rem;border-bottom:1px solid var(--border);">' +
+            '<button id="charge-all-toggle" class="fit-ctl fit-all-toggle" data-click="toggleChargeAll" aria-pressed="' + _chargeCtx.all + '">' +
+            'Load in all ' + nCand + ' that fit</button></div>';
+    }
 
     var list = '<div style="overflow-y:auto;flex:1;">';
     for (var i = 0; i < charges.length; i++) {
@@ -2551,6 +2821,18 @@ function closeChargeDropdown() {
     var overlay = document.getElementById('charge-overlay');
     if (overlay) overlay.remove();
     if (chargeModal) { chargeModal.remove(); chargeModal = null; }
+    _chargeCtx = null;
+}
+
+function toggleChargeAll() {
+    if (!_chargeCtx) return;
+    _chargeCtx.all = !_chargeCtx.all;
+    var b = document.getElementById('charge-all-toggle');
+    if (b) b.setAttribute('aria-pressed', String(_chargeCtx.all));
+}
+
+function _chargeAllOn(itemIndex) {
+    return !!(_chargeCtx && _chargeCtx.all && _chargeCtx.itemIndex === itemIndex);
 }
 
 function selectCharge(itemIndex, chargeTypeId, chargeName) {
@@ -2559,24 +2841,65 @@ function selectCharge(itemIndex, chargeTypeId, chargeName) {
         chargeTypeId = parseInt(this.dataset.typeId, 10);
         chargeName = this.dataset.typeName;
     }
-    state.items[itemIndex].charge_type_id = chargeTypeId;
-    state.items[itemIndex].charge_name = chargeName;
+    var note = '';
+    var idxs = [itemIndex];
+    if (_chargeAllOn(itemIndex)) {
+        var m = _chargeTargets(itemIndex, chargeTypeId);
+        idxs = m.targets;
+        note = 'Loaded in ' + idxs.length + ' of ' + m.total;
+        if (m.total > idxs.length) note += ' · ' + (m.total - idxs.length) + " can't use it";
+    }
+    idxs.forEach(function(i) {
+        state.items[i].charge_type_id = chargeTypeId;
+        state.items[i].charge_name = chargeName;
+    });
     saveState();
     closeChargeDropdown();
     renderSlots();
     recalcStats();
+    if (note) _limitNote(note, true);
 }
 
 function clearCharge(itemIndex) {
     if (this && this.dataset && this.dataset.itemIdx !== undefined) {
         itemIndex = parseInt(this.dataset.itemIdx, 10);
     }
-    delete state.items[itemIndex].charge_type_id;
-    delete state.items[itemIndex].charge_name;
+    var idxs = [itemIndex];
+    var note = '';
+    if (_chargeAllOn(itemIndex)) {
+        var t = state.items[itemIndex].type_id;
+        idxs = [];
+        state.items.forEach(function(it, i) { if (it.type_id === t && it.slot !== 'cargo') idxs.push(i); });
+        if (idxs.length > 1) note = 'Cleared the charge from ' + idxs.length + ' modules';
+    }
+    idxs.forEach(function(i) {
+        delete state.items[i].charge_type_id;
+        delete state.items[i].charge_name;
+    });
     saveState();
     closeChargeDropdown();
     renderSlots();
     recalcStats();
+    if (note) _limitNote(note, true);
+}
+
+/* Unload all charges: clears the loaded charge on every module, never removes
+   one. Cargo stacks are not "loaded" and are left alone. */
+function unloadAllCharges() {
+    var n = 0;
+    state.items.forEach(function(it) {
+        if (it.charge_type_id !== undefined || it.charge_name !== undefined) {
+            delete it.charge_type_id;
+            delete it.charge_name;
+            n++;
+        }
+    });
+    if (!n) { _limitNote('No charges loaded', true); return; }
+    saveState();
+    closeChargeDropdown();
+    renderSlots();
+    recalcStats();
+    _limitNote('Unloaded ' + n + ' charge' + (n === 1 ? '' : 's'), true);
 }
 
 /* ── Module Browser (persistent left panel) ──────────────────────────────── */
@@ -2701,6 +3024,10 @@ function renderBrowseItems(items) {
         // ISS-020: conditional hover collapses cleanly \u2014 only add the hover
         // class when canFit. Click handler via data-* only when canFit.
         // fit-brow: a 40px row on phones (mobile R6 T4).
+        // T-086: Fill on rack modules only (never subsystem, drone, cargo, fighter).
+        var fillBtn = (canFit && FILL_SLOTS.indexOf(item.slot_type) >= 0)
+            ? '<button class="fit-ctl fit-fill" data-click="addModuleFromBrowser" data-fill="1" data-stop data-type-id="' + item.type_id + '" data-type-name="' + escapeHtml(item.type_name) + '" data-slot-type="' + item.slot_type + '" style="background:none;border:1px solid var(--border);color:var(--accent);cursor:pointer;font-size:10px;padding:0 0.4rem;" title="Fill every free slot">Fill</button>'
+            : '';
         var rowClass = (canFit ? 'b-hover-accent ' : '') + 'fit-brow';
         var clickAttrs = canFit
             ? ' data-click="addModuleFromBrowser" data-type-id="' + item.type_id + '" data-type-name="' + escapeHtml(item.type_name) + '" data-slot-type="' + (item.slot_type || 'cargo') + '" data-volume="' + (item.volume || 0) + '"' +
@@ -2709,8 +3036,8 @@ function renderBrowseItems(items) {
         html += '<div class="' + rowClass + '" style="padding:0.35rem 0.75rem;cursor:' + cursor + ';display:flex;align-items:center;gap:0.5rem;border-bottom:1px solid var(--border);opacity:' + opacity + ';"' +
                 clickAttrs + '>' +
                 '<img src="https://images.evetech.net/types/' + item.type_id + '/icon?size=32" style="width:24px;height:24px;border:1px solid var(--border);" data-on-error="hide">' +
-                '<span style="flex:1;font-size:11px;color:var(--text);">' + escapeHtml(item.type_name) + restrictLabel + '</span>' +
-                slotBadge + '</div>';
+                '<span class="fit-bname' + (canFit ? ' fit-bname-1' : '') + '" style="flex:1;font-size:11px;color:var(--text);">' + escapeHtml(item.type_name) + restrictLabel + '</span>' +
+                slotBadge + fillBtn + '</div>';
     }
     container.innerHTML = html;
 }
@@ -2722,6 +3049,11 @@ function addModuleFromBrowser(typeId, typeName, slotType, volume) {
         slotType = this.dataset.slotType;
         if (this.dataset.volume !== undefined) volume = parseFloat(this.dataset.volume);
     }
+    if (this && this.dataset && this.dataset.fill === '1') {
+        // T-086: the row's Fill button. Its own note, so the add note is unchanged.
+        _fillWithCaps(typeId, typeName, slotType, true);
+        return;
+    }
     if (slotType === 'fighter') {
         // ISS-136: a squadron of its own, never merged with another of the
         // same type. Class and size ride on the row; volume on the usual one.
@@ -2732,6 +3064,11 @@ function addModuleFromBrowser(typeId, typeName, slotType, volume) {
         }
         if (!addFighter(typeId, typeName, finfo)) return;
         _noteBrowserAdd(_browserAddNoteText(typeId, typeName, slotType));
+        return;
+    }
+    if (slotType === 'cargo') {
+        // T-086: a stack with a quantity, merged by type.
+        if (addCargo(typeId, typeName, volume)) _noteBrowserAdd(_browserAddNoteText(typeId, typeName, slotType));
         return;
     }
     if (slotType !== 'drone' && slotType !== 'cargo' && isSlotFull(slotType)) {
@@ -2815,7 +3152,7 @@ addModule = function(typeId, typeName, slot) {
 function refreshOverheatCache() {
     var typeIds = [];
     state.items.forEach(function(item) {
-        if (item.slot !== 'drone' && item.slot !== 'cargo' && item.slot !== 'rig' && item.slot !== 'fighter') {
+        if (item.slot !== 'drone' && item.slot !== 'cargo' && item.slot !== 'fighter') {
             if (overheatCache[item.type_id] === undefined && typeIds.indexOf(item.type_id) < 0) typeIds.push(item.type_id);
         }
     });
@@ -2825,6 +3162,121 @@ function refreshOverheatCache() {
         .then(function(data) {
             for (var k in data) overheatCache[parseInt(k)] = data[k];
             renderSlots();
+        });
+}
+
+/* ── T-086 · Fill a rack ──────────────────────────────────────────────────
+   Fill adds N SEPARATE items (each its own object, quantity 1) so every
+   per-module control (state, charge, remove) keeps working. N is the free
+   slots in the rack, capped by the free turret/launcher hardpoints and by
+   maxGroupFitted / maxTypeFitted. The limits come from the module-caps
+   cache; a type with no cache entry yet is treated as unlimited, which is
+   why fillRack fetches the caps before it counts. */
+var FILL_SLOTS = ['high', 'med', 'low', 'rig'];
+
+function _fillLimits(typeId, slot) {
+    var cap = overheatCache[typeId] || {};
+    var free = Math.max(0, getSlotLimit(slot) - getSlotCount(slot));
+    var racked = state.items.filter(function(i) { return FILL_SLOTS.indexOf(i.slot) >= 0; });
+    var hp = (cap.hardpoint === 'turret' || cap.hardpoint === 'launcher') ? cap.hardpoint : null;
+    var hardFree = null;
+    if (hp && shipSlots[hp] != null) {
+        var usedHp = racked.filter(function(i) { return (overheatCache[i.type_id] || {}).hardpoint === hp; }).length;
+        hardFree = Math.max(0, shipSlots[hp] - usedHp);
+    }
+    var groupFree = null;
+    if (cap.max_group_fitted > 0 && cap.group_id != null) {
+        var inGroup = racked.filter(function(i) { return (overheatCache[i.type_id] || {}).group_id === cap.group_id; }).length;
+        groupFree = Math.max(0, cap.max_group_fitted - inGroup);
+    }
+    if (cap.max_type_fitted > 0) {
+        var ofType = racked.filter(function(i) { return i.type_id === typeId; }).length;
+        var typeFree = Math.max(0, cap.max_type_fitted - ofType);
+        groupFree = groupFree === null ? typeFree : Math.min(groupFree, typeFree);
+    }
+    var n = free;
+    if (hardFree !== null) n = Math.min(n, hardFree);
+    if (groupFree !== null) n = Math.min(n, groupFree);
+    return {n: n, free: free, hp: hp, hardFree: hardFree, groupFree: groupFree};
+}
+
+function fillCount(typeId, slot) {
+    if (FILL_SLOTS.indexOf(slot) < 0) return 0;
+    return _fillLimits(typeId, slot).n;
+}
+
+function _fillNoteText(typeName, slot, n, lim) {
+    if (n <= 0) {
+        var why = lim.free <= 0 ? _rackFill(slot) + ' full'
+            : lim.hardFree === 0 ? 'no free ' + lim.hp + ' hardpoints'
+            : 'fitting limit reached';
+        return '✖ Not added · ' + why;
+    }
+    var text = '✓ Added ' + n + '× ' + typeName + ' · ' + _rackFill(slot);
+    if (lim.hardFree !== null && lim.hardFree < lim.free && n === lim.hardFree) {
+        text += ' · ' + lim.hardFree + ' ' + lim.hp + ' hardpoint' + (lim.hardFree === 1 ? '' : 's') + ' free';
+    } else if (lim.groupFree !== null && lim.groupFree < lim.free && n === lim.groupFree) {
+        text += ' · fitting limit reached';
+    }
+    return text;
+}
+
+/* Count, push, then render and recalculate ONCE. */
+function _fillPush(typeId, typeName, slot, fromBrowser) {
+    var lim = _fillLimits(typeId, slot);
+    var n = FILL_SLOTS.indexOf(slot) < 0 ? 0 : lim.n;
+    for (var k = 0; k < n; k++) {
+        state.items.push({type_id: typeId, type_name: typeName, slot: slot, quantity: 1});
+    }
+    var text = _fillNoteText(typeName, slot, n, lim);
+    if (n > 0) {
+        saveState();
+        renderSlots();
+        recalcStats();
+        refreshOverheatCache();
+        if (!fromBrowser) {
+            document.querySelectorAll('.module-search[data-slot="' + slot + '"]').forEach(function(el) { el.value = ''; });
+            document.querySelectorAll('.module-results[data-slot="' + slot + '"]').forEach(function(el) { el.style.display = 'none'; });
+        }
+    }
+    // The browser panel is collapsed on phones: show the note beside the legend too.
+    _limitNote(text, true);
+    if (fromBrowser) _noteBrowserAdd(text);
+    return n;
+}
+
+/* Make sure the module and every fitted rack type has caps, then fill. */
+function _fillWithCaps(typeId, typeName, slot, fromBrowser) {
+    if (FILL_SLOTS.indexOf(slot) < 0) return;
+    var need = [typeId];
+    state.items.forEach(function(i) {
+        if (FILL_SLOTS.indexOf(i.slot) >= 0 && need.indexOf(i.type_id) < 0) need.push(i.type_id);
+    });
+    need = need.filter(function(t) { return overheatCache[t] === undefined; });
+    if (!need.length) { _fillPush(typeId, typeName, slot, fromBrowser); return; }
+    fetch('/tools/fitting/module-caps?type_ids=' + need.join(','))
+        .then(function(r) { return r.json(); })
+        .then(function(data) { for (var k in data) overheatCache[parseInt(k, 10)] = data[k]; })
+        .catch(function() {})
+        .then(function() { _fillPush(typeId, typeName, slot, fromBrowser); });
+}
+
+function fillRack(typeId, typeName, slot) {
+    if (this && this.dataset && this.dataset.typeId !== undefined) {
+        typeId = parseInt(this.dataset.typeId, 10);
+        typeName = this.dataset.typeName;
+        slot = this.dataset.slotType;
+    }
+    if (FILL_SLOTS.indexOf(slot) < 0) return;
+    if (!state.shipTypeId) { _fillWithCaps(typeId, typeName, slot, false); return; }
+    // The same one-time fit check a single add makes: one confirm at most.
+    fetch('/tools/fitting/check-fit?module_type_id=' + typeId + '&ship_type_id=' + state.shipTypeId)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.can_fit) {
+                if (!confirm(typeName + ' may not be compatible with this ship. Add anyway?')) return;
+            }
+            _fillWithCaps(typeId, typeName, slot, false);
         });
 }
 

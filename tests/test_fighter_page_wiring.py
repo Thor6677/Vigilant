@@ -47,7 +47,7 @@ global.escapeHtml = (s) => String(s);
 global.getSelectedSkillCharId = () => null; global.getSelectedSkillPreset = () => null; global.getSelectedProfile = () => 'uniform';
 global.getCustomWeights = () => null; global.getImplantTypeIds = () => []; global.getBoosterPayload = () => [];
 global._fitCheckOk = (r) => r; global._fitErrorHtml = (s) => 'ERROR ' + s;
-global._syncDroneVolumes = () => {}; global._fitSumBarUpdate = () => {}; global.refreshSkillWarnings = () => {};
+global._syncDroneVolumes = () => {}; global._syncCargo = () => {}; global.renderCargo = () => {}; global._fitSumBarUpdate = () => {}; global.refreshSkillWarnings = () => {};
 global.renderImplantSlots = () => {}; global.renderBoosterSlots = () => {};
 global.loadBrowseItems = () => {}; global.setTimeout = () => 0; global.clearTimeout = () => {};
 const pending = [];
@@ -122,9 +122,9 @@ def script():
 def result(script, tmp_path_factory):
     if not shutil.which("node"):
         pytest.skip("node not installed")
-    parts = ["var _limitNoteTimer = null;", "var fighterInfo = {};", "var fighterHangarTotal = null;",
+    parts = ["var _limitNoteTimer = null;", "var fighterInfo = {};", "var fighterHangarTotal = null;", "var cargoCapacity = null;",
              "var _lastMissing = {};", "var _statsSeq = 0;", "var currentBrowseGroup = null;",
-             "var overheatCache = {};", "var FIGHTER_CLASSES = ['light', 'support', 'heavy'];", "var NOT_LAUNCHABLE = 'not a launchable fighter';"]
+             "var overheatCache = {};", "var FIGHTER_CLASSES = ['light', 'support', 'heavy'];", "var FILL_SLOTS = ['high', 'med', 'low', 'rig'];", "var NOT_LAUNCHABLE = 'not a launchable fighter';"]
     parts += [_fn(script, n) for n in NAMES]
     harness = HARNESS % {"names": json.dumps(NAMES), "src": json.dumps("\n".join(parts))}
     path = tmp_path_factory.mktemp("node") / "harness.js"

@@ -1194,7 +1194,7 @@ async def search_drones(db: AsyncSession, query: str, limit: int = 15) -> list[d
 async def search_charges(db: AsyncSession, query: str, limit: int = 15) -> list[dict]:
     """Search published charge types by partial name."""
     result = await db.execute(
-        select(SDEType.type_id, SDEType.type_name, SDEType.group_id)
+        select(SDEType.type_id, SDEType.type_name, SDEType.group_id, SDEType.volume)
         .join(SDEGroup, SDEType.group_id == SDEGroup.group_id)
         .where(SDEGroup.category_id == CATEGORY_CHARGE)
         .where(SDEType.published == True)
@@ -1202,7 +1202,8 @@ async def search_charges(db: AsyncSession, query: str, limit: int = 15) -> list[
         .order_by(func.length(SDEType.type_name), SDEType.type_name)
         .limit(limit)
     )
-    return [{"type_id": r.type_id, "type_name": r.type_name, "group_id": r.group_id}
+    return [{"type_id": r.type_id, "type_name": r.type_name, "group_id": r.group_id,
+             "volume": r.volume or 0}
             for r in result.fetchall()]
 
 

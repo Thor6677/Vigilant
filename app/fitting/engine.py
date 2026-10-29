@@ -1565,7 +1565,10 @@ FIGHTER_UNSIZED_MAX = 12  # largest real squadron, for a fighter type with no si
 #    suppressors, micro jump drives and the like now rest at online as pyfa has
 #    them, so speed, signature, scan resolution and cap use change for existing
 #    fits; turrets, repairers and other cap users count only while running.
-FITTING_ENGINE_VERSION = "4"
+# 5: T-086 the stats carry cargo_used and cargo_volumes (the cargo hold's
+#    contents against its capacity); no number that existed changes, but a
+#    cached answer lacks the new keys, so the page would not know the hold's use.
+FITTING_ENGINE_VERSION = "5"
 
 
 def dps_cache_key(
@@ -2123,6 +2126,21 @@ async def calculate_fitting_stats(
             .where(SDEType.type_id.in_(drone_type_ids))
         )
         drone_volumes = {row.type_id: row.volume or 0 for row in vol_result.fetchall()}
+
+    # T-086: cargo volumes, same query shape. Cargo is stacks of ammo and the
+    # like; each stack's quantity multiplies the per-unit volume.
+    cargo_items = [i for i in items if i.get("slot") == "cargo"]
+    cargo_volumes = {}
+    cargo_used = 0.0
+    if cargo_items:
+        cargo_type_ids = list({c["type_id"] for c in cargo_items})
+        cvol_result = await db.execute(
+            select(SDEType.type_id, SDEType.volume)
+            .where(SDEType.type_id.in_(cargo_type_ids))
+        )
+        cargo_volumes = {row.type_id: row.volume or 0 for row in cvol_result.fetchall()}
+        for c in cargo_items:
+            cargo_used += cargo_volumes.get(c["type_id"], 0) * max(0, c.get("quantity", 1) or 0)
 
     # ── Step 1: Collect all attribute modifiers from fitted modules ────────
     # modifier_collectors[target_attr_id] = list of (operator, value) tuples
@@ -2781,6 +2799,9 @@ async def calculate_fitting_stats(
         # Per-unit volume of each fitted drone type: lets the page check a new
         # drone against the bay, including drones that came from an import.
         "drone_volumes": {str(t): v for t, v in drone_volumes.items()},
+        # T-086: what the cargo hold holds, and each stack type's per-unit volume.
+        "cargo_used": round(cargo_used, 1),
+        "cargo_volumes": {str(t): v for t, v in cargo_volumes.items()},
         # Launched squadrons against tubes and per-class limits; the hangar
         # counts every squadron, reserves included, and its total carries
         # Fighter Hangar Management.

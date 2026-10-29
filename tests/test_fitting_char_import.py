@@ -326,13 +326,23 @@ def test_conversion_matches_import_eft_for_equivalent_fit():
         assert "error" not in body, body
         eft_items = body["items"]
 
-        assert Counter(_item_key(i) for i in direct_items) == Counter(_item_key(i) for i in eft_items)
+        # T-086: the two paths now differ in exactly one way. An in-game
+        # fitting stores its loaded ammo AS a cargo stack, so the ESI path
+        # still turns that stack into the loaded charge. An EFT paste has the
+        # loaded ammo inline and its Cargo block is the real hold, so the EFT
+        # path keeps the stack. Everything else must still match.
+        loaded = {i["charge_type_id"] for i in eft_items if i.get("charge_type_id")}
+        eft_minus_kept_cargo = [i for i in eft_items
+                                if not (i["slot"] == "cargo" and i["type_id"] in loaded)]
+        assert Counter(_item_key(i) for i in direct_items) == Counter(_item_key(i) for i in eft_minus_kept_cargo)
         # And the charge really did get auto-loaded onto the turret, not left
         # sitting in cargo as its own line — otherwise this gate would pass
         # trivially on two empty autoload results.
         turret_item = next(i for i in direct_items if i["type_id"] == TURRET)
         assert turret_item.get("charge_type_id") == CHARGE
         assert not any(i["type_id"] == CHARGE and i["slot"] == "cargo" for i in direct_items)
+        # The pinned difference: the EFT import keeps the stack, the ESI one drops it.
+        assert any(i["type_id"] == CHARGE and i["slot"] == "cargo" for i in eft_items)
     finally:
         teardown()
 
@@ -424,7 +434,9 @@ def test_import_eft_attaches_med_slot_charge_from_cargo():
         injector = next(i for i in body["items"] if i["type_id"] == MED_MOD)
         assert injector["slot"] == "med"
         assert injector.get("charge_type_id") == BOOSTER
-        assert not any(i["type_id"] == BOOSTER and i["slot"] == "cargo" for i in body["items"])
+        # T-086: the EFT import keeps the cargo stack the charge was taken
+        # from (the ESI import still drops it; see the gate above).
+        assert any(i["type_id"] == BOOSTER and i["slot"] == "cargo" for i in body["items"])
     finally:
         teardown()
 
