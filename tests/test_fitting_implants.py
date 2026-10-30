@@ -298,3 +298,251 @@ def test_implant_picker_js_functions_are_globally_defined():
     assert "function onImplantCharChange(" in html
     assert "function loadImplantCharList(" in html
     assert "function fetchFittingCharacters(" in html
+
+
+# ── T-087: /tools/fitting/clones/{id} (active + jump clones) ────────────────
+
+import pytest
+
+import app.routes.fitting as fitting_mod
+from app.esi.scope_guard import ScopeNotGranted
+
+CLONE_CHAR = 95100011
+S_IMPL = "esi-clones.read_implants.v1"
+S_CLN = "esi-clones.read_clones.v1"
+T_ALPHA, T_BETA, T_GAMMA = 98001, 98002, 98003
+STRUCT = 1_000_000_000_777
+UNKNOWN_STRUCT = 1_000_000_000_888
+
+
+def _seed_clone_char(scopes):
+    async def _seed(db):
+        db.add(Character(
+            character_id=CLONE_CHAR, character_name="Test Pilot Clones",
+            access_token="x", refresh_token="y", token_expiry=datetime(2099, 1, 1),
+            scopes=scopes, user_id=USER_A,
+        ))
+        db.add(sm.SDEType(type_id=T_ALPHA, type_name="Test Implant Alpha", group_id=300, published=True))
+        db.add(sm.SDETypeDogmaAttribute(type_id=T_ALPHA, attribute_id=331, value=1.0))
+        db.add(sm.SDEType(type_id=T_BETA, type_name="Test Implant Beta", group_id=301, published=True))
+        db.add(sm.SDETypeDogmaAttribute(type_id=T_BETA, attribute_id=331, value=6.0))
+        db.add(sm.SDEType(type_id=T_GAMMA, type_name="Test Not An Implant", group_id=18, published=True))
+    return _seed
+
+
+class _FakeClient:
+    def __init__(self, *a, **kw):
+        pass
+
+    async def get(self, path, **kw):
+        return _Fake.implants_get(path)
+
+
+class _Fake:
+    implants_get = staticmethod(lambda path: [])
+
+
+def _mock_clones(monkeypatch, implants=None, clones=None, implants_exc=None, clones_exc=None,
+                 names=None, calls=None):
+    async def fake_refresh(char, db):
+        return "tok"
+
+    def implants_get(path):
+        if calls is not None:
+            calls.append(path)
+        if implants_exc:
+            raise implants_exc
+        return implants if implants is not None else []
+
+    async def fake_get_clones(client, character_id):
+        if calls is not None:
+            calls.append("clones")
+        if clones_exc:
+            raise clones_exc
+        return clones
+
+    async def fake_names(db, ids, cands):
+        return {i: n for i, n in (names or {}).items() if i in ids}
+
+    _Fake.implants_get = staticmethod(implants_get)
+    monkeypatch.setattr(fitting_mod, "refresh_token", fake_refresh)
+    monkeypatch.setattr(fitting_mod, "ESIClient", _FakeClient)
+    monkeypatch.setattr(fitting_mod.esi_char, "get_clones", fake_get_clones)
+    monkeypatch.setattr(fitting_mod, "_resolve_location_names", fake_names)
+
+
+def _get_clones(scopes, user=USER_A):
+    teardown = _seeded_db(_seed_clone_char(scopes))
+    try:
+        return _authed_client(user).get(f"/tools/fitting/clones/{CLONE_CHAR}")
+    finally:
+        teardown()
+
+
+def test_clones_anonymous_gets_401():
+    teardown = _seeded_db(_seed_clone_char(f"{S_IMPL} {S_CLN}"))
+    try:
+        r = _client().get(f"/tools/fitting/clones/{CLONE_CHAR}")
+        assert r.status_code == 401
+        assert r.text == ""
+    finally:
+        teardown()
+
+
+def test_clones_other_users_character_is_not_found(monkeypatch):
+    calls = []
+    _mock_clones(monkeypatch, calls=calls)
+    r = _get_clones(f"{S_IMPL} {S_CLN}", user=USER_B)
+    assert r.json() == {"error": "Character not found"}
+    assert calls == []
+
+
+def test_clones_neither_scope_returns_error_and_reauth(monkeypatch):
+    calls = []
+    _mock_clones(monkeypatch, calls=calls)
+    body = _get_clones("esi-skills.read_skills.v1").json()
+    assert "error" in body
+    assert body["reauth_url"] == f"/account/permissions/{CLONE_CHAR}?add=clones"
+    assert calls == []
+
+
+def test_clones_full_scopes_lists_active_and_jump_clones(monkeypatch):
+    _mock_clones(
+        monkeypatch,
+        implants=[T_ALPHA],
+        clones={"jump_clones": [
+            {"jump_clone_id": 5001, "location_id": STRUCT, "implants": [T_BETA, T_ALPHA, T_GAMMA]},
+            {"jump_clone_id": 5002, "location_id": STRUCT, "implants": []},
+        ]},
+        names={STRUCT: "Test Citadel"},
+    )
+    body = _get_clones(f"{S_IMPL} {S_CLN}").json()
+    assert body["character_name"] == "Test Pilot Clones"
+    assert body["notes"] == []
+    assert "reauth_url" not in body
+    active, jc1, jc2 = body["clones"]
+    assert active["clone_id"] == "active" and active["active"] is True
+    assert active["implant_count"] == 1
+    assert active["implants"] == {"1": {"type_id": T_ALPHA, "name": "Test Implant Alpha", "from_clone": True}}
+    assert jc1["clone_id"] == 5001 and jc1["active"] is False
+    assert jc1["label"] == "Test Citadel"
+    assert set(jc1["implants"]) == {"1", "6"}  # non-implant type dropped
+    assert jc1["implant_count"] == 2
+    # zero-implant clone is still listed
+    assert jc2["implant_count"] == 0 and jc2["implants"] == {}
+
+
+def test_clones_only_scope_omits_active_clone_with_note(monkeypatch):
+    calls = []
+    _mock_clones(monkeypatch, clones={"jump_clones": [
+        {"jump_clone_id": 5003, "location_id": STRUCT, "implants": [T_ALPHA]}]},
+        names={STRUCT: "Test Citadel"}, calls=calls)
+    body = _get_clones(S_CLN).json()
+    assert [c["clone_id"] for c in body["clones"]] == [5003]
+    assert any("implants permission" in n for n in body["notes"])
+    assert body["reauth_url"].endswith("?add=clones")
+    assert not any("/implants/" in c for c in calls)
+
+
+def test_implants_only_scope_returns_active_with_note(monkeypatch):
+    calls = []
+    _mock_clones(monkeypatch, implants=[T_BETA], calls=calls)
+    body = _get_clones(S_IMPL).json()
+    assert [c["clone_id"] for c in body["clones"]] == ["active"]
+    assert any("clones permission" in n for n in body["notes"])
+    assert "clones" not in calls
+
+
+def test_clones_no_jump_clones_returns_just_active(monkeypatch):
+    _mock_clones(monkeypatch, implants=[], clones={"home_location": {"location_id": 1}})
+    body = _get_clones(f"{S_IMPL} {S_CLN}").json()
+    assert len(body["clones"]) == 1
+    assert body["clones"][0]["implant_count"] == 0
+
+
+def test_clones_unknown_structure_and_custom_name_labels(monkeypatch):
+    _mock_clones(
+        monkeypatch, implants=[],
+        clones={"jump_clones": [
+            {"jump_clone_id": 5010, "location_id": UNKNOWN_STRUCT, "implants": []},
+            {"jump_clone_id": 5011, "location_id": STRUCT, "name": "Test Mining Clone", "implants": []},
+        ]},
+    )
+    body = _get_clones(f"{S_IMPL} {S_CLN}").json()
+    labels = {c["clone_id"]: c["label"] for c in body["clones"]}
+    assert labels[5010] == "Unknown structure"
+    assert labels[5011] == "Test Mining Clone"
+
+
+def test_clones_fetch_failure_still_returns_active(monkeypatch):
+    _mock_clones(monkeypatch, implants=[T_ALPHA], clones_exc=RuntimeError("boom"))
+    body = _get_clones(f"{S_IMPL} {S_CLN}").json()
+    assert [c["clone_id"] for c in body["clones"]] == ["active"]
+    assert any("Jump clones could not be loaded" in n for n in body["notes"])
+
+
+def test_clones_implants_failure_still_returns_jump_clones(monkeypatch):
+    _mock_clones(monkeypatch, implants_exc=RuntimeError("boom"),
+                 clones={"jump_clones": [{"jump_clone_id": 5020, "location_id": STRUCT, "implants": []}]})
+    body = _get_clones(f"{S_IMPL} {S_CLN}").json()
+    assert [c["clone_id"] for c in body["clones"]] == [5020]
+    assert body["notes"]
+
+
+def test_clones_scope_not_granted_returns_reauth_prompt(monkeypatch):
+    exc = ScopeNotGranted("GET", "/characters/1/clones/", S_CLN)
+    _mock_clones(monkeypatch, implants=[T_ALPHA], clones_exc=exc)
+    body = _get_clones(f"{S_IMPL} {S_CLN}").json()
+    assert body["reauth_url"] == f"/account/permissions/{CLONE_CHAR}?add=clones"
+    assert any("clones permission is missing" in n for n in body["notes"])
+    assert [c["clone_id"] for c in body["clones"]] == ["active"]
+
+
+def test_clones_junk_ids_and_entries_are_dropped_and_capped(monkeypatch):
+    jcs = [
+        "not-a-dict", None, 7,
+        {"jump_clone_id": "abc", "location_id": STRUCT, "implants": []},
+        {"jump_clone_id": 10 ** 30, "location_id": STRUCT, "implants": []},
+        {"jump_clone_id": 5030, "location_id": "zzz", "implants": [T_ALPHA, "x", None, 10 ** 30, -4]},
+    ] + [{"jump_clone_id": 6000 + i, "location_id": STRUCT, "implants": []} for i in range(60)]
+    _mock_clones(monkeypatch, implants=[], clones={"jump_clones": jcs})
+    body = _get_clones(f"{S_IMPL} {S_CLN}").json()
+    jump = [c for c in body["clones"] if not c["active"]]
+    assert len(jump) == fitting_mod.MAX_CLONES_LISTED
+    assert jump[0]["clone_id"] == 5030
+    assert list(jump[0]["implants"]) == ["1"]
+    assert jump[0]["label"] == "Unknown structure"
+
+
+def test_fitting_characters_reports_has_clones_scope():
+    teardown = _seeded_db(_seed_clone_char(S_CLN))
+    try:
+        chars = _authed_client(USER_A).get("/tools/fitting/characters").json()["characters"]
+        c = chars[0]
+        assert c["has_clones_scope"] is True and c["has_implants_scope"] is False
+    finally:
+        teardown()
+
+
+def test_clone_implants_still_reuses_slot_map(monkeypatch):
+    _mock_clones(monkeypatch, implants=[T_ALPHA, T_BETA, T_GAMMA])
+    teardown = _seeded_db(_seed_clone_char(S_IMPL))
+    try:
+        body = _authed_client(USER_A).get(f"/tools/fitting/clone-implants/{CLONE_CHAR}").json()
+        assert set(body["implants"]) == {"1", "6"}
+        assert body["implants"]["1"]["from_clone"] is True
+    finally:
+        teardown()
+
+
+def test_two_step_template_contract():
+    html = _template_src()
+    assert 'id="implant-clone-select"' in html
+    assert 'data-change="onImplantCloneChange"' in html
+    assert "function onImplantCloneChange(" in html
+    assert "/tools/fitting/clones/" in html
+    # picking a character must not call the one-shot active-clone route
+    assert "/tools/fitting/clone-implants/" not in html
+    assert "up to 5 minutes" in html
+    assert 'title="Imported from a character clone"' in html
+    assert "active jump clone" not in html

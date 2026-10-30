@@ -508,6 +508,7 @@ The `modifierInfo` YAML on each effect defines what attribute is modified, by wh
 |----------|-------|---------|
 | `GET /characters/{id}/skills/` | `esi-skills.read_skills.v1` | Character skill levels |
 | `GET /characters/{id}/implants/` | `esi-clones.read_implants.v1` | Active implant type IDs |
+| `GET /characters/{id}/clones/` | `esi-clones.read_clones.v1` | Jump clones (location, optional name, implant type IDs); never includes the active clone. Cached up to 5 minutes. |
 | `GET /characters/{id}/fittings/` | `esi-fittings.read_fittings.v1` | In-game saved fittings |
 
 ---

@@ -347,7 +347,7 @@ _LOGIN_ONLY_GETS = (
     "/tools/fitting/search/ships?q=rifter", "/tools/fitting/search/modules?q=gun",
     "/tools/fitting/search/drones?q=hob", "/tools/fitting/search/implants?q=snake",
     "/tools/fitting/search/boosters?q=blue", "/tools/fitting/search/charges?q=emp",
-    "/tools/fitting/ship-slots/587", "/tools/fitting/browse/groups",
+    "/tools/fitting/clones/1", "/tools/fitting/ship-slots/587", "/tools/fitting/browse/groups",
     "/tools/fitting/browse/items/1", "/tools/fitting/browse/path/1",
     "/tools/fitting/check-fit?module_type_id=1&ship_type_id=587",
     "/tools/fitting/module-caps?type_ids=1", "/tools/fitting/charges/1",
