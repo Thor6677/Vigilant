@@ -149,6 +149,9 @@ NON_RACK_SLOTS = ("drone", "cargo", "fighter")
 # per-copy loops (cross-module, booster, signature bloom) would otherwise run
 # once per unit of an attacker-supplied number.
 MAX_RACK_MODULE_COPIES = 8
+# Far above any real hold (a capital ammo bay is well under a million units); only
+# stops a hand-built request from overflowing the cargo volume sum.
+MAX_CARGO_QTY = 10_000_000
 
 # ── Module state (offline / online / active / overheated) ────────────────
 # Effect 16 (online) is the one effect every fittable module carries; it is

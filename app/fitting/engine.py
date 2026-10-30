@@ -52,7 +52,7 @@ from app.fitting.constants import (
     OVERLOAD_SOURCE_ATTR_PREFIX,
     ARMOR_RESONANCE_ATTRS, DAMAGE_TYPE_KEYS,
     EFFECT_ADAPTIVE_ARMOR_HARDENER, EFFECT_POWER_BOOSTER, NON_RACK_SLOTS,
-    ACTIVATION_EFFECT_CATS, MAX_RACK_MODULE_COPIES, EFFECT_MJD, EFFECT_MJFG, EFFECT_MJFG_CAPITAL,
+    ACTIVATION_EFFECT_CATS, MAX_RACK_MODULE_COPIES, MAX_CARGO_QTY, EFFECT_MJD, EFFECT_MJFG, EFFECT_MJFG_CAPITAL,
     ATTR_SIG_RADIUS_BONUS_PERCENT, STATE_ACTIVE, STATE_OVERHEATED,
     EFFECT_MWD, EFFECT_AFTERBURNER, ATTR_SPEED_FACTOR, ATTR_SPEED_BOOST_FACTOR,
     ATTR_MASS_ADDITION, ATTR_SIG_RADIUS_BONUS, ATTR_SIG_RADIUS,
@@ -2140,7 +2140,8 @@ async def calculate_fitting_stats(
         )
         cargo_volumes = {row.type_id: row.volume or 0 for row in cvol_result.fetchall()}
         for c in cargo_items:
-            cargo_used += cargo_volumes.get(c["type_id"], 0) * max(0, c.get("quantity", 1) or 0)
+            qty = min(max(as_int(c.get("quantity", 1), 0), 0), MAX_CARGO_QTY)
+            cargo_used += cargo_volumes.get(c["type_id"], 0) * qty
 
     # ── Step 1: Collect all attribute modifiers from fitted modules ────────
     # modifier_collectors[target_attr_id] = list of (operator, value) tuples

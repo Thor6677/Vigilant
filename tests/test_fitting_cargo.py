@@ -4,6 +4,7 @@ The cargo helpers run in node against stubs; the markup is checked in the
 rendered page. Type ids and names are invented.
 """
 import json
+import pathlib
 import re
 import shutil
 import subprocess
@@ -212,7 +213,7 @@ def test_add_reads_the_element_dataset(result):
 def test_add_that_does_not_fit_is_refused_with_a_note(result):
     ok, qty, notes, saved = result["refused"]
     assert ok is False and qty == 10 and saved == 0
-    assert notes == ["Not added · cargo hold full (5 / 5 m³)"]
+    assert notes == ["Not added · cargo hold full (5 / 5 m³)|near"]
     assert result["lastFits"] == [True, 10]
 
 
@@ -373,6 +374,14 @@ def test_engine_ignores_a_bad_cargo_quantity():
     assert stats["cargo_used"] == 0
 
 
+def test_engine_survives_a_hand_built_cargo_quantity():
+    """A string, a list, a float or a huge int must not 500 the stats call."""
+    for bad in ("5", [1], None, 1.5, 10 ** 400):
+        stats = _stats_with([{"type_id": AMMO, "slot": "cargo", "quantity": bad}])
+        assert stats["cargo_used"] >= 0
+    assert _stats_with([{"type_id": AMMO, "slot": "cargo", "quantity": "8"}])["cargo_used"] == pytest.approx(2.0)
+
+
 # ── stats partial ────────────────────────────────────────────────────
 
 def test_partial_exposes_capacity_and_flags_an_overfull_hold():
@@ -486,3 +495,17 @@ def test_autoload_keep_cargo_loads_the_weapon_and_keeps_the_stack():
     out = _autoload_cargo_charges(items, compat, keep_cargo=True)
     assert out[0]["charge_type_id"] == AMMO
     assert [i["quantity"] for i in out if i["slot"] == "cargo"] == [500]
+
+
+def test_notes_go_to_one_place_and_confirmations_use_the_calm_tone(script):
+    """A legend or cargo note is not copied into the drone/fighter boxes, and a
+    confirmation gets the ok tone instead of the red limit-note border."""
+    body = _fn(script, "_limitNote")
+    assert "where === true" in body and "where === 'cargo'" in body
+    assert "fit-note-ok" in body
+    css = (pathlib.Path(__file__).resolve().parent.parent / "static/css/site.css").read_text()
+    assert ".fit-limit-note.fit-note-ok" in css
+    assert css.index(".fit-limit-note.fit-note-ok") < css.index("m-hide wins ties")
+    # every cargo action writes to the cargo section, not to every box
+    for fn in ("setCargoQty", "maxCargo", "emptyCargo"):
+        assert "'cargo')" in _fn(script, fn)
