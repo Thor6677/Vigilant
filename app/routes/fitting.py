@@ -881,6 +881,9 @@ async def import_eft(
     # through parsing we are.
     items = []
     charge_names_eft: list[str | None] = []
+    # Parallel to `items`: the line carried an "xN" quantity. Fitted modules
+    # never do in EFT; spare modules in the cargo hold always do (ISS-161).
+    had_qty_suffix: list[bool] = []
     for line in lines[1:]:
         line = line.strip()
         if not line or line.startswith("["):
@@ -895,19 +898,27 @@ async def import_eft(
             item_name = line
             quantity = 1
 
-        # Handle comma-separated charge: "Module Name, Charge Name"
-        charge_name_eft = None
-        if ", " in item_name and not item_name.startswith("["):
-            parts = item_name.rsplit(", ", 1)
-            item_name = parts[0].strip()
-            charge_name_eft = parts[1].strip()
-
         # Skip empty slot markers
         if item_name.startswith("[Empty ") or item_name.startswith("[empty "):
             continue
 
+        # Handle comma-separated charge: "Module Name, Charge Name". Some
+        # tools write the comma with no space after it (ISS-160), so the
+        # split is on the last comma with optional whitespace. A real item
+        # name that itself contains a comma is tried whole first.
+        charge_name_eft = None
+        type_id = None
+        if "," in item_name:
+            type_id = await sde.type_name_to_id(db, item_name)
+            if not type_id:
+                head, _, tail = item_name.rpartition(",")
+                if head.strip() and tail.strip():
+                    item_name = head.strip()
+                    charge_name_eft = tail.strip()
+
         # Resolve type
-        type_id = await sde.type_name_to_id(db, item_name)
+        if not type_id:
+            type_id = await sde.type_name_to_id(db, item_name)
         if not type_id:
             logger.warning("EFT import: unresolved name '%s' (hex: %s)",
                            item_name, item_name.encode('unicode_escape').decode())
@@ -919,12 +930,17 @@ async def import_eft(
             "quantity": quantity,
         })
         charge_names_eft.append(charge_name_eft)
+        had_qty_suffix.append(bool(qty_match))
 
     # Batched slot resolution (SDEModuleSlot, with the drone/cargo fallback
     # via group -> category) for every distinct type_id parsed above.
     slot_map = await sde.get_module_slot_types_bulk(db, [i["type_id"] for i in items])
-    for item in items:
+    for item, has_qty in zip(items, had_qty_suffix):
         item["slot"] = slot_map.get(item["type_id"], "cargo")
+        # A rack module listed with a quantity is a spare in the cargo hold,
+        # not a fitted module (ISS-161). Drones and fighters keep their xN.
+        if has_qty and item["slot"] in ("high", "med", "low", "rig", "subsystem"):
+            item["slot"] = "cargo"
 
     # Resolve inline charges now that slot is known. NOTE: "med", not
     # "mid" — SDEModuleSlot and the fitting tool's own slot keys both say
