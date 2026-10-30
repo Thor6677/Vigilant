@@ -3126,6 +3126,11 @@ button.cp-chip { cursor: pointer; }
 .fit-bname-1 { white-space: nowrap; }
 .fit-fill { flex-shrink: 0; }
 /* ── end T-086 ── */
+/* T-086 · note tone: the line under the legend defaults to the warning colour
+   (it used to be an inline style); confirmations switch to the calm one. */
+#fit-state-note { color: var(--warning, var(--muted)); }
+.fit-limit-note.fit-note-ok { border-color: var(--success); color: var(--success); }
+#fit-state-note.fit-note-ok { color: var(--success); }
 /* ── T-086 · ammo: load in all / unload all ── */
 /* Unload all sits at the end of the module-state legend row. It is a .fit-ctl
    (40px wide, 44px tall from the global phone button floor). */

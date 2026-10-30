@@ -209,7 +209,7 @@
 {# Shown on every screen size: the Module Browser panel that holds the other
    limit notes is collapsed on phones. #}
 <div id="fit-state-note" role="status" aria-live="polite" hidden
-     style="font-size:11px;color:var(--warning, var(--muted));margin-bottom:0.4rem;"></div>
+     style="font-size:11px;margin-bottom:0.4rem;"></div>
 
 {% for slot_key, slot_label in [("high", "High Slots"), ("med", "Mid Slots"), ("low", "Low Slots"), ("rig", "Rigs"), ("subsystem", "Subsystems")] %}
 <div class="b-section" id="section-{{ slot_key }}" style="display:none;">
@@ -1014,14 +1014,22 @@ function _fmtM3(v) {
     return (Math.round(v * 10) / 10).toString();
 }
 
-function _limitNote(text, nearLegend) {
+/* `where`: omitted = every section's note box; true = only the always-visible
+   line under the legend; 'cargo' = that line plus the cargo section's box.
+   Confirmations ("Added", "Loaded", "Emptied") get the calm tone, everything
+   else the warning one. */
+function _limitNote(text, where) {
     var ids = ['fit-limit-note', 'drone-limit-note', 'fighter-limit-note', 'cargo-limit-note'];
-    if (nearLegend || !text) ids.push('fit-state-note');
-    ids.forEach(function(id) {
+    if (where === true) ids = ['fit-state-note'];
+    else if (where === 'cargo') ids = ['cargo-limit-note', 'fit-state-note'];
+    var ok = /^(\u2713|Added|Loaded|Unloaded|Emptied|Set to)/.test(text || '');
+    ['fit-limit-note', 'drone-limit-note', 'fighter-limit-note', 'cargo-limit-note', 'fit-state-note'].forEach(function(id) {
         var el = document.getElementById(id);
         if (!el) return;
-        el.textContent = text;
-        el.hidden = !text;
+        var on = ids.indexOf(id) >= 0 || !text;
+        el.textContent = on ? text : '';
+        el.hidden = !(on && text);
+        if (el.classList) el.classList.toggle('fit-note-ok', on && ok);
     });
     clearTimeout(_limitNoteTimer);
     if (text) _limitNoteTimer = setTimeout(function() { _limitNote(''); }, 4000);
@@ -1162,7 +1170,7 @@ function addCargo(typeId, typeName, volume) {
     var at = _cargoStackIndex(typeId);
     var want = at >= 0 ? (parseInt(state.items[at].quantity, 10) || 0) + 1 : 1;
     if (_cargoMaxQty(typeId, at) < want) {
-        _limitNote('Not added · ' + _cargoFull());
+        _limitNote('Not added · ' + _cargoFull(), 'cargo');
         return false;
     }
     if (at >= 0) {
@@ -1201,7 +1209,7 @@ function setCargoQty(index, value) {
     saveState();
     renderSlots();
     recalcStats();
-    if (note) _limitNote(note, true);
+    if (note) _limitNote(note, 'cargo');
 }
 
 function maxCargo(index) {
@@ -1211,24 +1219,24 @@ function maxCargo(index) {
     var item = state.items[index];
     if (!item || item.slot !== 'cargo') return;
     var max = _cargoMaxQty(item.type_id, index);
-    if (max === Infinity) { _limitNote('Capacity not known yet', true); return; }
-    if (max < 1) { _limitNote('No room · ' + _cargoFull(), true); return; }
+    if (max === Infinity) { _limitNote('Capacity not known yet', 'cargo'); return; }
+    if (max < 1) { _limitNote('No room · ' + _cargoFull(), 'cargo'); return; }
     item.quantity = max;
     saveState();
     renderSlots();
     recalcStats();
-    _limitNote('Set to ' + max + ' · hold now ' + _fmtM3(_cargoUsed()) + ' / ' + _fmtM3(cargoCapacity) + ' m³', true);
+    _limitNote('Set to ' + max + ' · hold now ' + _fmtM3(_cargoUsed()) + ' / ' + _fmtM3(cargoCapacity) + ' m³', 'cargo');
 }
 
 /* Empty cargo: every stack goes (charges live here), modules are never touched. */
 function emptyCargo() {
     var n = state.items.filter(function(i) { return i.slot === 'cargo'; }).length;
-    if (!n) { _limitNote('Cargo is already empty', true); return; }
+    if (!n) { _limitNote('Cargo is already empty', 'cargo'); return; }
     state.items = state.items.filter(function(i) { return i.slot !== 'cargo'; });
     saveState();
     renderSlots();
     recalcStats();
-    _limitNote('Emptied cargo · ' + n + ' stack' + (n === 1 ? '' : 's'), true);
+    _limitNote('Emptied cargo · ' + n + ' stack' + (n === 1 ? '' : 's'), 'cargo');
 }
 
 function renderCargo() {
