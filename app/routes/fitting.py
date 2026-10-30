@@ -34,7 +34,10 @@ from app.db.sde_models import (
     SDETypeSkillReq,
 )
 from app.sde.loader import SLOT_EFFECT_MAP
+from app.auth import scopes as perms
 from app.esi.client import ESIClient, refresh_token
+from app.esi.scope_guard import ScopeNotGranted
+from app.routes.industry_jobs import _resolve_location_names
 from app.esi import universe as esi_universe
 from app.esi import character as esi_char
 from app.esi import market as esi_market
@@ -1241,24 +1244,187 @@ async def clone_implants(
     if not type_ids:
         return {"implants": {}}
 
+    slot_map = await _implant_slot_map(db, [int(t) for t in type_ids])
+    implants = _implants_from_slot_map(slot_map, slot_map.keys())
+
+    return {"implants": implants, "character_name": char.character_name}
+
+
+async def _implant_slot_map(db: AsyncSession, type_ids) -> dict[int, tuple[str, int]]:
+    """{type_id: (name, implantness slot 1-10)} for the implant types among
+    `type_ids`, from one batched query on dogma attribute 331. Types with no
+    (or an out-of-range / non-numeric) implantness are left out."""
+    ids = list({int(t) for t in type_ids})
+    if not ids:
+        return {}
     rows = (await db.execute(
         select(SDEType.type_id, SDEType.type_name, SDETypeDogmaAttribute.value)
         .join(SDETypeDogmaAttribute,
               (SDETypeDogmaAttribute.type_id == SDEType.type_id)
               & (SDETypeDogmaAttribute.attribute_id == 331))
-        .where(SDEType.type_id.in_([int(t) for t in type_ids]))
+        .where(SDEType.type_id.in_(ids))
     )).fetchall()
 
-    implants: dict = {}
+    out: dict[int, tuple[str, int]] = {}
     for type_id, name, slot_val in rows:
         try:
             slot = int(slot_val)
         except (TypeError, ValueError):
             continue
         if 1 <= slot <= 10:
-            implants[str(slot)] = {"type_id": type_id, "name": name, "from_clone": True}
+            out[type_id] = (name, slot)
+    return out
 
-    return {"implants": implants, "character_name": char.character_name}
+
+def _implants_from_slot_map(slot_map: dict, type_ids) -> dict:
+    """The state.implants shape ({"<slot>": {type_id, name, from_clone}}) for
+    the given type ids, using a map from _implant_slot_map."""
+    implants: dict = {}
+    for type_id in type_ids:
+        hit = slot_map.get(type_id)
+        if hit:
+            name, slot = hit
+            implants[str(slot)] = {"type_id": type_id, "name": name, "from_clone": True}
+    return implants
+
+
+# Most clones one /clones/ response will list (a character has at most 10 jump
+# clones in practice; this only bounds a malformed ESI payload).
+MAX_CLONES_LISTED = 32
+
+
+def _clean_clone_type_ids(raw) -> list[int]:
+    """Bounded, deduped implant type ids out of an untrusted ESI list."""
+    out: list[int] = []
+    if not isinstance(raw, list):
+        return out
+    for t in raw:
+        t_int = _bounded_int(t)
+        if t_int is not None and t_int not in out:
+            out.append(t_int)
+        if len(out) >= 20:
+            break
+    return out
+
+
+@router.get("/tools/fitting/clones/{character_id}")
+async def character_clones(
+    request: Request,
+    character_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """The active clone plus every jump clone of a linked character, each
+    already resolved to the state.implants slot-map shape (T-087).
+
+    Active implants (/implants/, implants scope) and the jump clones
+    (/clones/, clones scope) are fetched independently: if one scope is
+    missing or one call fails the other half is still returned, with a note.
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("", 401)
+
+    char = (await db.execute(
+        select(Character)
+        .where(Character.character_id == character_id)
+        .where(Character.user_id == user_id)
+    )).scalar_one_or_none()
+    if not char:
+        return {"error": "Character not found"}
+
+    reauth_url = f"/account/permissions/{character_id}?add=clones"
+    want_active = perms.has(char, perms.IMPLANTS)
+    want_jump = perms.has(char, perms.CLONES)
+    if not want_active and not want_jump:
+        return {"error": "Character lacks the clones permission — re-authorize to grant it.",
+                "reauth_url": reauth_url}
+
+    notes: list[str] = []
+    need_reauth = False
+    try:
+        token = await refresh_token(char, db)
+        client = ESIClient(token, db=db)
+    except Exception as e:
+        logger.warning("clones token refresh failed for %s: %s", character_id, e)
+        return {"error": "ESI clone fetch failed — try again shortly."}
+
+    active_ids: list[int] | None = None
+    if want_active:
+        try:
+            active_ids = _clean_clone_type_ids(
+                await client.get(f"/characters/{character_id}/implants/") or [])
+        except ScopeNotGranted:
+            need_reauth = True
+            notes.append("The active clone is unavailable: the implants permission is missing.")
+        except Exception as e:
+            logger.warning("clones: implants fetch failed for %s: %s", character_id, e)
+            notes.append("The active clone could not be loaded from ESI right now.")
+    else:
+        notes.append("The active clone is unavailable: the implants permission is missing.")
+        need_reauth = True
+
+    jump_raw: list = []
+    if want_jump:
+        try:
+            data = await esi_char.get_clones(client, character_id)
+            jcs = (data or {}).get("jump_clones") if isinstance(data, dict) else None
+            jump_raw = jcs if isinstance(jcs, list) else []
+        except ScopeNotGranted:
+            need_reauth = True
+            notes.append("Jump clones are unavailable: the clones permission is missing.")
+        except Exception as e:
+            logger.warning("clones: clones fetch failed for %s: %s", character_id, e)
+            notes.append("Jump clones could not be loaded from ESI right now.")
+    else:
+        notes.append("Jump clones are unavailable: the clones permission is missing.")
+        need_reauth = True
+
+    jumps: list[dict] = []
+    for jc in jump_raw:
+        if not isinstance(jc, dict):
+            continue
+        jc_id = _bounded_int(jc.get("jump_clone_id"))
+        if jc_id is None:
+            continue
+        jumps.append({
+            "id": jc_id,
+            # structure ids run past 2**31 (~1e12+), so widen the bound to int64
+            "location_id": _bounded_int(jc.get("location_id"), 2 ** 63),
+            "name": jc.get("name") if isinstance(jc.get("name"), str) else "",
+            "type_ids": _clean_clone_type_ids(jc.get("implants")),
+        })
+        if len(jumps) >= MAX_CLONES_LISTED:
+            break
+
+    all_types = set(active_ids or [])
+    for j in jumps:
+        all_types.update(j["type_ids"])
+    slot_map = await _implant_slot_map(db, all_types)
+
+    loc_ids = {j["location_id"] for j in jumps if j["location_id"]}
+    loc_names: dict = {}
+    if loc_ids:
+        try:
+            loc_names = await _resolve_location_names(db, loc_ids, {lid: [char] for lid in loc_ids})
+        except Exception as e:
+            logger.info("clones: location name resolution failed: %s", e)
+
+    clones: list[dict] = []
+    if active_ids is not None:
+        impl = _implants_from_slot_map(slot_map, active_ids)
+        clones.append({"clone_id": "active", "active": True, "label": "Active clone",
+                       "implant_count": len(impl), "implants": impl})
+    for j in jumps:
+        impl = _implants_from_slot_map(slot_map, j["type_ids"])
+        label = (j["name"].strip()[:80] if j["name"].strip()
+                 else loc_names.get(j["location_id"]) or "Unknown structure")
+        clones.append({"clone_id": j["id"], "active": False, "label": label,
+                       "implant_count": len(impl), "implants": impl})
+
+    out = {"character_name": char.character_name, "clones": clones, "notes": notes}
+    if need_reauth:
+        out["reauth_url"] = reauth_url
+    return out
 
 
 @router.post("/tools/fitting/save")
@@ -2361,6 +2527,7 @@ async def list_fitting_characters(request: Request, db: AsyncSession = Depends(g
                 "name": c.character_name,
                 "has_skills_scope": _SKILLS_SCOPE in (c.scopes or ""),
                 "has_implants_scope": _IMPLANTS_SCOPE in (c.scopes or ""),
+                "has_clones_scope": perms.has(c, perms.CLONES),
             }
             for c in r.scalars().all()
         ],

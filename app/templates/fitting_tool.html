@@ -233,10 +233,10 @@
 {% endfor %}
 
 {# Implants — 10 slots, auto-routed by implantness (1-5 stat, 6-10 hardwiring).
-   ISS-016 follow-up: picking a character is the PRIMARY path — one select
-   pulls that character's whole active clone into the 10 slots in one shot,
-   replacing the old two-control layout (an unrelated top-of-page character
-   dropdown plus a separate "load" button). Name search stays as the
+   ISS-016 follow-up / T-087: picking a character is the PRIMARY path, in two
+   steps — the character select only lists that character's clones (active
+   plus jump clones); choosing one in the clone select pulls its whole
+   loadout into the 10 slots. Name search stays as the
    secondary path, below, for hypothetical implants nobody has plugged in. #}
 <div class="b-section" id="section-implant" style="display:none;">
     <div class="b-section-head">
@@ -246,11 +246,16 @@
     <div id="slots-implant" style="padding:0.25rem 0;"></div>
     <div style="padding:0.25rem 0;">
         <select id="implant-char-select" data-change="onImplantCharChange"
-                title="Load a linked character's active clone implants"
+                title="Choose a linked character, then pick one of its clones"
                 style="width:100%;padding:0.3rem 0.5rem;font-size:10px;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;cursor:pointer;">
             <option value="">Load from character&hellip;</option>
             {# populated via JS on init — characters lacking the implants
                scope render disabled with a reason in the option text #}
+        </select>
+        <select id="implant-clone-select" data-change="onImplantCloneChange" hidden
+                title="Load this clone's implants into the slots"
+                style="width:100%;padding:0.3rem 0.5rem;margin-top:0.25rem;font-size:10px;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;cursor:pointer;">
+            <option value="">Choose a clone&hellip;</option>
         </select>
         <div id="implant-char-status" style="font-size:9px;color:var(--muted);margin-top:0.25rem;display:none;"></div>
     </div>
@@ -1654,7 +1659,7 @@ function renderImplantSlots() {
     for (var s = 1; s <= 10; s++) {
         var rec = (state.implants || {})[String(s)];
         var cloneTag = (rec && rec.from_clone)
-            ? '<span style="font-size:8px;letter-spacing:0.1em;color:var(--accent);border:1px solid var(--accent);padding:0 3px;margin-left:0.4rem;" title="Imported from active jump clone">CLONE</span>'
+            ? '<span style="font-size:8px;letter-spacing:0.1em;color:var(--accent);border:1px solid var(--accent);padding:0 3px;margin-left:0.4rem;" title="Imported from a character clone">CLONE</span>'
             : '';
         var nameCell = rec
             ? '<span class="b-text">' + escapeHtml(rec.name || ('Type ' + rec.type_id)) + '</span>' + cloneTag +
@@ -1726,11 +1731,15 @@ function removeImplant(slot) {
     recalcStats();
 }
 
-/* ISS-016 follow-up: character-first implant picker. Populates the select
-   from the same /tools/fitting/characters list the skill-check selector
-   uses (see fetchFittingCharacters below) rather than issuing its own
-   query, and disables options for characters that haven't granted the
-   implants scope instead of only failing after the fact. */
+/* ISS-016 follow-up / T-087: character-first, two-step implant picker.
+   Step 1 (#implant-char-select) lists the linked characters, taken from the
+   same /tools/fitting/characters list the skill-check selector uses (see
+   fetchFittingCharacters below). A character is selectable with EITHER the
+   implants scope (active clone) or the clones scope (jump clones); only one
+   with neither is disabled. Step 2 (#implant-clone-select) lists that
+   character's clones from /tools/fitting/clones/{id}. */
+var implantClones = [];
+
 function loadImplantCharList() {
     var sel = document.getElementById('implant-char-select');
     if (!sel) return;
@@ -1738,64 +1747,114 @@ function loadImplantCharList() {
         characters.forEach(function(c) {
             var opt = document.createElement('option');
             opt.value = String(c.id);
-            opt.textContent = c.has_implants_scope
-                ? c.name
-                : (c.name + ' — no implant access');
-            opt.disabled = !c.has_implants_scope;
+            var active = !!c.has_implants_scope, jump = !!c.has_clones_scope;
+            opt.textContent = (active && jump) ? c.name
+                : jump ? (c.name + ' — jump clones only')
+                : active ? (c.name + ' — active clone only')
+                : (c.name + ' — no clone access');
+            opt.disabled = !(active || jump);
             sel.appendChild(opt);
         });
     });
 }
 
+/* Status line under the pickers: plain text plus, when `reauthUrl` is given,
+   a re-authorize link (built with createElement, never innerHTML). */
+function setImplantStatus(text, reauthUrl) {
+    var el = document.getElementById('implant-char-status');
+    if (!el) return;
+    el.textContent = text || '';
+    el.style.display = (text || reauthUrl) ? '' : 'none';
+    if (reauthUrl) {
+        var a = document.createElement('a');
+        a.href = reauthUrl;
+        a.textContent = 'Re-authorize this character';
+        a.style.color = 'var(--accent)';
+        el.appendChild(document.createTextNode(' '));
+        el.appendChild(a);
+        el.appendChild(document.createTextNode('.'));
+    }
+}
+
+function resetImplantCloneSelect() {
+    implantClones = [];
+    var cs = document.getElementById('implant-clone-select');
+    if (!cs) return;
+    while (cs.options.length > 1) cs.remove(1);
+    cs.value = '';
+    cs.hidden = true;
+}
+
 /* Fires on 'change' of #implant-char-select (dispatcher calls this with
-   `this` = the <select>, per static/js/actions.js). Replaces the whole
-   loadout (a clone IS a full loadout) — imported slots get from_clone=true
-   so renderImplantSlots badges them. Confirms first if slots are already
-   occupied, matching the confirm() pattern used elsewhere on this page
-   (see doImportEFT-adjacent module-compat check and deleteFitting). */
+   `this` = the <select>, per static/js/actions.js). Picking a character
+   loads NOTHING into the slots — it only fetches that character's clone
+   list and reveals #implant-clone-select. */
 function onImplantCharChange() {
     var sel = this;
-    var statusEl = document.getElementById('implant-char-status');
+    resetImplantCloneSelect();
     var charId = sel.value ? parseInt(sel.value, 10) : null;
-    if (!charId) { if (statusEl) statusEl.style.display = 'none'; return; }
+    if (!charId) { setImplantStatus(''); return; }
 
     var label = sel.options[sel.selectedIndex]
         ? sel.options[sel.selectedIndex].textContent : '';
+    setImplantStatus('Loading clones for ' + label + '…');
+    fetch('/tools/fitting/clones/' + charId)
+    .then(function(r) {
+        if (r.status === 401) throw new Error('Sign in to load clones.');
+        if (!r.ok) throw new Error('Clone fetch failed — try again shortly.');
+        return r.json();
+    })
+    .then(function(data) {
+        if (sel.value !== String(charId)) return;  // user moved on
+        if (data.error) { setImplantStatus(data.error, data.reauth_url); return; }
+        implantClones = data.clones || [];
+        var cs = document.getElementById('implant-clone-select');
+        implantClones.forEach(function(c) {
+            var opt = document.createElement('option');
+            opt.value = String(c.clone_id);
+            opt.textContent = c.label + ' (' + c.implant_count + ' implant' +
+                (c.implant_count === 1 ? '' : 's') + ')';
+            cs.appendChild(opt);
+        });
+        cs.hidden = !implantClones.length;
+        var who = data.character_name || label;
+        var msg = implantClones.length
+            ? (who + ': choose a clone to load. Clone data can be up to 5 minutes behind the game.')
+            : (who + ' has no clones to show.');
+        if (data.notes && data.notes.length) msg += ' ' + data.notes.join(' ');
+        setImplantStatus(msg, data.reauth_url);
+    })
+    .catch(function(e) {
+        if (sel.value !== String(charId)) return;
+        setImplantStatus((e && e.message) || 'Clone fetch failed — try again shortly.');
+    });
+}
+
+/* Fires on 'change' of #implant-clone-select. Replaces the whole loadout (a
+   clone IS a full loadout) — imported slots get from_clone=true so
+   renderImplantSlots badges them. Confirms first if slots are already
+   occupied, matching the confirm() pattern used elsewhere on this page. */
+function onImplantCloneChange() {
+    var cs = this;
+    var clone = null;
+    for (var i = 0; i < implantClones.length; i++) {
+        if (String(implantClones[i].clone_id) === cs.value) { clone = implantClones[i]; break; }
+    }
+    if (!clone) return;
     var hadImplants = state.implants && Object.keys(state.implants).length > 0;
-    if (hadImplants && !confirm('Replace all implant slots with ' + label + '’s active clone?')) {
-        sel.value = '';
+    if (hadImplants && !confirm('Replace all implant slots with ' + clone.label + '?')) {
+        cs.value = '';
         return;
     }
-
-    if (statusEl) {
-        statusEl.style.display = '';
-        statusEl.textContent = 'Loading ' + label + '…';
-    }
-    fetch('/tools/fitting/clone-implants/' + charId)
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-        if (data.error) {
-            if (statusEl) statusEl.textContent = data.error;
-            sel.value = '';
-            return;
-        }
-        state.implants = data.implants || {};
-        saveState();
-        renderImplantSlots();
-        recalcStats();
-        var n = Object.keys(state.implants).length;
-        var who = data.character_name || label;
-        if (statusEl) {
-            statusEl.textContent = n
-                ? ('Loaded ' + n + ' implant' + (n === 1 ? '' : 's') + ' from ' + who + '.')
-                : (who + '’s active clone has no implants plugged in.');
-        }
-        sel.value = '';
-    })
-    .catch(function() {
-        if (statusEl) statusEl.textContent = 'Clone implant fetch failed — try again shortly.';
-        sel.value = '';
-    });
+    state.implants = JSON.parse(JSON.stringify(clone.implants || {}));
+    saveState();
+    renderImplantSlots();
+    recalcStats();
+    var n = Object.keys(state.implants).length;
+    setImplantStatus(n
+        ? ('Loaded ' + n + ' implant' + (n === 1 ? '' : 's') + ' from ' + clone.label + '.')
+        : (clone.label + ' has no implants plugged in.'));
+    cs.value = '';
 }
 
 /* ── Boosters (T-049, active-list + per-effect toggles) ──────────────
