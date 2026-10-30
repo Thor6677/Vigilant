@@ -4,6 +4,7 @@ import asyncio
 import html
 import json
 import logging
+import time
 import os
 import sys
 from datetime import datetime, timezone, timedelta
@@ -31,6 +32,7 @@ from app.esi.client import get_etag_cache_stats
 from app.esi.rate_limit import rate_limit_tracker
 from app.config import get_settings
 from app.ops import updater as updater_client
+from app.ops import update_check
 from app.ops import update_reports
 from app.ops import update_schedule
 from app.ops.version import is_newer
@@ -1235,7 +1237,8 @@ async def _updater_context(request: Request, db: AsyncSession,
                            schedule_error: str | None = None,
                            schedule_notice: str | None = None,
                            open_form: str | None = None,
-                           draft: dict | None = None) -> dict:
+                           draft: dict | None = None,
+                           check_notice: str | None = None) -> dict:
     """Everything partials/updater_panel.html needs — update state AND schedule
     state, always together.
 
@@ -1270,6 +1273,7 @@ async def _updater_context(request: Request, db: AsyncSession,
         # polled on BUSY would sit motionless right after the operator clicked —
         # looking exactly like a button that did nothing.
         "awaiting_pickup": awaiting,
+        "check_notice": check_notice,
         "polling": polling or awaiting or state == updater_client.BUSY,
         **(await _schedule_context(request, db, schedule_error, schedule_notice,
                                    open_form, draft)),
@@ -1302,12 +1306,48 @@ async def _updater_context(request: Request, db: AsyncSession,
 
 
 async def _panel(request: Request, db: AsyncSession, error: str | None = None,
-                 status_code: int = 200, polling: bool = False):
+                 status_code: int = 200, polling: bool = False,
+                 check_notice: str | None = None):
     return templates.TemplateResponse(
         request, "partials/updater_panel.html",
-        await _updater_context(request, db, error, polling),
+        await _updater_context(request, db, error, polling,
+                               check_notice=check_notice),
         status_code=status_code,
     )
+
+
+# T-089: an operator who has just tagged a release should not have to wait up to
+# an hour for the poll. The button runs the SAME check_once() the loop runs, so
+# the announce-once rule (update_status.notified_tag, committed with the send
+# decision) holds: a release that was already announced is not announced again.
+# The cooldown is per process and deliberately simple; it only has to stop a
+# held-down button from hammering GitHub's 60-requests/hour unauthenticated cap.
+_CHECK_COOLDOWN_SECONDS = 30.0
+_last_manual_check = 0.0
+
+
+@router.post("/update/check", response_class=HTMLResponse)
+async def updater_check_now(request: Request,
+                            db: AsyncSession = Depends(get_db),
+                            admin: User = Depends(require_admin)):
+    """Run the release check now, then re-render the panel."""
+    global _last_manual_check
+    if not get_settings().update_check_enabled:
+        return await _panel(request, db, status_code=400,
+                            check_notice="The update check is turned off "
+                                         "(UPDATE_CHECK_ENABLED=false).")
+    wait = _CHECK_COOLDOWN_SECONDS - (time.monotonic() - _last_manual_check)
+    if wait > 0:
+        return await _panel(
+            request, db,
+            check_notice=f"Checked a moment ago. Try again in {int(wait) + 1} seconds.")
+    _last_manual_check = time.monotonic()
+    logger.info("update check: manual check requested by user %s", admin.id)
+    await update_check.check_once()
+    # The panel reads the row check_once() just committed; a failed fetch shows
+    # up in its "Last check error" row.
+    await db.rollback()
+    return await _panel(request, db)
 
 
 @router.get("/update/status", response_class=HTMLResponse)

@@ -81,8 +81,16 @@
     </div>
     <div class="b-row">
       <span class="b-row-label">Last checked</span>
-      <span class="b-row-val">{{ update_checked_at }}</span>
+      <span class="b-row-val">{{ update_checked_at }}
+        <form class="upd-check" hx-post="/admin/update/check"
+              hx-target="#updater-panel" hx-swap="outerHTML">
+          <button type="submit" class="b-btn is-ghost">Check now</button>
+        </form>
+      </span>
     </div>
+    {% if check_notice %}
+    <div class="b-row"><span class="b-row-val is-muted">{{ check_notice }}</span></div>
+    {% endif %}
     {% if update_error %}
     <div class="b-row">
       <span class="b-row-label">Last check error</span>
