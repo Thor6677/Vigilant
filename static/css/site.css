@@ -3154,6 +3154,8 @@ button.cp-chip { cursor: pointer; }
 }
 /* ── end T-086 cargo ── */
 
+/* T-089 · the manual "Check now" button sits beside the Last checked time. */
+.upd-check { display: inline-block; margin: 0 0 0 0.75rem; }
 /* ── m-hide wins ties: keep this the last phone rule in the file ── */
 @media (max-width: 640px) {
     .m-hide, .m-tabs-desktop { display: none !important; }
