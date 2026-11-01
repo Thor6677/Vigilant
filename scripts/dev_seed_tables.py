@@ -154,6 +154,8 @@ COPY_ALL = (
     'sovereignty_changes',
     'stockpile_targets',
     'structure_age_calibration',
+    'structure_first_seen',
+    'structure_first_seen_imports',
     'structure_name_cache',
     'structure_timers',
     'system_activity_snapshots',

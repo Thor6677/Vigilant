@@ -88,6 +88,10 @@ class Settings(BaseSettings):
     battle_loot_evetools_resolve: bool = True
     killmail_gc_enabled: bool = False  # off by default so /intel/kills has full history
     everef_ingest_enabled: bool = False  # historical backfill from data.everef.net
+    # Daily EVE Ref public-structure snapshot -> structure_first_seen (T-090).
+    # Small (one file a day) and not a killmail feature, so it is NOT behind
+    # killmails_enabled; BACKGROUND_JOBS_ENABLED=false still stops it.
+    everef_structures_enabled: bool = True
 
     # Ops/backfill progress ping (see everef_ingest.py). Optional; no-op unset.
     # Named DISCORD_WEBHOOK to match the host-level ops tooling that shares it.
