@@ -25,6 +25,18 @@
 </div>
 
 <div class="b-panel" style="margin-bottom:1.5rem;">
+    <div class="b-panel-head"><span class="b-label">EVE Ref first sightings</span></div>
+    <div class="b-row"><span class="b-row-label">Last ingest</span><span class="b-row-val">{% if everef['last'] %}{{ everef['last'] }} UTC ({{ everef['age_days'] }} d ago){% else %}Never{% endif %}{% if everef['stale'] %} <span style="color:var(--danger);">stale</span>{% endif %}</span></div>
+    <div class="b-row"><span class="b-row-label">Files imported</span><span class="b-row-val">{{ "{:,}".format(everef['files']) }}</span></div>
+    <div class="b-row"><span class="b-row-label">Structures with a first sighting</span><span class="b-row-val">{{ "{:,}".format(everef['ids']) }} ({{ "{:,}".format(everef['censored_ids']) }} on mass dates, not counted)</span></div>
+    {% if shadow['matched'] %}
+    <div class="b-row"><span class="b-row-label">Shadow check vs triff ({{ "{:,}".format(shadow['matched']) }} shared)</span><span class="b-row-val" style="white-space:normal;">first sighting after the triff date: {{ shadow['after_share'] }}% · lag median {{ shadow['median_lag'] }} d, 90th percentile {{ shadow['p90_lag'] }} d</span></div>
+    {% else %}
+    <div class="b-row"><span class="b-row-label">Shadow check vs triff</span><span class="b-row-val">No shared structures yet</span></div>
+    {% endif %}
+</div>
+
+<div class="b-panel" style="margin-bottom:1.5rem;">
     <div class="b-panel-head"><span class="b-label">Pending review</span><span class="b-badge">{{ stats['pending'] }}</span></div>
     {% for row in pending %}
     {% set s = row['sub'] %}

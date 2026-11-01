@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import (Character, StructureAgeCalibration, StructureAgeSubmission, User,
                            get_db)
 from app.intel import structure_age_check as sac
+from app.intel import structure_first_seen as sfs
 from app.routes.admin import _log_audit, require_admin
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -131,7 +132,8 @@ async def _render(request: Request, db: AsyncSession, flash: str | None = None,
     }
     return templates.TemplateResponse(request, "partials/admin_structure_age.html", {
         "flash": flash, "flash_ok": flash_ok, "stats": stats, "pending": pending_rows,
-        "approved": approved_rows, "certainty_labels": sac.CERTAINTY_LABELS})
+        "approved": approved_rows, "everef": await sfs.ingest_status(db),
+        "shadow": await sfs.shadow_stats(db), "certainty_labels": sac.CERTAINTY_LABELS})
 
 
 @router.get("/section/structure-age", response_class=HTMLResponse)

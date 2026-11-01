@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import StructureAgeCalibration, StructureAgeSubmission, get_db
 from app.intel import structure_age_check as sac
+from app.intel import structure_first_seen as first_seen
 from app.routes.admin import _log_audit
 
 log = logging.getLogger(__name__)
@@ -112,12 +113,14 @@ async def _estimate(db: AsyncSession, structure_id: int) -> dict:
         est = await sac.neighbour_estimate(db, structure_id)
         if est is None:
             return {"error": sac.FRONTIER_MSG}
-        return {
+        # Above every calibration point, so above the newest triff one too:
+        # the only place EVE Ref's first sightings (never "exact") are used.
+        return _capped(await first_seen.tail_refinement(db, structure_id, {
             "method": "extrapolate",
             **est,
             "note": "ID is newer than our latest calibration point — "
                     "extrapolated from the recent ID rate",
-        }
+        }))
 
     # A user point among the two nearest: no straight line to it. IDs run
     # ~10-45 days noisy, so one honest outlier would drag every estimate

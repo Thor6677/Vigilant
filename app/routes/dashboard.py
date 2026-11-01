@@ -2379,10 +2379,28 @@ async def _background_scheduler():
                 except Exception as e:
                     logger.warning("Contract check error: %s", e)
 
+            # Structure first-seen ingest from EVE Ref (T-090) — daily. One
+            # small file, so it sits OUTSIDE the killmails_enabled gate below;
+            # the scheduler itself only runs when BACKGROUND_JOBS_ENABLED.
+            from app.config import get_settings as _get_settings
+            if _get_settings().everef_structures_enabled and (
+                not hasattr(_background_scheduler, '_last_structure_first_seen') or
+                (now - _background_scheduler._last_structure_first_seen).total_seconds() >= 86400
+            ):
+                try:
+                    from app.intel.everef_structures import (
+                        run_daily_ingest, is_running as _sfs_running,
+                    )
+                    if not _sfs_running():
+                        _background_scheduler._structure_first_seen_task = asyncio.create_task(
+                            run_daily_ingest())
+                        _background_scheduler._last_structure_first_seen = now
+                except Exception as e:
+                    logger.warning("structure first-seen scheduling error: %s", e)
+
             # Killmail backfill — one character per 2-minute tick (gated).
             # Inside backfill_character there is a 10-minute startup grace
             # window, so this is a no-op right after deploy.
-            from app.config import get_settings as _get_settings
             _km_settings = _get_settings()
             if _km_settings.killmails_enabled:
                 if not hasattr(_background_scheduler, '_last_killmail_tick') or \
@@ -2446,45 +2464,6 @@ async def _background_scheduler():
                         _background_scheduler._last_everef_tick = now
                     except Exception as e:
                         logger.warning("EVERef backfill scheduling error: %s", e)
-
-                # Structure age calibration scrape — runs once automatically when
-                # the calibration table is empty, then never again (guarded by flag).
-                if not getattr(_background_scheduler, '_structure_age_done', False):
-                    try:
-                        from app.intel.structure_age_scraper import (
-                            run_full_scrape, is_running as _sa_running,
-                        )
-                        from app.db.models import StructureAgeCalibration
-                        from sqlalchemy import func as _func
-                        if not _sa_running():
-                            async with AsyncSessionLocal() as _db:
-                                _count = (await _db.execute(
-                                    select(_func.count(StructureAgeCalibration.structure_id))
-                                )).scalar() or 0
-                            if _count < 5000:
-                                asyncio.create_task(run_full_scrape())
-                                logger.info("structure_age: %d calibration points (< 5000) — starting/resuming scrape", _count)
-                            else:
-                                _background_scheduler._structure_age_done = True
-                                logger.info("structure_age: %d calibration points, scrape complete", _count)
-                    except Exception as e:
-                        logger.warning("structure_age scheduler error: %s", e)
-
-                # Daily structure-calibration top-up from EVERef (T-036).
-                # Cheap: one small JSON + a handful of triff.tools calls for
-                # IDs not yet in the calibration table. Skipped while the
-                # one-time full scrape is still running.
-                if not hasattr(_background_scheduler, '_last_sa_refresh') or \
-                   (now - _background_scheduler._last_sa_refresh).total_seconds() >= 86400:
-                    try:
-                        from app.intel.structure_age_scraper import (
-                            refresh_from_everef, is_running as _sa_refresh_running,
-                        )
-                        if not _sa_refresh_running():
-                            asyncio.create_task(refresh_from_everef())
-                            _background_scheduler._last_sa_refresh = now
-                    except Exception as e:
-                        logger.warning("structure_age refresh scheduling error: %s", e)
 
                 # Recent battle discovery — every 15 min, also gated by battles flag.
                 # Hard-capped to 100 ESI hydrations per run (see recent_battles.py).

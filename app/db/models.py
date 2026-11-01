@@ -1047,6 +1047,41 @@ class StructureAgeCalibration(Base):
     source = Column(String(8), nullable=False, server_default="triff")
 
 
+class StructureFirstSeen(Base):
+    """The earliest time EVE Ref's public-structure snapshots listed a
+    structure (T-090). first_seen is an UPPER bound on when the structure was
+    anchored, not the anchor date, and is kept as the minimum over every file
+    ever imported (upstream drops structures unseen for 30 days, so a later
+    file never raises it). This is NOT calibration data: it must never be
+    written to structure_age_calibration, whose rows show as "exact".
+
+    censored: first_seen falls on a date shared by far more ids than a normal
+    day (an upstream sweep or reset), so it says nothing about creation. It
+    never counts as a vote. `source` is the snapshot file that supplied the
+    kept first_seen.
+    """
+    __tablename__ = "structure_first_seen"
+
+    structure_id = Column(BigInteger, primary_key=True)
+    first_seen = Column(DateTime, nullable=False, index=True)
+    censored = Column(Boolean, nullable=False, default=False, server_default=text("0"))
+    source = Column(String(80), nullable=False)
+    last_listed = Column(DateTime, nullable=True)
+    type_id = Column(Integer, nullable=True)
+
+
+class StructureFirstSeenImport(Base):
+    """One row per EVE Ref snapshot file already ingested, written in the same
+    transaction as that file's structure_first_seen rows."""
+    __tablename__ = "structure_first_seen_imports"
+
+    file_name = Column(String(120), primary_key=True)
+    imported_at = Column(DateTime, nullable=False)
+    rows = Column(Integer, nullable=False, default=0)
+    etag = Column(String(200), nullable=True)
+    size = Column(Integer, nullable=True)
+
+
 class StructureAgeSubmission(Base):
     """A user's claimed anchor date for one structure ID, before and after
     admin review (app/routes/admin_structure_age.py). Approving copies it into
