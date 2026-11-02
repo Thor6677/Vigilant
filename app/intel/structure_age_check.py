@@ -17,10 +17,10 @@ Each neighbour predicts the date by moving its own along the ID rate (~14M
 IDs/day through 2026), and the expected date is the median prediction. Where
 neighbours are dense on both sides that moves them a day or so and the median
 is simply theirs. Where there's a gap — above the newest point, or between the
-stalled triff data and the first user point above it — it extrapolates
+stalled baseline data and the first user point above it — it extrapolates
 instead of sticking to the far side's dates. The rate is fitted on
-triff-sourced points only, so approved user points can never move it, and a
-user point is one vote among up to fifty.
+non-user points only (today the frozen triff rows), so approved user
+points can never move it, and a user point is one vote among up to fifty.
 """
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ TOLERANCE_DAYS = 120         # allowed distance from the expected date
 TAIL_SPREAD = 0.25           # extra allowance per day of IDs to the neighbours
 FUTURE_SLACK_DAYS = 60       # an ID extrapolating further past today doesn't exist yet
 ESTIMATE_HALF_DAYS = 7       # estimate half-width right next to its neighbours (triff's tail used ±7)
-RATE_WINDOW_DAYS = 180       # triff points used to fit the ID rate
+RATE_WINDOW_DAYS = 180       # non-user points used to fit the ID rate
 MIN_RATE_POINTS = 20
 DEFAULT_RATE = 14_000_000    # IDs/day through 2026; only when the fit has too little data
 # Item IDs, not character or corporation IDs. The calibration data starts at
@@ -206,14 +206,15 @@ async def _neighbours(db: AsyncSession, structure_id: int, sources):
 
 
 async def tail_rate(db: AsyncSession) -> float:
-    """IDs/day over the last RATE_WINDOW_DAYS of triff data. Triff only, so
-    approved user points can't move it (spec §7 S5)."""
-    newest = await db.scalar(select(func.max(Cal.anchor_mid)).where(Cal.source == "triff"))
+    """IDs/day over the last RATE_WINDOW_DAYS of non-user points (today the
+    frozen triff rows). Never user points, so approved ones can't move it
+    (spec §7 S5)."""
+    newest = await db.scalar(select(func.max(Cal.anchor_mid)).where(Cal.source != "user"))
     if newest is None:
         return DEFAULT_RATE
     rows = (await db.execute(
         select(Cal.structure_id, Cal.anchor_mid)
-        .where(Cal.source == "triff",
+        .where(Cal.source != "user",
                Cal.anchor_mid >= newest - timedelta(days=RATE_WINDOW_DAYS)))).all()
     return fit_rate([(r[0], r[1]) for r in rows])
 

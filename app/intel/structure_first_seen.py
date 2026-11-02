@@ -1,11 +1,13 @@
-"""Read side of structure_first_seen (T-090, PR 1): the EVE Ref upper bound
-for structure ages above the newest triff anchor, and the admin shadow stats.
+"""Read side of structure_first_seen (T-090): the EVE Ref upper bound for
+structure ages, above the newest calibration point (PR 1) and between two
+calibration points (PR 2), and the admin shadow stats.
 
 first_seen is when EVE Ref first LISTED a structure, so it can only be later
 than the anchor date. It tightens the latest side of an estimate and pulls the
-midpoint down; the earliest side stays as wide as the extrapolation made it,
-or wider by the measured lag. Nothing here is "exact" and nothing here touches
-structure_age_calibration.
+midpoint down. Above the calibration range the earliest side stays as wide as
+the extrapolation made it, or wider by the measured lag; inside it the window
+never grows and never leaves the neighbouring anchors. Nothing here is "exact"
+and nothing here touches structure_age_calibration.
 """
 from __future__ import annotations
 
@@ -18,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import (StructureAgeCalibration, StructureFirstSeen,
                            StructureFirstSeenImport)
 
+MIN_REFINED_DAYS = 2         # in range, a refined window is never narrower than this
 K_VOTES = 3                  # U(X) = k-th smallest non-censored first_seen at ids >= X
 DEFAULT_LAG_DAYS = 14.0
 MIN_LAG_SAMPLES = 20
@@ -33,14 +36,17 @@ async def own_first_seen(db: AsyncSession, structure_id: int) -> datetime | None
     return await db.scalar(select(FS.first_seen).where(FS.structure_id == structure_id))
 
 
-async def soft_upper_bound(db: AsyncSession, structure_id: int) -> datetime | None:
+async def soft_upper_bound(db: AsyncSession, structure_id: int,
+                           below: int | None = None) -> datetime | None:
     """The K_VOTES-th smallest non-censored first_seen among ids >= structure_id
     (a later id was listed no earlier than this one existed, give or take the
     noise in id order, so the k-th smallest tolerates a few early outliers).
-    None when fewer than K_VOTES such ids exist."""
-    rows = (await db.execute(
-        select(FS.first_seen).where(FS.structure_id >= structure_id, FS.censored.is_(False))
-        .order_by(FS.first_seen).limit(K_VOTES))).scalars().all()
+    With `below`, only ids under it vote (the gap up to a neighbouring
+    calibration point). None when fewer than K_VOTES such ids exist."""
+    q = select(FS.first_seen).where(FS.structure_id >= structure_id, FS.censored.is_(False))
+    if below is not None:
+        q = q.where(FS.structure_id < below)
+    rows = (await db.execute(q.order_by(FS.first_seen).limit(K_VOTES))).scalars().all()
     return rows[-1] if len(rows) == K_VOTES else None
 
 
@@ -97,6 +103,59 @@ async def tail_refinement(db: AsyncSession, structure_id: int, est: dict) -> dic
     if own is None and soft is None:
         return est
     return refine_estimate(est, own, soft, await measured_lag_days(db))
+
+
+def refine_between(est: dict, own: datetime | None, soft: datetime | None,
+                   floor: datetime) -> dict:
+    """Tighten an in-range estimate with EVE Ref. B = min(own, soft) is a
+    latest date. The window slides earlier so its latest side meets B, keeping
+    its width, but never below `floor` (the lowest neighbouring anchor date)
+    and never narrower than MIN_REFINED_DAYS; it never grows, never moves
+    later, and the midpoint only moves down. Returns est itself when B is no
+    earlier than est's latest date. Never "exact"."""
+    bounds = [b for b in (own, soft) if b is not None]
+    if not bounds:
+        return est
+    bound = min(bounds)
+    if bound >= est["high"]:
+        return est
+    width = est["high"] - est["low"]
+    keep = min(width, timedelta(days=MIN_REFINED_DAYS))
+    high = max(bound, floor + keep)
+    low = max(floor, high - width)
+    mid = min(est["mid"], low + (high - low) / 2)
+    return {**est, "low": low, "mid": mid, "high": high,
+            "days_wide": round((high - low).total_seconds() / 86400, 1),
+            "source": "everef"}
+
+
+async def range_refinement(db: AsyncSession, structure_id: int, est: dict,
+                           lower, upper) -> dict:
+    """est (an interpolation between calibration points `lower` and `upper`,
+    neither on the id itself) refined with EVE Ref. Own first sighting counts
+    even when censored, as in the tail; the soft bound only takes votes from
+    ids inside this gap. Unchanged when the table has nothing for it."""
+    own = await own_first_seen(db, structure_id)
+    soft = await soft_upper_bound(db, structure_id, below=upper.structure_id)
+    if own is None and soft is None:
+        return est
+    floor = min(lower.anchor_low, upper.anchor_low, est["low"])
+    out = refine_between(est, own, soft, floor)
+    if out is est:
+        return est
+    if own is not None and (soft is None or own <= soft):
+        text = (f"EVE Ref first saw it on {own.strftime('%d %b %Y')}, so it is at most "
+                "that old; the range stays between the neighbouring calibration points "
+                "(not a measurement)")
+    else:
+        text = "latest date bounded by EVE Ref's first sightings of nearby structures"
+    bound = min(b for b in (own, soft) if b is not None)
+    if bound < floor + min(est["high"] - est["low"], timedelta(days=MIN_REFINED_DAYS)):
+        text = ("EVE Ref first saw it earlier than its neighbours suggest; ID order is "
+                "noisy, so the range is held at the lower neighbour")
+    base = est.get("note")
+    out["note"] = f"{base} — {text}" if base else text
+    return out
 
 
 # ── Admin ─────────────────────────────────────────────────────────────────

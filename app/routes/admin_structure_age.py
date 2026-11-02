@@ -85,7 +85,7 @@ def _who(labels: dict[int, str], uid: int | None) -> str:
 async def _gap(db: AsyncSession, sub, rate: float, sources=None) -> dict | None:
     """How far the claim sits from the expected date right now; None with
     no points to compare. `beyond` when the ID extrapolates past the
-    frontier on these sources — for the triff baseline that is exactly when
+    frontier on these sources — for the data baseline that is exactly when
     drift from a chain of user points would be largest, so it's flagged,
     not shown as n/a."""
     try:
@@ -116,7 +116,7 @@ async def _render(request: Request, db: AsyncSession, flash: str | None = None,
     approved_rows = [{"sub": s, "by": _who(labels, s.submitted_by),
                       "reviewer": _who(labels, s.reviewed_by)} for s in approved]
     newest = await db.scalar(select(func.max(Cal.anchor_mid)))
-    # The triff side on its own: a recent user point would otherwise hide a
+    # The baseline side on its own: a recent user point would otherwise hide a
     # stalled upstream behind a fresh "newest anchor".
     newest_triff = await db.scalar(select(func.max(Cal.anchor_mid)).where(Cal.source == "triff"))
     triff_last = await db.scalar(select(func.max(Cal.fetched_at)).where(Cal.source == "triff"))

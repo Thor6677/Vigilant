@@ -1,11 +1,11 @@
 # Structure age: EVE Ref first sightings (T-090)
 
-The estimator's calibration table (`structure_age_calibration`) holds triff.tools
-points (frozen, read-only, `source='triff'`) and admin-approved user anchors
-(`source='user'`). Any row there shows as "exact", so EVE Ref data is never
-written to it.
+The estimator's calibration table (`structure_age_calibration`) holds the frozen
+baseline points (read-only, `source='triff'`, no longer fetched from anywhere)
+and admin-approved user anchors (`source='user'`). Any row there shows as
+"exact", so EVE Ref data is never written to it.
 
-## PR 1 (this change): shadow ingest and a tail bound
+## PR 1 (done): shadow ingest and a tail bound
 
 - `structure_first_seen`: one row per structure id with the MINIMUM `first_seen`
   over every EVE Ref v2 snapshot imported (upstream drops structures unseen for
@@ -27,12 +27,36 @@ written to it.
   range are unchanged, and user anchors work as before.
 - Admin > Structure Age shows last ingest, staleness, row counts and a shadow
   comparison against the frozen triff points.
-- The old triff scrape and top-up scheduler blocks are removed. The scraper
-  module and the manual admin trigger remain.
+- The old triff scrape and top-up scheduler blocks are removed.
 
-## PR 2 (later)
+## PR 2 (done): EVE Ref everywhere, triff.tools gone
 
-Delete the triff scraper and admin scrape routes and use EVE Ref everywhere.
+- Deleted: the scraper module (`structure_age_scraper.py`, including the old v1
+  id-list refresh, which the daily v2 ingest supersedes), the admin routes
+  `POST /admin/structure-age/scrape` and `GET /admin/structure-age/status`, and
+  their tests. `tests/test_no_triff_tools.py` fails if "triff.tools" in any
+  host or URL form appears under `app/`. The frozen rows stay and keep
+  `source='triff'`; that value is a label, not a call.
+- Admin wording: "triff baseline" is now "data baseline".
+- ID-rate fit: uses every non-user point (today the frozen rows), so user
+  points still cannot move it.
+- In-range estimates (between two calibration points, neither on the id) use
+  EVE Ref too. B = min(the id's own first_seen, the 3rd-smallest non-censored
+  first_seen among ids inside this gap, i.e. at or above the id and below the
+  upper neighbour). Rules:
+  - An id with a calibration row of its own (frozen or user) is unchanged, and
+    stays `exact`.
+  - If B is no earlier than the estimate's latest date, nothing changes.
+  - Otherwise the latest date moves to B and the window slides earlier with it,
+    keeping its width. It never grows, never moves later, and never goes below
+    the lowest neighbouring anchor date (or the estimate's own earliest date,
+    if lower). It is never narrower than 2 days (MIN_REFINED_DAYS), so a very
+    early B holds the window at the lower neighbour with a note saying so.
+  - The midpoint only moves earlier. The method stays `interpolate`, the
+    source becomes `everef`, and the result is never `exact`.
+- Ids between the newest frozen row and a user point above it are refined the
+  same way (the user-point branch), with the note extended rather than replaced.
+- The lag used above the range is not used inside it.
 
 ## Running the backfill (operator, dev first)
 
