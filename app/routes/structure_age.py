@@ -1,9 +1,11 @@
 """Structure Age Estimator — estimates when an Upwell structure was anchored
-from its structure ID, using a local interpolation table built from EVERef
-history + triff.tools calibration data, plus admin-approved user points.
-Between triff points it draws a straight line; past the newest point, or
+from its structure ID, using a local interpolation table of frozen baseline
+points (source 'triff', no longer fetched) plus admin-approved user points.
+Between baseline points it draws a straight line; past the newest point, or
 next to a user point, it takes the median over the nearest points moved
-along the recent ID rate (app/intel/structure_age_check.py)."""
+along the recent ID rate (app/intel/structure_age_check.py). EVE Ref's first
+sightings (app/intel/structure_first_seen.py) only ever narrow the latest
+side of a window, inside or above the calibration range."""
 
 import logging
 import re
@@ -86,7 +88,7 @@ async def _estimate(db: AsyncSession, structure_id: int) -> dict:
     )).scalar_one_or_none()
 
     if lower is None and upper is None:
-        return {"error": "Calibration table is empty — run the scraper first."}
+        return {"error": "No calibration data yet."}
 
     # Exact hit
     if lower and lower.structure_id == structure_id:
@@ -113,8 +115,8 @@ async def _estimate(db: AsyncSession, structure_id: int) -> dict:
         est = await sac.neighbour_estimate(db, structure_id)
         if est is None:
             return {"error": sac.FRONTIER_MSG}
-        # Above every calibration point, so above the newest triff one too:
-        # the only place EVE Ref's first sightings (never "exact") are used.
+        # Above every calibration point: EVE Ref's first sightings (never
+        # "exact") tighten the latest side here, with the measured lag.
         return _capped(await first_seen.tail_refinement(db, structure_id, {
             "method": "extrapolate",
             **est,
@@ -128,11 +130,12 @@ async def _estimate(db: AsyncSession, structure_id: int) -> dict:
     # many-point rule gives it one vote; as more are approved they take
     # over. Stretches of triff points keep the straight line (spec §5).
     if "user" in (lower.source, upper.source):
-        return _capped({
+        base = {
             "method": "interpolate",
             **await sac.neighbour_estimate(db, structure_id),
             "note": "Estimated from the nearest points, including user-submitted ones",
-        })
+        }
+        return _capped(await first_seen.range_refinement(db, structure_id, base, lower, upper))
 
     # Interpolate between lower and upper
     lo_id, hi_id = lower.structure_id, upper.structure_id
@@ -154,13 +157,14 @@ async def _estimate(db: AsyncSession, structure_id: int) -> dict:
     low = mid - timedelta(seconds=window_secs / 2)
     high = mid + timedelta(seconds=window_secs / 2)
 
-    return _capped({
+    base = {
         "method": "interpolate",
         "mid": mid,
         "low": low,
         "high": high,
         "days_wide": round(days_wide, 1),
-    })
+    }
+    return _capped(await first_seen.range_refinement(db, structure_id, base, lower, upper))
 
 
 def _age_str(anchor_mid: datetime) -> str:

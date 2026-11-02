@@ -58,7 +58,7 @@ def test_the_queue_shows_the_claim_and_who_made_it(review_db):
     assert r.status_code == 200
     assert str(MID_ID) in r.text and "Sample Pilot" in r.text
     assert 'hx-post="/admin/structure-age/1/approve"' in r.text
-    assert "triff baseline" in r.text
+    assert "data baseline" in r.text
 
 
 def test_approving_adds_a_user_point_with_the_certainty_window(review_db):
@@ -171,7 +171,7 @@ def test_an_oversized_submission_id_is_refused_not_a_500(review_db):
         assert r.status_code == 422, action
 
 
-def test_the_triff_baseline_ignores_user_points(review_db):
+def test_the_data_baseline_ignores_user_points(review_db):
     """Spec S5: the queue's second gap is measured against triff points only,
     so drift from a run of approved user points still shows there after the
     full table has moved with them."""
@@ -188,7 +188,7 @@ def test_the_triff_baseline_ignores_user_points(review_db):
     run(drift())
     text = " ".join(client(ADMIN).get("/admin/section/structure-age").text.split())
     full = int(re.search(r"expected \d\d \w{3} \d{4} \(([+-]\d+) d\)", text).group(1))
-    baseline = int(re.search(r"triff baseline \d\d \w{3} \d{4} \(([+-]\d+) d\)", text).group(1))
+    baseline = int(re.search(r"data baseline \d\d \w{3} \d{4} \(([+-]\d+) d\)", text).group(1))
     assert full <= -10                     # the full table has moved with the user points
     assert abs(baseline) <= 1              # the triff-only baseline has not
 
@@ -209,7 +209,7 @@ def test_a_big_gap_is_flagged_even_inside_the_window(review_db):
                      text), text
 
 
-def test_the_triff_baseline_is_flagged_when_it_runs_out(review_db):
+def test_the_data_baseline_is_flagged_when_it_runs_out(review_db):
     """With approved user points far past the triff data, a claim between
     them is interior on the full table but past the triff frontier — exactly
     when drift would be largest. That reads as a flag, not as n/a."""
@@ -225,7 +225,7 @@ def test_the_triff_baseline_is_flagged_when_it_runs_out(review_db):
             await db.commit()
     run(seed())
     text = " ".join(client(ADMIN).get("/admin/section/structure-age").text.split())
-    assert '<span style="color:var(--danger);">triff baseline: past the end of its data</span>' in text
+    assert '<span style="color:var(--danger);">data baseline: past the end of its data</span>' in text
 
 
 def test_who_is_shown_main_character_first_or_removed_user(review_db):

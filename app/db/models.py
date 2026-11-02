@@ -1026,17 +1026,16 @@ class StructureAgeCalibration(Base):
     interpolate anchor dates for any structure ID by finding the nearest known
     IDs above and below it.
 
-    `source` is where the point came from: 'triff' (method='exact' results
-    from triff.tools, via app/intel/structure_age_scraper.py) or 'user' (an
-    admin-approved StructureAgeSubmission). It is a server_default, not just a
-    Python default, so the scraper's bulk sqlite_insert and the startup
-    ALTER TABLE agree on fresh and existing databases alike.
+    `source` is where the point came from: 'triff' (the frozen baseline rows,
+    read-only, no longer fetched from anywhere) or 'user' (an admin-approved
+    StructureAgeSubmission). It is a server_default, not just a Python
+    default, so the startup ALTER TABLE and fresh databases agree.
     """
     __tablename__ = "structure_age_calibration"
 
     structure_id = Column(BigInteger, primary_key=True)
     # Indexed for the ID-rate fit (app/intel/structure_age_check.py), which
-    # reads the last 180 days of triff points on every tail estimate.
+    # reads the last 180 days of non-user points on every tail estimate.
     anchor_mid = Column(DateTime, nullable=False, index=True)
     anchor_low = Column(DateTime, nullable=False)
     anchor_high = Column(DateTime, nullable=False)

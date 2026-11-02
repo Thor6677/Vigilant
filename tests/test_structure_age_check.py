@@ -248,7 +248,7 @@ def test_user_points_cannot_move_the_rate():
     assert before == pytest.approx(RATE, rel=0.01) and after == before
 
 
-def test_triff_baseline_ignores_user_points():
+def test_data_baseline_ignores_user_points():
     async def fn(SL):
         async with SL() as db:
             # A user point above TAIL_ID makes it an interior ID for the full

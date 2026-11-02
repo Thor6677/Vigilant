@@ -20,8 +20,8 @@
     <div class="b-row"><span class="b-row-label">Points</span><span class="b-row-val">{{ "{:,}".format(stats['total']) }}</span></div>
     <div class="b-row"><span class="b-row-label">From users</span><span class="b-row-val">{{ "{:,}".format(stats['from_users']) }}</span></div>
     <div class="b-row"><span class="b-row-label">Newest anchor</span><span class="b-row-val">{{ stats['newest'] or 'None' }}</span></div>
-    <div class="b-row"><span class="b-row-label">Newest triff anchor</span><span class="b-row-val">{{ stats['newest_triff'] or 'None' }}</span></div>
-    <div class="b-row"><span class="b-row-label">Triff last added</span><span class="b-row-val">{{ stats['triff_last'] or 'Never' }}</span></div>
+    <div class="b-row"><span class="b-row-label">Newest baseline anchor</span><span class="b-row-val">{{ stats['newest_triff'] or 'None' }}</span></div>
+    <div class="b-row"><span class="b-row-label">Baseline last added</span><span class="b-row-val">{{ stats['triff_last'] or 'Never' }}</span></div>
 </div>
 
 <div class="b-panel" style="margin-bottom:1.5rem;">
@@ -30,9 +30,9 @@
     <div class="b-row"><span class="b-row-label">Files imported</span><span class="b-row-val">{{ "{:,}".format(everef['files']) }}</span></div>
     <div class="b-row"><span class="b-row-label">Structures with a first sighting</span><span class="b-row-val">{{ "{:,}".format(everef['ids']) }} ({{ "{:,}".format(everef['censored_ids']) }} on mass dates, not counted)</span></div>
     {% if shadow['matched'] %}
-    <div class="b-row"><span class="b-row-label">Shadow check vs triff ({{ "{:,}".format(shadow['matched']) }} shared)</span><span class="b-row-val" style="white-space:normal;">first sighting after the triff date: {{ shadow['after_share'] }}% · lag median {{ shadow['median_lag'] }} d, 90th percentile {{ shadow['p90_lag'] }} d</span></div>
+    <div class="b-row"><span class="b-row-label">Shadow check vs data baseline ({{ "{:,}".format(shadow['matched']) }} shared)</span><span class="b-row-val" style="white-space:normal;">first sighting after the baseline date: {{ shadow['after_share'] }}% · lag median {{ shadow['median_lag'] }} d, 90th percentile {{ shadow['p90_lag'] }} d</span></div>
     {% else %}
-    <div class="b-row"><span class="b-row-label">Shadow check vs triff</span><span class="b-row-val">No shared structures yet</span></div>
+    <div class="b-row"><span class="b-row-label">Shadow check vs data baseline</span><span class="b-row-val">No shared structures yet</span></div>
     {% endif %}
 </div>
 
@@ -47,7 +47,7 @@
         <span class="b-row-val" style="white-space:normal;text-align:left;flex:1 1 100%;">
             {{ s.anchor_date.strftime('%d %b %Y') }} · {{ certainty_labels[s.certainty] }}
             · {{ gap(row['check'], 'expected') }}
-            · {{ gap(row['baseline'], 'triff baseline') }}
+            · {{ gap(row['baseline'], 'data baseline') }}
             · by {{ row['by'] }} · {{ s.submitted_at.strftime('%Y-%m-%d %H:%M') }} UTC
         </span>
         <button type="button" class="b-btn" style="padding:0.25rem 0.5rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;flex:none;"
