@@ -270,29 +270,69 @@ def test_refresh_stamps_last_authorized_only_and_fills_a_missing_owner(env, sso_
     assert alt.owner_hash == "owner-A"
 
 
-def test_refresh_naming_another_owner_neither_stamps_nor_overwrites(env, sso_refresh):
-    old = _ago(40)
-    _set(env, ALT_ID, last_authorized_at=old, owner_hash="owner-A")
-    sso_refresh["respond"] = _refreshes(ALT_ID, owner="owner-B")
-    _refresh(env, ALT_ID)
+def _token_state(env, cid):
+    c = env.char(cid)
+    return (c.access_token, c.refresh_token, _naive(c.token_expiry), c.scopes,
+            _naive(c.last_authorized_at), c.last_sso_at)
+
+
+def _refresh_raises(env, cid):
+    """_do_refresh on the stored row; returns the in-memory row it left and
+    the exception it raised (the session is never committed by the test)."""
+    from app.esi import client as client_mod
+
+    async def go(db):
+        c = await _scalar(db, select(Character).where(Character.character_id == cid))
+        try:
+            await client_mod._do_refresh(c, db)
+        except Exception as e:
+            return c.owner_hash, e
+        return c.owner_hash, None
+    return env.q(go)
+
+
+def test_refresh_naming_another_owner_is_never_stored(env, sso_refresh):
+    """The new owner's token must not reach the old account: nothing about
+    the row changes, and the authorization counts as dead."""
+    from app.esi.client import TokenRevoked
+    _set(env, ALT_ID, last_authorized_at=_ago(40), owner_hash="owner-A",
+         access_token=_token(ALT_ID, "owner-A", ALT_SCOPES))
+    before = _token_state(env, ALT_ID)
+    # Narrower scopes too, so a narrowing clean-up would show if it ran.
+    sso_refresh["respond"] = _refreshes(ALT_ID, owner="owner-B", scopes=[cat.WALLET])
+    _owner, err = _refresh_raises(env, ALT_ID)
+    assert isinstance(err, TokenRevoked)
+    assert _token_state(env, ALT_ID) == before            # tokens, expiry, scopes, stamps
     alt = env.char(ALT_ID)
-    assert _same(alt.last_authorized_at, old)
-    assert alt.owner_hash == "owner-A"
-    assert alt.refresh_token == "rotated-refresh"        # EVE rotated it: it must be kept
-    assert alt.user_id == USER_ID                        # never deleted mid-refresh
+    assert alt.owner_hash == "owner-A" and alt.user_id == USER_ID
 
 
 def test_refresh_of_a_legacy_row_keeps_the_old_owner_as_evidence(env, sso_refresh):
-    """ISS-162: owner_hash NULL but the stored token names owner-A. Filling it
-    from a token naming owner-B would erase the only sign of the transfer."""
-    old = _ago(40)
-    _set(env, ALT_ID, last_authorized_at=old, owner_hash=None,
+    """ISS-162: owner_hash NULL but the stored token names owner-A. The
+    stored token stays, so the evidence does too, whether or not the caller
+    commits the owner_hash that _do_refresh fills in."""
+    from app.esi.client import TokenRevoked
+    _set(env, ALT_ID, last_authorized_at=_ago(40), owner_hash=None,
          access_token=_token(ALT_ID, "owner-A", ALT_SCOPES))
+    before = _token_state(env, ALT_ID)
     sso_refresh["respond"] = _refreshes(ALT_ID, owner="owner-B")
-    _refresh(env, ALT_ID)
+    filled, err = _refresh_raises(env, ALT_ID)
+    assert isinstance(err, TokenRevoked)
+    assert filled == "owner-A"                            # recorded on the row it was given
+    assert _token_state(env, ALT_ID) == before
     alt = env.char(ALT_ID)
-    assert alt.owner_hash == "owner-A"
-    assert _same(alt.last_authorized_at, old)
+    assert alt.owner_hash is None                         # not committed here...
+    assert purge.owner_from_token(alt.access_token) == "owner-A"   # ...and not needed
+
+
+def test_the_probe_reports_another_owners_refresh_as_revoked(env, sso_refresh):
+    from app.auth.routes import PROBE_REVOKED, _probe_stored_token
+    _set(env, ALT_ID, owner_hash="owner-A", access_token=_token(ALT_ID, "owner-A", ALT_SCOPES))
+    before = _token_state(env, ALT_ID)
+    sso_refresh["respond"] = _refreshes(ALT_ID, owner="owner-B")
+    verdict, scopes, error = env.q(lambda db: _probe_stored_token(db, ALT_ID))
+    assert (verdict, scopes, error) == (PROBE_REVOKED, None, None)
+    assert _token_state(env, ALT_ID) == before
 
 
 def test_refresh_reporting_no_owner_is_not_a_change(env, sso_refresh):
@@ -470,11 +510,23 @@ def test_sweep_removes_an_owner_mismatch_as_a_transfer(seeded, sso_refresh):
     _assert_untouched(env, STRANGER_ID)
 
 
-def test_a_transfer_a_refresh_noticed_is_removed_by_the_next_sweep(env, sso_refresh):
-    _set(env, ALT_ID, owner_hash="owner-A", last_authorized_at=_ago(2))
+@pytest.mark.parametrize("days,removed", [(2, False), (91, True)])
+def test_a_refresh_for_another_owner_counts_as_refused(env, sso_refresh, days, removed):
+    """Not stored, so the sweep sees a dead authorization: kept until the
+    90-day rule, then removed by it (not as a transfer: the row still holds
+    the old owner's token)."""
+    _set(env, ALT_ID, owner_hash="owner-A", last_authorized_at=_ago(days),
+         access_token=_token(ALT_ID, "owner-A", ALT_SCOPES))
+    before = _token_state(env, ALT_ID)
     sso_refresh["respond"] = _refreshes(ALT_ID, owner="owner-B")
-    assert _sweep(env) == {"held": 0, "transfer": 1, "kept": 2}
-    assert env.char(ALT_ID) is None
+    out = _sweep(env)
+    if removed:
+        assert out == {"held": 0, "expiry": 1, "kept": 2}
+        assert env.char(ALT_ID) is None
+        assert len(_events(env, "character_expired")) == 1
+    else:
+        assert out == {"held": 0, "checked_revoked": 1, "kept": 2}
+        assert _token_state(env, ALT_ID) == before
 
 
 def test_sweep_skips_characters_on_no_account(env):

@@ -397,8 +397,9 @@ async def _probe_stored_token(db: AsyncSession, character_id: int
       that commit must carry the rotated token and nothing else. The caller
       runs this before it has written anything, so it holds no write lock.
 
-    Only TokenRevoked (SSO's 400/401, or a token sealed under an old
-    SECRET_KEY) means dead. Any other failure proves nothing about the token:
+    Only TokenRevoked (SSO's 400/401, a token sealed under an old SECRET_KEY,
+    or a refresh that came back for another EVE account, which is not stored)
+    means dead. Any other failure proves nothing about the token:
     a network blip must not be what narrows a live pilot, which would be the
     ISS-068 incident all over again. The caller keeps the stored token then,
     and a token that really is dead still shows up as Renew on the dashboard.

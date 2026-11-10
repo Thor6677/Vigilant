@@ -20,7 +20,9 @@ settings = get_settings()
 
 
 class TokenRevoked(Exception):
-    """Raised when ESI SSO returns 400/401 indicating a revoked or invalid refresh token."""
+    """Raised when ESI SSO returns 400/401 indicating a revoked or invalid refresh token,
+    and when a refresh EVE accepted came back for another EVE account (_do_refresh):
+    either way the stored authorization is dead to Vigilant."""
     pass
 
 
@@ -167,7 +169,8 @@ async def _do_refresh(character: Character, db: AsyncSession, *,
                       clear_on_narrowing: bool = True) -> str:
     """Refresh at SSO, then store the rotated token and its scopes in one
     commit on `db`. A narrowing is cleaned up after that commit, in its own
-    session (clear_after_refresh_narrowing).
+    session (clear_after_refresh_narrowing). A token for another EVE account
+    is not stored: TokenRevoked, as for a refresh SSO refused.
 
     `clear_on_narrowing=False` is for the ISS-068 probe in the SSO callback,
     which inspects the refreshed scopes itself and, if EVE narrowed them,
@@ -221,27 +224,36 @@ async def _do_refresh(character: Character, db: AsyncSession, *,
 
     from app.auth.purge import owner_from_token
     # Who owned the character before this refresh: owner_hash, or for a row
-    # that never had one, the claim in the token about to be replaced (ISS-162).
+    # that never had one, the claim in the stored token (ISS-162).
     owner_before = character.owner_hash or owner_from_token(character.access_token)
+    owner_after = owner_from_token(data["access_token"])
+    if owner_before and owner_after and owner_after != owner_before:
+        # The refreshed token is another EVE account's: the character changed
+        # owner. It is never stored or used, so the old account can't read the
+        # new owner's data: tokens, expiry, scopes and the authorization-expiry
+        # stamp all stay as they were, and every caller sees a dead
+        # authorization. The character then shows as needing re-authorization
+        # with its removal date (app/auth/expiry.py), the 90-day rule removes
+        # it if nobody signs in, and a sign-in by the new owner is caught by
+        # the SSO callback's transfer guard. Nothing is deleted here: this runs
+        # in the middle of syncs and page loads. owner_hash records the old
+        # owner when it was never filled in; nothing depends on the caller
+        # committing that, since the stored token still carries the claim.
+        if not character.owner_hash:
+            character.owner_hash = owner_before
+        import logging
+        logging.getLogger(__name__).warning(
+            "character %s: refreshed token names a different EVE owner; not stored, "
+            "treated as revoked", character.character_id)
+        raise TokenRevoked("refreshed token names a different EVE owner")
     character.access_token = data["access_token"]
     character.refresh_token = data.get("refresh_token", character.refresh_token)
     character.token_expiry = datetime.now(timezone.utc) + timedelta(seconds=data["expires_in"])
     # Authorization expiry (app/auth/expiry.py): EVE accepting the refresh
-    # shows the authorization still works, unless the new token names another
-    # EVE account. Then nothing is stamped and the old owner stays recorded,
-    # so the expiry sweep sees the mismatch and removes it as a transfer. Rows
-    # are never deleted here: this runs in the middle of syncs and page loads.
-    owner_after = owner_from_token(character.access_token)
-    if owner_before and owner_after and owner_after != owner_before:
-        character.owner_hash = owner_before
-        import logging
-        logging.getLogger(__name__).warning(
-            "character %s: refreshed token names a different EVE owner; "
-            "left for the expiry sweep", character.character_id)
-    else:
-        character.last_authorized_at = datetime.now(timezone.utc)
-        if not character.owner_hash and owner_after:
-            character.owner_hash = owner_after
+    # shows the authorization still works.
+    character.last_authorized_at = datetime.now(timezone.utc)
+    if not character.owner_hash and owner_after:
+        character.owner_hash = owner_after
     # Keep the stored scopes equal to what the token can actually do (its scp
     # claim — the same source the scope guard reads). If EVE ever narrows an
     # authorization underneath us, the Account page and the sync layer see it

@@ -15,17 +15,25 @@ quiet ones, below) and removes nothing; then it removes the ones it chose,
 each only if, read again, the same rule still applies. The rules:
 
 1. **Transfer.** The stored token's ``owner`` claim and ``owner_hash`` are both
-   known and differ: a refresh brought back a token for another EVE account.
-   _do_refresh only records that (it never deletes, being called mid-sync from
-   many places); here the character is removed as the SSO callback removes a
-   transfer.
+   known and differ: the row holds another EVE account's token. Removed as the
+   SSO callback removes a transfer. A refresh no longer stores such a token
+   (below), so this catches rows left in that state by an earlier release,
+   which stored it and left the removal to this sweep.
 2. **Sign-in cap.** No sign-in for CHARACTER_SSO_CAP_DAYS (365): removed, however
    well its token works.
 3. **Expiry.** Nothing shown to work for CHARACTER_AUTH_EXPIRY_DAYS (90): the
    stored token is refreshed once first. EVE accepts it: stamped and kept.
-   EVE refuses it (SSO 400/401): removed. Anything else (a network error, SSO
-   5xx or 429) proves nothing, so the character is left for the next run. That
-   is what keeps a long SSO or network outage from removing anyone.
+   EVE refuses it (SSO 400/401), or the refresh comes back for another EVE
+   account: removed. Anything else (a network error, SSO 5xx or 429) proves
+   nothing, so the character is left for the next run. That is what keeps a
+   long SSO or network outage from removing anyone.
+
+When a refresh comes back for another EVE account (the character changed
+owner), _do_refresh stores none of it and raises TokenRevoked: the old account
+never reads the new owner's data, and every caller sees a dead authorization.
+The character keeps its old tokens and stamps, shows as needing
+re-authorization with its removal date, and goes by rule 3 if nobody signs in;
+a sign-in by the new owner is caught by the SSO callback's transfer guard.
 
 A character that shares no permissions syncs nothing, so nothing else ever
 refreshes its token. The sweep therefore refreshes any character that has gone
@@ -99,7 +107,7 @@ WARN_AFTER = timedelta(days=3)
 HOLD_MIN = 3
 
 _DETAIL = {
-    RULE_TRANSFER: ("A token refresh reported a new EVE owner; removed from the previous "
+    RULE_TRANSFER: ("Its stored token names a new EVE owner; removed from the previous "
                     "account with its stored data"),
     RULE_SSO_CAP: ("No EVE sign-in with it for {days} days (last {when}); removed with its "
                    "stored data"),
@@ -195,6 +203,8 @@ async def backfill_authorization_stamps(db: AsyncSession) -> int:
 # ── The sweep ────────────────────────────────────────────────────────────────
 
 def _transferred(char: Character) -> bool:
+    """Rule 1: the row holds another EVE account's token. A refresh never
+    stores one now (_do_refresh), so this is a row an earlier release left."""
     stored = owner_from_token(char.access_token)
     return bool(char.owner_hash and stored and stored != char.owner_hash)
 
