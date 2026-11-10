@@ -1394,6 +1394,10 @@ def run_action(request: dict) -> dict:
     decide whether to self-update afterwards, and reading status.json back off
     the volume to learn something this function already knows would be a
     needless round trip through a file another container also writes to.
+
+    Terminal states are "success", "failed" and "skipped". "skipped" is only
+    ever an unattended update to a release this host already runs or has
+    passed: nothing was run, and it is not a failure.
     """
     action = request.get("action")
     tag = request.get("tag")
@@ -1430,6 +1434,27 @@ def run_action(request: dict) -> dict:
     # The other half of the same rule: going back is only ever a rollback, so
     # an `update` cannot be used to skip the history and the floor above.
     if action == "update" and not is_forward_update(tag, current):
+        # An unattended request (the app's scheduler; requested_by is an
+        # explicit null, because nobody asked) that this host has already
+        # overtaken: a schedule or weekly window whose release was meanwhile
+        # deployed over SSH, or passed. Nothing runs either way; this only
+        # decides whether that is published as a failure, which pauses the
+        # automatic policy and pages the admin, or as the no-op it is. Decided
+        # here, on `current` read from .deployed at pickup, because the app's
+        # view comes from a heartbeat that can be a minute old. Only for a
+        # tag that validated above and a running release that parses: an
+        # unknown running version is still the failure below. A request that
+        # lies about who asked gains nothing — it still cannot move the host.
+        if ("requested_by" in request and request["requested_by"] is None
+                and parse_version(current) is not None):
+            log.info("unattended update to %s skipped: the host already runs %s",
+                     tag, current)
+            status.update(
+                state="skipped", step="done", finished_at=_now_iso(),
+                message=(f"The host already runs {current}, so the update to "
+                         f"{tag} had nothing to do."))
+            _publish(status)
+            return status
         status.update(
             state="failed", step="failed", finished_at=_now_iso(),
             error=(f"{tag} is not newer than the running release "

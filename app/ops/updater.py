@@ -240,7 +240,9 @@ def build_request(action: str, tag: str, requested_by: int | None,
 
     `requested_by` is carried through to `request.json.claimed`, which the
     supervisor never deletes — so the record of who asked for a deploy survives
-    even when the run itself fails.
+    even when the run itself fails. None means nobody asked (the scheduler), and
+    the supervisor then skips, rather than fails, an update to a release the
+    host already runs or has passed.
     """
     if action not in _ACTIONS:
         raise InvalidRequest(f"unknown action: {action!r}")

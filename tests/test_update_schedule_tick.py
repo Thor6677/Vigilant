@@ -7,6 +7,7 @@ instead of retrying the same bad release every week.
 """
 import asyncio
 import json
+import logging
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -233,11 +234,25 @@ def test_a_badly_missed_schedule_is_abandoned_not_applied(control):
     assert ("v1.3.0", "superseded") in _schedule_states()
 
 
+def _dropped_traces(to_tag, from_tag):
+    """Audit rows saying a due schedule was dropped because the host already
+    runs its release or a newer one. Counted, not listed: this file's fixture
+    leaves the audit log alone, so rows from earlier tests are still there."""
+    detail = (f"Scheduled update to {to_tag} skipped: the host already runs "
+              f"{from_tag}, which is that release or newer")
+    return sum(1 for r in _audit_rows()
+               if r[0] == "scheduled_update_already_current" and r[2] == detail
+               and r[1] is None)
+
+
 def test_a_schedule_for_the_running_release_is_dropped(control):
     _beat(control, current_tag="v1.3.0")
     _schedule("v1.3.0", minutes_ago=5)
+    before = _dropped_traces("v1.3.0", "v1.3.0")
     assert _run(us.tick()) == "scheduled tag already running"
     assert _request(control) is None
+    _run(us.tick())
+    assert _dropped_traces("v1.3.0", "v1.3.0") == before + 1
 
 
 def test_a_schedule_outranks_the_policy(control):
@@ -489,9 +504,11 @@ def test_a_schedule_overtaken_by_a_newer_release_is_dropped_not_applied(control)
     be a downgrade nobody asked for."""
     _beat(control, current_tag="v1.4.0")
     _schedule("v1.3.0", minutes_ago=5)
+    before = _dropped_traces("v1.3.0", "v1.4.0")
     assert _run(us.tick()) == "scheduled tag is not newer than the running release"
     assert _request(control) is None
     assert ("v1.3.0", "superseded") in _schedule_states()
+    assert _dropped_traces("v1.3.0", "v1.4.0") == before + 1
 
 
 # ── The decision is committed before the request exists ──────────────────────
@@ -558,3 +575,142 @@ def test_the_policy_holds_on_stale_release_information(control):
 
     _latest("v1.3.0")                                        # the checker is back
     assert _run(us.tick(SUNDAY_0430 + timedelta(minutes=1))) == "fired policy"
+
+
+# ── The host got there first ─────────────────────────────────────────────────
+#
+# tick() checks the running release against the heartbeat, which can be a
+# minute old, and a request can wait out a sidecar handoff. An SSH deploy of the
+# same release, or a newer one, can land in between. The sidecar reads
+# .deployed itself at pickup, so its view is the one that counts: these run the
+# real run_action on the request tick() wrote, on a host whose .deployed has
+# moved on while the heartbeat has not.
+
+def _sidecar(control, monkeypatch, deployed):
+    """The real sidecar on this control dir. deploy.sh is a stand-in that
+    leaves a marker if it ever runs. Returns (pick_up, marker)."""
+    import updater.supervisor as sup
+    host = control / "host"
+    host.mkdir()
+    (host / ".deployed").write_text(f"2026-09-13T04:00:00Z {deployed}\n")
+    marker = host / "deploy-ran"
+    script = host / "deploy.sh"
+    script.write_text(f'#!/usr/bin/env bash\ntouch "{marker}"\necho "[5/5] Done"\n')
+    script.chmod(0o755)
+    monkeypatch.setattr(sup, "CONTROL", control)
+    monkeypatch.setattr(sup, "ROOT", str(host))
+    monkeypatch.setattr(sup, "build_command", lambda a, t, root=None: [str(script)])
+
+    def pick_up():
+        claimed, request = sup.claim_request(control)
+        assert claimed and request is not None
+        return sup.run_action(request)
+    return pick_up, marker
+
+
+def _discord_spy(monkeypatch):
+    sent = []
+
+    async def spy(**kwargs):
+        sent.append(kwargs)
+    monkeypatch.setattr("app.notify.discord.send_discord_alert", spy)
+    return sent
+
+
+def _reports():
+    async def go():
+        async with AsyncSessionLocal() as db:
+            rows = (await db.execute(select(UpdateRunReport))).scalars().all()
+            return [(r.kind, r.outcome, r.to_tag) for r in rows]
+    return _run(go())
+
+
+def _already_current_rows(event_type, request_id):
+    return [r for r in _audit_rows()
+            if r[0] == event_type and f"request {request_id}" in (r[2] or "")]
+
+
+@pytest.mark.parametrize("deployed", ["v1.3.0", "v1.4.0"], ids=["same", "newer"])
+def test_a_schedule_the_host_already_reached_is_skipped_not_failed(
+        control, monkeypatch, deployed):
+    sent = _discord_spy(monkeypatch)
+    _beat(control, current_tag="v1.2.0")              # what the app last heard
+    # A standing policy too, which a failed schedule's tag would block and
+    # nothing here may switch off.
+    _set_policy(enabled=True, weekday=6, local_time="04:00", timezone="UTC", patch_only=False)
+    _schedule("v1.3.0", minutes_ago=5)
+    assert _run(us.tick()) == "fired schedule"
+    rid = _request(control)["id"]
+
+    pick_up, marker = _sidecar(control, monkeypatch, deployed)
+    assert pick_up()["state"] == "skipped"
+    assert not marker.exists(), "deploy.sh ran for an update the host had reached"
+
+    _beat(control, current_tag=deployed)
+    _run(us.tick())
+    _run(us.tick())                                   # once, not once a minute
+    assert ("v1.3.0", "superseded") in _schedule_states()
+    assert _pending_schedule_ids() == []
+    assert _reports() == [], "reported as a run"
+    assert sent == [], "pushed a notification"
+    rows = _already_current_rows("scheduled_update_already_current", rid)
+    assert len(rows) == 1
+    assert rows[0][1] is None
+    assert "v1.3.0" in rows[0][2] and deployed in rows[0][2]
+    p = _policy()
+    assert p.enabled is True and p.paused_reason is None
+
+
+@pytest.mark.parametrize("deployed", ["v1.3.0", "v1.4.0"], ids=["same", "newer"])
+def test_an_automatic_update_the_host_already_reached_is_skipped_not_failed(
+        control, monkeypatch, caplog, deployed):
+    """Reported as a failure, this paused the policy and paged the admin
+    because the release they wanted was already running."""
+    sent = _discord_spy(monkeypatch)
+    _beat(control, current_tag="v1.2.0")
+    _set_policy(enabled=True, weekday=6, local_time="04:00", timezone="UTC", patch_only=False)
+    _latest("v1.3.0")
+    assert _run(us.tick(SUNDAY_0430)) == "fired policy"
+    rid = _request(control)["id"]
+
+    pick_up, marker = _sidecar(control, monkeypatch, deployed)
+    assert pick_up()["state"] == "skipped"
+    assert not marker.exists()
+
+    _beat(control, current_tag=deployed)
+    with caplog.at_level(logging.INFO, logger=us.__name__):
+        _run(us.tick(SUNDAY_0430 + timedelta(minutes=1)))
+    assert f"update to v1.3.0 skipped: the host already runs {deployed}" in caplog.text
+    assert _run(us.tick(SUNDAY_0430 + timedelta(minutes=2))) == "already fired for this window"
+    assert _request(control) is None
+    p = _policy()
+    assert p.enabled is True
+    assert p.paused_reason is None
+    assert p.awaiting_request_id is None
+    assert p.last_fired_window == "2026-09-13"
+    assert _reports() == [], "reported as a run"
+    assert sent == [], "pushed a notification"
+    rows = _already_current_rows("auto_update_already_current", rid)
+    assert len(rows) == 1
+    assert "v1.3.0" in rows[0][2] and deployed in rows[0][2]
+
+
+def test_an_automatic_update_the_host_cannot_place_is_still_a_failure(control, monkeypatch):
+    """Only a running release that parses can be "already reached". The
+    sidecar's "dev" is not one, so this stays the failure it was: reported,
+    and the policy paused."""
+    _discord_spy(monkeypatch)
+    _beat(control, current_tag="v1.2.0")
+    _set_policy(enabled=True, weekday=6, local_time="04:00", timezone="UTC", patch_only=False)
+    _latest("v1.3.0")
+    assert _run(us.tick(SUNDAY_0430)) == "fired policy"
+
+    pick_up, marker = _sidecar(control, monkeypatch, "dev")
+    assert pick_up()["state"] == "failed"
+    assert not marker.exists()
+
+    _run(us.tick(SUNDAY_0430 + timedelta(minutes=1)))
+    p = _policy()
+    assert p.enabled is False
+    assert "failed" in p.paused_reason
+    assert _reports() == [("automatic", "failed", "v1.3.0")]

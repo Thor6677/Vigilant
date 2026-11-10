@@ -707,11 +707,20 @@ the updater, which is itself off by default.
   or timezone — never fires for a window that is already open; the first run is
   the next one.
 
+If you deploy the release (or a newer one) over SSH in the meantime, a schedule
+that comes due afterwards, or either kind of update that the updater only finds
+already done when it picks the request up, is a no-op, not a failure: nothing
+runs, there is no report, automatic updates stay on, and the admin audit log
+records it as `scheduled_update_already_current` or
+`auto_update_already_current`, naming both releases. Clicking **Update** for a
+release that is not newer is still refused.
+
 `deploy.sh`'s health gate proves the new release is **up**, not that it
 **works**: a release that starts cleanly with a broken page passes it. So every
 unattended run is reported, and a failed automatic run — including one
 `deploy.sh` rolled back — pauses automatic updates until you save the form
-again, instead of retrying the same bad release every week.
+again, instead of retrying the same bad release every week. An update the host
+had already reached is not a failed run and does not pause them.
 
 The scheduler never hands the sidecar a request while it is upgrading itself,
 while any of its self-checks is failing (the same checks that disable the
@@ -727,7 +736,9 @@ Every scheduled and automatic run gets one report: **succeeded**, **failed**,
 **rolled back**, or **skipped** — a schedule or weekly window whose 2 hours ran
 out before the update could start (Vigilant was down, or the updater was busy,
 failing a check or not running). A skip is reported once, never once a minute.
-No external service is needed to see any of it:
+The one run without a report is an update the host had already reached (see
+above), which is an audit log entry only. No external service is needed to see
+any of it:
 
 - the **admin audit log** gets a row first, before anything is pushed;
 - admins see a **banner** on every page. A success can be dismissed and goes

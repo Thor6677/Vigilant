@@ -321,6 +321,32 @@ def test_status_without_an_id_key_at_all_also_skips_preserve():
     assert "<details>" in html
 
 
+def _outcome(html):
+    start = html.index('<div class="updater-outcome">')
+    return html[start:html.index("</div>", start)]
+
+
+def test_a_skipped_update_is_not_shown_as_a_failure():
+    """The sidecar skips an unattended update to a release the host already
+    runs or has passed. Nothing ran and nothing went wrong, so the last-run
+    line says that, in neither red nor the word "failed"."""
+    html = _render_finished(_finished_status(
+        state="skipped", from_tag="v1.4.0", to_tag="v1.3.0", log_tail=[],
+        message="The host already runs v1.4.0, so the update to v1.3.0 had nothing to do."))
+    outcome = _outcome(html)
+    assert "skipped" in outcome
+    assert "v1.3.0" in outcome and "v1.4.0" in outcome
+    assert "is-danger" not in outcome
+    assert "failed" not in outcome
+
+
+def test_a_failed_update_is_still_shown_as_one():
+    """The control for the test above."""
+    outcome = _outcome(_render_finished(_finished_status(
+        state="failed", error="update failed (exit 1)", log_tail=[])))
+    assert "is-danger" in outcome and "failed" in outcome
+
+
 def test_different_run_ids_give_different_element_ids():
     html_a = _render_finished(_finished_status(id="run-aaaa"))
     html_b = _render_finished(_finished_status(id="run-bbbb"))

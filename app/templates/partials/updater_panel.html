@@ -205,6 +205,12 @@
               {% if status.state == 'success' %}
                 <p class="upd-note">Last run: <b>{{ status.action }}</b> to
                    <b class="mono">{{ status.to_tag }}</b> <span class="is-ok">succeeded</span>.</p>
+              {% elif status.state == 'skipped' %}
+                {# A scheduled or automatic update the host had already reached
+                   (an SSH deploy got there first). Nothing ran; not a failure. #}
+                <p class="upd-note">Last run: <b>{{ status.action }}</b> to
+                   <b class="mono">{{ status.to_tag }}</b> skipped: the host already runs
+                   <b class="mono">{{ status.from_tag }}</b>.</p>
               {% else %}
                 <p class="upd-note is-danger">
                   Last run: <b>{{ status.action }}</b> to
