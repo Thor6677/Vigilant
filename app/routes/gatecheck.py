@@ -59,6 +59,9 @@ _resolve_type_ids = resolve_type_ids
 _enrich_kills = enrich_kills
 _check_route_systems = check_route_systems
 
+# ESI /route/ `flag` values; the gate check form offers exactly these.
+_ROUTE_FLAGS = ("shortest", "secure", "insecure")
+
 
 # ── Routes ───────────────────────────────────────────────────────────────────
 
@@ -116,6 +119,10 @@ async def check_route(request: Request, db: AsyncSession = Depends(get_db)):
     origin = form.get("origin", "").strip()
     dest = form.get("destination", "").strip()
     flag = form.get("flag", "shortest")
+    # ISS-178: only a value ESI's /route/ takes ever reaches it. Anything else
+    # falls back to the form's default, as a missing field already did.
+    if flag not in _ROUTE_FLAGS:
+        flag = "shortest"
     avoid_text = form.get("avoid", "").strip()
 
     if not origin or not dest:
