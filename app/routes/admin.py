@@ -1244,7 +1244,9 @@ async def _updater_context(request: Request, db: AsyncSession,
         "update_checked_at": _format_age(checker.checked_at) if checker else "never",
         "update_error": checker.last_error if checker else None,
         "checker_says_newer": is_newer(latest, settings.version),
-        "update_available": bool(latest and current and latest != current),
+        # Newer, not just different: /admin/update refuses anything else, and
+        # a CLI deploy can run ahead of the release the checker last saw.
+        "update_available": is_newer(latest, current),
         "checks": (beat or {}).get("checks") or {},
         "updater_version": (beat or {}).get("version"),
         "self_update": self_update,
@@ -1349,16 +1351,25 @@ async def _submit(request: Request, db: AsyncSession, admin: User,
 async def updater_update(request: Request, tag: str = Form(...),
                          db: AsyncSession = Depends(get_db),
                          admin: User = Depends(require_admin)):
-    """Deploy a release.
+    """Deploy a newer release.
 
-    Refuses a no-op, but deliberately does NOT require the target to be newer:
-    re-deploying the running release is a legitimate way to recover a container
-    that came up wrong.
+    Forward only (ISS-165). Going back is a rollback, which reaches only
+    releases this host has run, at or above the sidecar's floor; an `update`
+    to an older tag used to skip both. The sidecar enforces this on pickup;
+    refusing here gives the reason before anything is queued.
     """
     beat = _require_updater()
-    if tag and tag == beat.get("current_tag"):
+    current = beat.get("current_tag")
+    if tag and tag == current:
         return await _panel(request, db, error=f"{tag} is already running.",
                             status_code=400)
+    # A malformed tag is left to _submit, which says what is wrong with it.
+    if updater_client.validate_tag_advisory(tag) and not is_newer(tag, current):
+        return await _panel(
+            request, db, status_code=400,
+            error=(f"{tag} is not newer than the running release "
+                   f"({current or 'unknown'}). An update only moves forward; "
+                   f"use Roll back for an earlier release."))
     return await _submit(request, db, admin, "update", tag, "admin_update_requested")
 
 

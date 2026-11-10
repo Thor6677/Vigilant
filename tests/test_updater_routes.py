@@ -222,13 +222,26 @@ def test_update_refuses_a_no_op(env):
     assert _request_file(env.control) is None
 
 
-def test_update_does_not_require_the_target_to_be_newer(env):
-    """…but an older tag is allowed: re-deploying is a legitimate way to
-    recover a container that came up wrong, so this is not a one-way ratchet."""
-    _beat(env.control, current_tag="v1.2.0")
-    r = env.admin().post("/admin/update", data={"tag": "v1.1.0"})
-    assert r.status_code == 200
-    assert _request_file(env.control)["tag"] == "v1.1.0"
+@pytest.mark.parametrize("tag", ["v1.1.0", "v1.0.0"])
+def test_update_refuses_an_older_release(env, tag):
+    """…and so is an older tag (ISS-165). Going back is a rollback, which only
+    reaches releases this host has run, at or above the updater's floor; an
+    `update` used to reach any of them. The sidecar refuses it too, so this is
+    the early, readable copy of that rule."""
+    _beat(env.control, current_tag="v1.2.0", targets=("v1.1.0",))
+    r = env.admin().post("/admin/update", data={"tag": tag})
+    assert r.status_code == 400
+    assert "Roll back" in r.text
+    assert _request_file(env.control) is None
+
+
+def test_update_refuses_when_the_running_release_is_unknown(env):
+    """Nothing to compare against, so nothing is queued: the sidecar would
+    refuse it for the same reason."""
+    _beat(env.control, current_tag=None)
+    r = env.admin().post("/admin/update", data={"tag": "v1.3.0"})
+    assert r.status_code == 400
+    assert _request_file(env.control) is None
 
 
 def test_update_rejects_an_injection_tag(env):
@@ -314,6 +327,17 @@ def test_panel_offers_the_latest_known_release(env):
 def test_panel_reports_up_to_date_when_current_matches_latest(env):
     _beat(env.control, current_tag="v1.3.0")
     body = env.admin().get("/admin/update/status").text
+    assert "Up to date" in body
+
+
+def test_panel_offers_no_update_to_an_older_release(env):
+    """A CLI deploy can run ahead of the release the checker last saw. The
+    panel then has nothing to install, rather than a button the route and the
+    sidecar both refuse."""
+    _beat(env.control, current_tag="v1.4.0")
+    body = env.admin().get("/admin/update/status").text
+    assert "Update to v1.3.0" not in body
+    assert 'hx-post="/admin/update"' not in body
     assert "Up to date" in body
 
 

@@ -17,6 +17,7 @@ from updater.supervisor import (
     _RECHECK_SECONDS,
     clamp_log_tail,
     eligible_rollback_targets,
+    is_forward_update,
     is_stale_lock,
     looks_like_ssh_url,
     parse_deployed_tags,
@@ -211,6 +212,41 @@ def test_eligible_targets_reject_what_parse_version_would_accept():
     current = _rel_to_floor(minor_delta=2)
     lines = f"t {at_floor}\nt {prerelease}\nt v١.٠.٠\nt {current}\n"
     assert eligible_rollback_targets(lines, current_tag=current) == [at_floor]
+
+
+# ── Update is forward-only (ISS-165) ─────────────────────────────────────────
+
+def test_an_update_must_move_forward():
+    """An `update` to an older tag skipped every rollback rule: the history,
+    and the floor below which the app comes back with no /control mount.
+    Older releases go through the rollback action instead."""
+    current = _rel_to_floor(minor_delta=3)
+    assert is_forward_update(_rel_to_floor(minor_delta=4), current)
+    assert is_forward_update(_rel_to_floor(major_delta=1), current)
+    assert not is_forward_update(current, current)
+    assert not is_forward_update(_rel_to_floor(minor_delta=2), current)
+    assert not is_forward_update(MIN_ROLLBACK_TAG, current)
+    assert not is_forward_update(_rel_to_floor(minor_delta=-1), current)
+
+
+def test_an_update_past_a_prerelease_counts_as_forward():
+    """deploy.sh --tag v1.3.0-rc1 is a supported workflow; its final release
+    must still be installable from the panel."""
+    final = _rel_to_floor(minor_delta=1)
+    assert is_forward_update(final, final + "-rc1")
+    assert not is_forward_update(MIN_ROLLBACK_TAG, final + "-rc1")
+
+
+def test_forward_update_fails_closed_on_an_unknown_running_release():
+    newer = _rel_to_floor(minor_delta=4)
+    for current in (None, "", "dev", "garbage"):
+        assert not is_forward_update(newer, current), current
+
+
+def test_forward_update_still_requires_an_exact_release_tag():
+    current = _rel_to_floor(minor_delta=3)
+    for tag in ("v9.9.9-rc1", "v9.9.9\n", "v٩.٩.٩", None):
+        assert not is_forward_update(tag, current), tag
 
 
 # ── Lock staleness ───────────────────────────────────────────────────────────
@@ -489,6 +525,12 @@ def test_every_marker_matches_a_line_the_real_scripts_actually_print():
             f"no line in deploy.sh/rollback.sh starts with {marker!r}"
 
 
+def _running(root, tag="v1.0.0"):
+    """Record `tag` as the host's running release. An update must be newer
+    than it (ISS-165), so a test that needs the run to start begins older."""
+    (root / ".deployed").write_text(f"2026-01-01T00:00:00Z {tag}\n")
+
+
 # ── Watchdog: the wall-clock ceiling must actually fire ──────────────────────
 
 def test_a_hang_that_keeps_printing_is_still_killed(tmp_path, monkeypatch):
@@ -500,6 +542,7 @@ def test_a_hang_that_keeps_printing_is_still_killed(tmp_path, monkeypatch):
     script = tmp_path / "chatty.sh"
     script.write_text('#!/usr/bin/env bash\nwhile true; do echo "[1/5] x"; sleep 0.05; done\n')
     script.chmod(0o755)
+    _running(tmp_path)
     monkeypatch.setattr(sup, "_RUN_TIMEOUT_SECONDS", 1)
     monkeypatch.setattr(sup, "CONTROL", tmp_path)
     monkeypatch.setattr(sup, "ROOT", str(tmp_path))
@@ -524,6 +567,7 @@ def test_a_silent_hang_is_killed(tmp_path, monkeypatch):
     script = tmp_path / "silent.sh"
     script.write_text('#!/usr/bin/env bash\necho "[1/5] Deploy"\nsleep 300\n')
     script.chmod(0o755)
+    _running(tmp_path)
     monkeypatch.setattr(sup, "_RUN_TIMEOUT_SECONDS", 1)
     monkeypatch.setattr(sup, "CONTROL", tmp_path)
     monkeypatch.setattr(sup, "ROOT", str(tmp_path))
@@ -574,6 +618,7 @@ def test_a_tick_that_runs_an_action_advances_the_step(tmp_path, monkeypatch):
         'echo "[2/5] Health check"\n'
         'echo "[5/5] Done"\n')
     script.chmod(0o755)
+    _running(tmp_path)
     monkeypatch.setattr(sup, "CONTROL", tmp_path)
     monkeypatch.setattr(sup, "ROOT", str(tmp_path))
     monkeypatch.setattr(sup, "build_command", lambda a, t, root=None: [str(script)])
@@ -605,6 +650,61 @@ def test_rollback_eligibility_is_read_fresh_not_from_the_heartbeat(tmp_path, mon
     status = json.loads((tmp_path / "status.json").read_text())
     assert status["state"] == "failed"
     assert "not an eligible rollback target" in status["error"]
+
+
+def _marker_deploy(tmp_path, monkeypatch, current=None):
+    """A deploy stand-in that leaves a file behind if it ever runs."""
+    import updater.supervisor as sup
+    marker = tmp_path / "deploy-ran"
+    script = tmp_path / "deploy.sh"
+    script.write_text(f'#!/usr/bin/env bash\ntouch "{marker}"\necho "[5/5] Done"\n')
+    script.chmod(0o755)
+    if current is not None:
+        _running(tmp_path, current)
+    monkeypatch.setattr(sup, "CONTROL", tmp_path)
+    monkeypatch.setattr(sup, "ROOT", str(tmp_path))
+    monkeypatch.setattr(sup, "build_command", lambda a, t, root=None: [str(script)])
+    return sup, marker
+
+
+@pytest.mark.parametrize("tag", [
+    _rel_to_floor(minor_delta=-1),     # below the floor: no /control mount
+    MIN_ROLLBACK_TAG,                  # an eligible rollback target, as an update
+    _rel_to_floor(minor_delta=3),      # the running release itself
+])
+def test_an_update_request_for_an_older_release_is_refused(tmp_path, monkeypatch, tag):
+    """ISS-165: the app (or anything that can write request.json) could ask
+    for an `update` to any older tag, and pickup only checked its format.
+    The refusal happens on this side, before deploy.sh runs."""
+    current = _rel_to_floor(minor_delta=3)
+    sup, marker = _marker_deploy(tmp_path, monkeypatch)
+    # A history in which the floor release really did run here.
+    (tmp_path / ".deployed").write_text(
+        f"t {MIN_ROLLBACK_TAG}\nt {_rel_to_floor(minor_delta=1)}\nt {current}\n")
+    status = sup.run_action({"id": "u1", "action": "update", "tag": tag})
+    assert status["state"] == "failed"
+    assert "Roll back" in status["error"]
+    assert not marker.exists(), "deploy.sh ran for a refused update"
+    assert json.loads((tmp_path / "status.json").read_text())["state"] == "failed"
+
+
+def test_an_update_request_for_a_newer_release_runs(tmp_path, monkeypatch):
+    """The control for the refusals above."""
+    sup, marker = _marker_deploy(tmp_path, monkeypatch, current=_rel_to_floor(minor_delta=3))
+    status = sup.run_action({"id": "u2", "action": "update",
+                             "tag": _rel_to_floor(minor_delta=4)})
+    assert status["state"] == "success"
+    assert marker.exists()
+
+
+def test_an_update_is_refused_when_the_running_release_is_unknown(tmp_path, monkeypatch):
+    """No .deployed means nothing to be newer than: fail closed, as the
+    rollback list does."""
+    sup, marker = _marker_deploy(tmp_path, monkeypatch, current=None)
+    status = sup.run_action({"id": "u3", "action": "update",
+                             "tag": _rel_to_floor(minor_delta=4)})
+    assert status["state"] == "failed"
+    assert not marker.exists()
 
 
 def test_tick_survives_a_request_that_would_have_killed_the_loop(tmp_path, monkeypatch):
@@ -663,6 +763,7 @@ def test_auto_revert_is_reported_end_to_end(tmp_path, monkeypatch):
         'echo "→ Automatically reverting to v1.0.0"\n'
         'echo "✓ Reverted to v1.0.0; the site is serving."\n'
         'exit 1\n')
+    _running(tmp_path, "v1.0.0")
     monkeypatch.setattr(sup, "CONTROL", tmp_path)
     monkeypatch.setattr(sup, "ROOT", str(tmp_path))
     monkeypatch.setattr(sup, "build_command", lambda a, t, root=None: [str(script)])
@@ -680,6 +781,7 @@ def test_a_failed_revert_is_reported_as_needing_a_human(tmp_path, monkeypatch):
         'echo "→ Automatically reverting to v1.0.0"\n'
         'echo "✗ Revert to v1.0.0 ALSO failed — manual intervention needed."\n'
         'exit 1\n')
+    _running(tmp_path, "v1.0.0")
     monkeypatch.setattr(sup, "CONTROL", tmp_path)
     monkeypatch.setattr(sup, "ROOT", str(tmp_path))
     monkeypatch.setattr(sup, "build_command", lambda a, t, root=None: [str(script)])
@@ -1177,6 +1279,7 @@ def test_deploy_subprocess_inherits_the_images_git_environment(tmp_path, monkeyp
     the variables back out of its output.
     """
     import updater.supervisor as sup
+    _running(tmp_path)
     monkeypatch.setattr(sup, "CONTROL", tmp_path)
     monkeypatch.setattr(sup, "ROOT", str(tmp_path))
     monkeypatch.setenv("GIT_CONFIG_COUNT", "2")
