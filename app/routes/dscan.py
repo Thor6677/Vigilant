@@ -18,6 +18,7 @@ from sqlalchemy import select, delete, text
 from app.db.models import get_db, DScanResult, AsyncSessionLocal
 from app.esi.client import ESIClient
 from app.sde import lookup as sde
+from app.utils.paste import paste_limit_error
 
 router = APIRouter(tags=["intel"])
 logger = logging.getLogger(__name__)
@@ -76,6 +77,42 @@ SHIP_GROUP_ORDER = [
     "Capitals", "Battleships", "Battlecruisers", "Cruisers",
     "Destroyers", "Frigates", "Industrial", "Capsules", "Shuttles",
 ]
+
+# ── Size limits (ISS-168) ────────────────────────────────────────────────────
+# A d-scan is one line per thing on scan, so even a large fight is a few
+# thousand lines of under a hundred characters. A local scan is one pilot per
+# line, and each pilot is an ESI lookup when it isn't cached, so it has a
+# lower cap of its own. The page's own form post is already held to 1 MB by
+# the CSRF middleware, so the paste cap costs it nothing; it holds every
+# other client to the same.
+INTEL_MAX_LINES = 5000
+INTEL_MAX_LINE_CHARS = 500
+INTEL_MAX_PASTE_CHARS = 1_000_000
+LOCAL_MAX_NAMES = 2000
+# A stored scan, merges included.
+INTEL_MAX_ITEMS = 10_000
+INTEL_MAX_STORED_PASTE_CHARS = 2_000_000
+# The public page is rendered on the event loop on every view. Scans stored
+# before these caps can be far bigger, so it renders at most this many rows
+# of a list (the counts still cover every item) and at most the stored-paste
+# cap of the raw paste.
+INTEL_RENDER_ROWS = 2000
+
+# Merge refusals, shown on the scan page. Fixed texts, so a crafted link can
+# only pick one of these.
+MERGE_ERRORS = {
+    "paste": (f"That paste is over the limit: at most {INTEL_MAX_LINES:,} lines of up to "
+              f"{INTEL_MAX_LINE_CHARS:,} characters, {INTEL_MAX_PASTE_CHARS:,} in all."),
+    "full": (f"This scan is full: at most {INTEL_MAX_ITEMS:,} items. "
+             "Start a new scan for the rest."),
+}
+
+
+def _paste_limit_error(text: str) -> str | None:
+    return paste_limit_error(text, max_lines=INTEL_MAX_LINES,
+                             max_line_chars=INTEL_MAX_LINE_CHARS,
+                             max_chars=INTEL_MAX_PASTE_CHARS)
+
 
 EXPIRY_OPTIONS = {
     "24h":    timedelta(hours=24),
@@ -461,6 +498,9 @@ async def intel_parse(request: Request, db: AsyncSession = Depends(get_db)):
 
     if not paste_text.strip():
         return templates.TemplateResponse(request, "intel.html", {"error": "Paste your d-scan or local scan above."})
+    too_big = _paste_limit_error(paste_text)
+    if too_big:
+        return templates.TemplateResponse(request, "intel.html", {"error": too_big})
 
     paste_type = detect_paste_type(paste_text)
 
@@ -488,6 +528,9 @@ async def intel_parse(request: Request, db: AsyncSession = Depends(get_db)):
         names = parse_local_names(paste_text)
         if not names:
             return templates.TemplateResponse(request, "intel.html", {"error": "Could not parse any character names."})
+        if len(names) > LOCAL_MAX_NAMES:
+            return templates.TemplateResponse(request, "intel.html", {
+                "error": f"That local scan has {len(names):,} pilots — the limit is {LOCAL_MAX_NAMES:,}."})
 
         summary = await resolve_local_scan(names)
         parsed_json = json.dumps(summary.get("characters", []))
@@ -550,13 +593,27 @@ async def intel_view(scan_id: str, request: Request, db: AsyncSession = Depends(
 
     return templates.TemplateResponse(request, template, {
         "dscan": dscan,
-        "items": items,
-        "non_ship_items": non_ship_items,
+        **bounded_view(items, non_ship_items, dscan.paste_data or ""),
+        "merge_error": MERGE_ERRORS.get(request.query_params.get("merge_error", "")),
         "summary": summary,
         "expires_str": expires_str,
         "scan_id": scan_id,
         "expiry_options": EXPIRY_OPTIONS,
     })
+
+
+def bounded_view(items: list, non_ship_items: list, paste: str) -> dict:
+    """The lists and raw paste intel_view renders: each list cut to
+    INTEL_RENDER_ROWS and the paste to the stored cap (ISS-168), with the
+    totals of the whole scan beside them."""
+    return {
+        "items": items[:INTEL_RENDER_ROWS],
+        "items_total": len(items),
+        "non_ship_items": non_ship_items[:INTEL_RENDER_ROWS],
+        "non_ship_total": len(non_ship_items),
+        "paste_text": paste[:INTEL_MAX_STORED_PASTE_CHARS],
+        "paste_cut": len(paste) > INTEL_MAX_STORED_PASTE_CHARS,
+    }
 
 
 # Keep old /dscan/{id} URLs working (301 so bookmarks/history migrate)
@@ -582,6 +639,8 @@ async def intel_merge(scan_id: str, request: Request, db: AsyncSession = Depends
         return RedirectResponse("/intel", status_code=303)
     if dscan.user_id is not None and dscan.user_id != user_id:
         return RedirectResponse(f"/intel/{scan_id}", status_code=303)
+    if _paste_limit_error(paste_text):
+        return RedirectResponse(f"/intel/{scan_id}?merge_error=paste", status_code=303)
 
     # Parse the new paste
     new_items = parse_dscan(paste_text)
@@ -622,8 +681,14 @@ async def intel_merge(scan_id: str, request: Request, db: AsyncSession = Depends
     else:
         existing_items.extend(new_items)
 
+    merged_paste = dscan.paste_data + "\n--- Merged Scan ---\n" + paste_text
+    # Each merge re-reads and re-writes the whole row, and every view renders
+    # it, so a scan stops growing at the caps (ISS-168).
+    if len(existing_items) > INTEL_MAX_ITEMS or len(merged_paste) > INTEL_MAX_STORED_PASTE_CHARS:
+        return RedirectResponse(f"/intel/{scan_id}?merge_error=full", status_code=303)
+
     # Append new paste to raw data
-    dscan.paste_data = dscan.paste_data + "\n--- Merged Scan ---\n" + paste_text
+    dscan.paste_data = merged_paste
 
     # Rebuild summary and save
     summary = build_dscan_summary(existing_items)

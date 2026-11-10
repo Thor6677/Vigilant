@@ -10,7 +10,7 @@
     <div>
         <h1 class="b-page-title" style="margin-bottom:2px;">D-Scan{% if dscan.label %} — {{ dscan.label }}{% endif %}</h1>
         <div class="intel-meta" style="display:flex;align-items:center;gap:0.75rem;font-size:10px;color:var(--muted);">
-            <span>{{ summary.ships }} ship{{ 's' if summary.ships != 1 else '' }}{% if non_ship_items %} · {{ non_ship_items | length }} other{% endif %}</span>
+            <span>{{ summary.ships }} ship{{ 's' if summary.ships != 1 else '' }}{% if non_ship_total %} · {{ non_ship_total }} other{% endif %}</span>
             <span>·</span>
             <span>Expires in {{ expires_str }}</span>
         </div>
@@ -30,6 +30,12 @@
    textarea), so it's a hidden input: no unlabelled Tab stop, nothing off-screen. #}
 <input type="hidden" id="share-url" value="{{ request.url_for('intel_view', scan_id=scan_id) }}">
 
+{% if merge_error %}
+<div class="b-banner" style="margin-bottom:1rem;border-color:var(--danger);">
+    <span style="color:var(--danger);">{{ merge_error }}</span>
+</div>
+{% endif %}
+
 {# ── Raw Paste (hidden by default) ───────────────────────────────────────── #}
 <div id="raw-paste-section" style="display:none;margin-bottom:1rem;">
     <div class="b-panel">
@@ -39,7 +45,8 @@
         </div>
         <div style="padding:0.5rem 0.75rem;">
             <textarea id="raw-paste-text" readonly rows="12"
-                      style="width:100%;padding:0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--muted);font-family:monospace;font-size:10px;line-height:1.5;resize:vertical;">{{ dscan.paste_data }}</textarea>
+                      style="width:100%;padding:0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--muted);font-family:monospace;font-size:10px;line-height:1.5;resize:vertical;">{{ paste_text }}</textarea>
+            {% if paste_cut %}<div class="b-muted-sm" style="margin-top:0.25rem;">Raw paste cut off at {{ "{:,}".format(paste_text | length) }} characters.</div>{% endif %}
         </div>
     </div>
 </div>
@@ -138,7 +145,7 @@
 {% if non_ship_items %}
 <details style="margin-top:0.5rem;">
     <summary class="intel-toggle" style="cursor:pointer;display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0;">
-        <span class="b-eyebrow">Other on Scan ({{ non_ship_items | length }})</span>
+        <span class="b-eyebrow">Other on Scan ({{ non_ship_total }})</span>
         <span class="b-muted-sm">▼</span>
     </summary>
     <div class="b-panel" style="margin-top:0.25rem;">
@@ -151,6 +158,9 @@
             <span style="flex:1;font-size:10px;color:var(--muted);text-align:right;">{{ item.distance_str }}</span>
         </div>
         {% endfor %}
+        {% if non_ship_total > non_ship_items | length %}
+        <div class="b-table-row b-muted-sm" style="padding:0.25rem 0.75rem;">Showing the first {{ "{:,}".format(non_ship_items | length) }} of {{ "{:,}".format(non_ship_total) }}.</div>
+        {% endif %}
     </div>
 </details>
 {% endif %}
