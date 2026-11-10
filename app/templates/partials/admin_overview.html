@@ -2,7 +2,7 @@
    breaker stopped more of them than it trusts itself to make at once. First
    on the tab an admin lands on. No script: two hx-posts, which base.html's
    configRequest hook gives the CSRF header. #}
-{% if held_note %}<p class="upd-note is-ok" role="status" style="margin-bottom:1rem;">{{ held_note }}</p>{% endif %}
+{% if held_note %}<p class="upd-note is-ok" role="status" data-refresh-hold style="margin-bottom:1rem;">{{ held_note }}</p>{% endif %}
 {% if held %}
 <div class="b-panel" id="held-removals" style="margin-bottom:1.5rem;">
     <div class="b-panel-head">
