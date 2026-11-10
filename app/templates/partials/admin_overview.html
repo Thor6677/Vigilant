@@ -20,7 +20,7 @@
         <span class="b-row-label">{{ h['character_name'] }} <span class="b-muted-sm">· {{ h['account'] }}</span></span>
         <span class="b-row-val">
             {{ h['why'] }} · {{ h['last_label'] }} {{ h['last'] }} · held since {{ h['held_since'] }}
-            {% if not h['still_due'] %}<span class="b-badge">signed in or refreshed since; will be kept</span>{% endif %}
+            {% if not h['still_due'] %}<span class="b-badge" title="Signed in or refreshed since it was held; removing keeps it">will be kept</span>{% endif %}
         </span>
     </div>
     {% endfor %}

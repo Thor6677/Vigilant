@@ -304,7 +304,7 @@
 {% if request.session.get('is_admin') %}
 <div id="held-removals-slot"
      hx-get="/status/held-removals"
-     hx-trigger="load delay:600ms, every 300s"
+     hx-trigger="load delay:600ms, every 300s, held-removals-changed from:body"
      hx-swap="innerHTML"
      data-htmx-no-error="1"></div>
 {% endif %}

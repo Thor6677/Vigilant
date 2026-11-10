@@ -780,6 +780,7 @@ def test_remove_takes_only_those_still_due(env, no_pause):
 
     r = admin.post("/admin/action/held-removals/remove")
     assert r.status_code == 200
+    assert r.headers["HX-Trigger"] == "held-removals-changed"   # the banner re-fetches
     assert "Removed 2 held characters; kept 2 that signed in" in " ".join(r.text.split())
     assert env.char(alt) is None and env.char(e2) is None
     assert env.char(e0).user_id == USER_ID and env.char(e1).user_id == OTHER_ID
@@ -802,6 +803,7 @@ def test_keep_for_now_clears_the_hold_and_removes_nobody(env):
     r = _make_admin(env).post("/admin/action/held-removals/keep")
     assert r.status_code == 200
     assert "Kept them for now" in r.text and "Held removals" not in r.text
+    assert r.headers["HX-Trigger"] == "held-removals-changed"
     assert _held_set(env) == []
     assert all(env.char(cid).user_id == USER_ID for cid in held)
     assert _events(env, "character_expired") == []
@@ -1083,3 +1085,12 @@ def test_dashboard_attention_warns_for_an_affected_character_only(env):
     assert "auth_expiry:%d" % ALT_ID in page
     assert "auth_expiry:%d" % MAIN_ID not in page
     assert "Main Pilot</span> · will be removed" not in page
+
+
+def test_the_banner_slot_listens_for_the_change_event():
+    """Otherwise it announces a held set for up to five minutes after an
+    admin has dealt with it."""
+    from pathlib import Path
+    base = Path("app/templates/base.html").read_text()
+    slot = base[base.index('id="held-removals-slot"'):][:400]
+    assert "held-removals-changed from:body" in slot

@@ -967,6 +967,13 @@ async def admin_remove_character(character_id: int, request: Request,
 # Same permission as remove-character above: require_admin, so admins and
 # managers. Both re-render Overview, where the held set is listed.
 
+def _held_changed(response):
+    """The site-wide banner (base.html) re-fetches on this event, so it does
+    not go on announcing a held set an admin has just dealt with."""
+    response.headers["HX-Trigger"] = "held-removals-changed"
+    return response
+
+
 @router.post("/action/held-removals/remove", response_class=HTMLResponse)
 async def admin_held_removals_remove(request: Request, background_tasks: BackgroundTasks,
                                      db: AsyncSession = Depends(get_db),
@@ -985,7 +992,7 @@ async def admin_held_removals_remove(request: Request, background_tasks: Backgro
     note = f"Removed {removed} held character{'s' if removed != 1 else ''}"
     if kept:
         note += f"; kept {kept} that signed in, refreshed or left their account since"
-    return await _overview(request, db, held_note=note + ".")
+    return _held_changed(await _overview(request, db, held_note=note + "."))
 
 
 @router.post("/action/held-removals/keep", response_class=HTMLResponse)
@@ -998,8 +1005,8 @@ async def admin_held_removals_keep(request: Request, db: AsyncSession = Depends(
                      detail=(f"Kept {held} held removal{'s' if held != 1 else ''} for now; "
                              f"the next daily sweep judges them again"),
                      ip=request.client.host if request.client else None)
-    return await _overview(request, db, held_note=(
-        "Kept them for now. The next daily sweep judges them again, and may hold them again."))
+    return _held_changed(await _overview(request, db, held_note=(
+        "Kept them for now. The next daily sweep judges them again, and may hold them again.")))
 
 
 # ── Allowlist management ─────────────────────────────────────────────────────
