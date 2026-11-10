@@ -257,8 +257,12 @@ def test_offers_404_expires_with_the_offers_ttl(monkeypatch):
     assert seen == [SDE_CORP, SDE_CORP]
 
 
-@pytest.mark.parametrize("failure", [_status_error(503), _status_error(420), RuntimeError("down")])
+@pytest.mark.parametrize("failure", [
+    _status_error(503), _status_error(500), _status_error(420), _status_error(429),
+    _status_error(403), httpx.ReadTimeout("timed out"), RuntimeError("down")])
 def test_offers_other_failures_are_not_cached(monkeypatch, failure):
+    """Only ESI's 404 for that corp means "no store"; a throttle, a 5xx or a
+    timeout is never kept, and the next request finds the real catalog."""
     monkeypatch.setattr(lp, "_offers_cache", {})
     monkeypatch.setattr(lp, "_offers_locks", {})
     seen = []
@@ -271,3 +275,11 @@ def test_offers_other_failures_are_not_cached(monkeypatch, failure):
     assert _run(lp.get_offers(SDE_CORP)) == []
     assert _run(lp.get_offers(SDE_CORP)) == []
     assert seen == [SDE_CORP, SDE_CORP]
+    assert SDE_CORP not in lp._offers_cache
+
+    async def store(corporation_id):
+        seen.append(corporation_id)
+        return [{"offer_id": 7}]
+
+    monkeypatch.setattr(lp, "_fetch_offers_esi", store)
+    assert _run(lp.get_offers(SDE_CORP)) == [{"offer_id": 7}]
