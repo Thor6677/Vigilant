@@ -6,6 +6,8 @@ Provides API endpoints for live ESI statistics (kills, jumps, sov, fw, incursion
 """
 import asyncio
 import logging
+import time
+from collections import OrderedDict
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -446,6 +448,30 @@ async def map_characters(request: Request):
 _alliance_cache: dict[int, str] = {}
 _alliance_cache_ttl_days = 30
 
+# ── Alliance lookups by request-chosen id (ISS-178) ───────────────────────
+# Every failed ESI lookup spends the error budget that every signed-in sync
+# shares. So both alliance routes below remember what ESI said, including
+# "no such alliance", in bounded LRU dicts (the wormhole kills cache's shape).
+# A miss is remembered only for an id ESI itself answered as unknown, never
+# after a throttle, a 5xx, a network failure or a refused multi-id batch.
+# It never goes into `_alliance_cache`: that dict has no expiry, and the sov
+# warm-up skips any id already in it.
+ALLIANCE_DETAIL_TTL = 86400        # seconds; esi_cache keeps /alliances/{id}/ as long
+ALLIANCE_MISS_TTL = 600            # an id ESI had no alliance for
+_ESI_NO_SUCH_ID = (400, 404, 422)  # what ESI answers for an id it can't resolve
+ALLIANCE_LOOKUP_ENTRIES = 2048
+MAP_ALLIANCES_MAX_IDS = 1000       # one /universe/names/ call; the star map sends every sov holder at once
+
+_alliance_detail_cache: "OrderedDict[int, tuple[float, dict]]" = OrderedDict()
+_alliance_name_misses: "OrderedDict[int, float]" = OrderedDict()
+
+
+def _remember(cache: OrderedDict, key: int, value) -> None:
+    cache[key] = value
+    cache.move_to_end(key)
+    while len(cache) > ALLIANCE_LOOKUP_ENTRIES:
+        cache.popitem(last=False)
+
 
 async def _load_alliance_cache_from_db():
     """Warm the in-memory alliance name cache from the persistent DB table.
@@ -463,12 +489,21 @@ async def _load_alliance_cache_from_db():
         log.warning("Alliance cache warm failed: %s", e)
 
 
-async def _resolve_alliance_names_bulk(ids: list[int]) -> dict[int, str]:
+async def _resolve_alliance_names_bulk(
+    ids: list[int], unknown: set[int] | None = None,
+) -> dict[int, str]:
     """Resolve a list of alliance IDs to names using the bulk
     POST /universe/names/ endpoint (≤ 1,000 IDs per call).
 
     Writes results to both the in-memory cache and the DB. Returns a dict
-    of {alliance_id: name} for every ID that resolved successfully."""
+    of {alliance_id: name} for every ID that resolved successfully.
+
+    `unknown`, when given, collects the ids ESI positively answered as no
+    alliance (ISS-178): missing from, or not an alliance in, a 200 answer, or
+    the only id of a chunk refused as invalid. Nothing else counts. ESI
+    refuses a whole batch when any one id in it is invalid, so a refused
+    multi-id chunk says nothing about the others in it; nor does a throttle,
+    a 5xx or a network failure."""
     from app.db.models import AsyncSessionLocal, AllianceNameCache
 
     out: dict[int, str] = {}
@@ -486,6 +521,9 @@ async def _resolve_alliance_names_bulk(ids: list[int]) -> dict[int, str]:
                 resp = await client.post("/universe/names/", json=chunk)
                 if resp.status_code != 200:
                     log.warning("Bulk /universe/names returned %d", resp.status_code)
+                    if (unknown is not None and len(chunk) == 1
+                            and resp.status_code in _ESI_NO_SUCH_ID):
+                        unknown.update(chunk)
                     continue
                 for entry in resp.json():
                     if entry.get("category") != "alliance":
@@ -495,6 +533,8 @@ async def _resolve_alliance_names_bulk(ids: list[int]) -> dict[int, str]:
                     if isinstance(aid, int) and isinstance(name, str):
                         out[aid] = name
                         _alliance_cache[aid] = name
+                if unknown is not None:
+                    unknown.update(i for i in chunk if i not in out)
             except Exception as e:
                 log.warning("Bulk /universe/names error: %s", e)
 
@@ -562,6 +602,10 @@ async def map_alliances(request: Request):
         ids = [int(x) for x in ids_param.split(",") if x.strip()]
     except ValueError:
         return JSONResponse({"error": "Invalid IDs"}, status_code=400)
+    # ISS-178: each id once, and at most MAP_ALLIANCES_MAX_IDS per request, so
+    # one request costs at most one ESI call. Ids past the cap get no entry;
+    # every caller already shows "Alliance <id>" for an id it has no name for.
+    ids = list(dict.fromkeys(ids))[:MAP_ALLIANCES_MAX_IDS]
 
     # Lazy-warm the in-memory cache from DB on first request of the process
     if not _alliance_cache:
@@ -569,22 +613,31 @@ async def map_alliances(request: Request):
 
     result: dict[str, str] = {}
     missing: list[int] = []
+    now = time.monotonic()
     for aid in ids:
         if aid in _alliance_cache:
             result[str(aid)] = _alliance_cache[aid]
+        elif _alliance_name_misses.get(aid, 0.0) > now:
+            result[str(aid)] = f"Alliance {aid}"
         else:
             missing.append(aid)
 
     # One bulk ESI call resolves up to 1,000 missing IDs
     if missing:
-        resolved = await _resolve_alliance_names_bulk(missing)
+        unknown: set[int] = set()
+        resolved = await _resolve_alliance_names_bulk(missing, unknown)
         for aid, name in resolved.items():
             result[str(aid)] = name
-        # Fill in any still-unresolved with the placeholder so callers don't
-        # retry endlessly on bad IDs
+        # Fill in any still-unresolved with the placeholder. Only an id ESI
+        # answered as unknown is remembered (for ALLIANCE_MISS_TTL); after a
+        # failed or refused batch nothing is, so a bad id sent beside real
+        # ones can't blank them for anyone else.
+        expires = time.monotonic() + ALLIANCE_MISS_TTL
         for aid in missing:
             if str(aid) not in result:
                 result[str(aid)] = f"Alliance {aid}"
+                if aid in unknown:
+                    _remember(_alliance_name_misses, aid, expires)
 
     return JSONResponse(result)
 
@@ -1810,6 +1863,73 @@ def _utc_iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).isoformat()
 
 
+async def _alliance_header(alliance_id: int) -> dict:
+    """The alliance header from ESI's /alliances/{id}/, or {} without one.
+
+    ISS-178: the page used to ask ESI on every view, and the name caches
+    can't stand in for it (they hold no founded date). So the header itself
+    is kept: a 200 for ALLIANCE_DETAIL_TTL, ESI's "no such alliance"
+    (_ESI_NO_SUCH_ID) for ALLIANCE_MISS_TTL. Any other answer (a throttle,
+    a 5xx, a 403) or a network failure is not kept, so the next view asks
+    again."""
+    hit = _alliance_detail_cache.get(alliance_id)
+    if hit is not None and hit[0] > time.monotonic():
+        _alliance_detail_cache.move_to_end(alliance_id)
+        return hit[1]
+
+    header = {}
+    async with httpx.AsyncClient(
+        base_url=ESI_BASE, timeout=10,
+        headers={"Accept": "application/json", "User-Agent": user_agent()},
+    ) as client:
+        try:
+            resp = await client.get(f"/alliances/{alliance_id}/")
+            if resp.status_code == 200:
+                h = resp.json()
+                header = {
+                    "name": h.get("name"),
+                    "ticker": h.get("ticker"),
+                    "creator_id": h.get("creator_id"),
+                    "executor_corporation_id": h.get("executor_corporation_id"),
+                    "date_founded": h.get("date_founded"),
+                    "faction_id": h.get("faction_id"),
+                }
+                _remember(_alliance_detail_cache, alliance_id,
+                          (time.monotonic() + ALLIANCE_DETAIL_TTL, header))
+                name = h.get("name", f"Alliance {alliance_id}")
+                ticker = h.get("ticker")
+                _alliance_cache[alliance_id] = name
+                # Persist to the DB-backed name cache so subsequent panel
+                # clicks skip the ESI round-trip entirely.
+                try:
+                    from sqlalchemy import select
+                    from app.db.models import AsyncSessionLocal, AllianceNameCache
+                    async with AsyncSessionLocal() as db:
+                        existing = (await db.execute(
+                            select(AllianceNameCache).where(
+                                AllianceNameCache.alliance_id == alliance_id
+                            )
+                        )).scalar_one_or_none()
+                        if existing:
+                            existing.name = name
+                            existing.ticker = ticker
+                            existing.cached_at = datetime.now(timezone.utc)
+                        else:
+                            db.add(AllianceNameCache(
+                                alliance_id=alliance_id, name=name, ticker=ticker,
+                                cached_at=datetime.now(timezone.utc),
+                            ))
+                        await db.commit()
+                except Exception:
+                    pass
+            elif resp.status_code in _ESI_NO_SUCH_ID:
+                _remember(_alliance_detail_cache, alliance_id,
+                          (time.monotonic() + ALLIANCE_MISS_TTL, header))
+        except Exception:
+            pass
+    return header
+
+
 @router.get("/api/map/alliance/{alliance_id}")
 async def alliance_detail(alliance_id: int, request: Request):
     """Aggregated alliance snapshot derived from the sov map cache + 7d change log.
@@ -1852,51 +1972,7 @@ async def alliance_detail(alliance_id: int, request: Request):
     # more metadata (ticker, creator, founded date) than the bulk /universe/names/
     # call, so this page specifically needs the full response — we still
     # update the name cache as a side effect.
-    header = {}
-    async with httpx.AsyncClient(
-        base_url=ESI_BASE, timeout=10,
-        headers={"Accept": "application/json", "User-Agent": user_agent()},
-    ) as client:
-        try:
-            resp = await client.get(f"/alliances/{alliance_id}/")
-            if resp.status_code == 200:
-                h = resp.json()
-                header = {
-                    "name": h.get("name"),
-                    "ticker": h.get("ticker"),
-                    "creator_id": h.get("creator_id"),
-                    "executor_corporation_id": h.get("executor_corporation_id"),
-                    "date_founded": h.get("date_founded"),
-                    "faction_id": h.get("faction_id"),
-                }
-                name = h.get("name", f"Alliance {alliance_id}")
-                ticker = h.get("ticker")
-                _alliance_cache[alliance_id] = name
-                # Persist to the DB-backed name cache so subsequent panel
-                # clicks skip the ESI round-trip entirely.
-                try:
-                    from sqlalchemy import select
-                    from app.db.models import AsyncSessionLocal, AllianceNameCache
-                    async with AsyncSessionLocal() as db:
-                        existing = (await db.execute(
-                            select(AllianceNameCache).where(
-                                AllianceNameCache.alliance_id == alliance_id
-                            )
-                        )).scalar_one_or_none()
-                        if existing:
-                            existing.name = name
-                            existing.ticker = ticker
-                            existing.cached_at = datetime.now(timezone.utc)
-                        else:
-                            db.add(AllianceNameCache(
-                                alliance_id=alliance_id, name=name, ticker=ticker,
-                                cached_at=datetime.now(timezone.utc),
-                            ))
-                        await db.commit()
-                except Exception:
-                    pass
-        except Exception:
-            pass
+    header = await _alliance_header(alliance_id)
 
     return JSONResponse({
         "alliance_id": alliance_id,

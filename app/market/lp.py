@@ -65,6 +65,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -151,6 +152,27 @@ def _corps_list() -> list[dict]:
         ),
         key=lambda c: c["name"],
     )
+
+
+async def is_npc_corp(db: AsyncSession, corporation_id: int) -> bool:
+    """True when `corporation_id` is an NPC corporation the app already knows:
+    a row in the SDE's `sde_npc_corps`, or a member of the ESI roster the
+    corp tree was built from (already in memory once the tree has loaded).
+
+    ISS-178: the offers route used to send any integer to ESI. Checking both
+    sources means a corp the tree shows is never refused, including while
+    the SDE table is still empty before a reimport. Never fetches anything.
+    """
+    if _npc_corp_ids is not None and corporation_id in _npc_corp_ids:
+        return True
+    if not 1 <= corporation_id <= 2 ** 31 - 1:  # ESI's int32; keeps the bind in range
+        return False
+    row = (await db.execute(
+        select(SDENpcCorp.corporation_id).where(
+            SDENpcCorp.corporation_id == corporation_id
+        )
+    )).first()
+    return row is not None
 
 
 # ── Faction grouping (EVE-style pickers Task 3; forever cache like the roster
@@ -313,8 +335,9 @@ def _get_offers_lock(corporation_id: int) -> asyncio.Lock:
 async def _fetch_offers_esi(corporation_id: int) -> list[dict]:
     """Monkeypatched in tests. Many NPC corp IDs run no LP store at all —
     ESI 404s for those, which `get_public` surfaces as a raised exception
-    (`raise_for_status`); `get_offers` below treats that identically to any
-    other fetch error (stale-on-error, else empty list)."""
+    (`raise_for_status`); `get_offers` below caches that 404 as "no store"
+    and treats any other fetch error as before (stale-on-error, else empty
+    list)."""
     client = ESIClient("", cache_enabled=False)
     data = await client.get_public(f"/loyalty/stores/{corporation_id}/offers/")
     return data if isinstance(data, list) else []
@@ -324,7 +347,12 @@ async def get_offers(corporation_id: int) -> list[dict]:
     """Raw ESI offers for one corp, 24h TTL cached. Same fetch-once,
     single-flight-lock, stale-on-error idiom as `app.market.orders.get_orders`
     (see that module's docstring for the full reasoning) — only the TTL
-    differs here."""
+    differs here.
+
+    A 404 (the corp runs no LP store) is cached as an empty catalog for the
+    same 24h, so re-picking that corp in the tree doesn't repeat the ESI
+    error each time (ISS-178). Other failures stay uncached, so a blip never
+    hides a real store for a day."""
     cached = _offers_cache.get(corporation_id)
     if cached is not None and (_now() - cached[0]) < OFFERS_TTL:
         return cached[1]
@@ -335,6 +363,10 @@ async def get_offers(corporation_id: int) -> list[dict]:
             return cached[1]
         try:
             data = await _fetch_offers_esi(corporation_id)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code != 404:
+                return cached[1] if cached is not None else []
+            data = []
         except Exception:
             return cached[1] if cached is not None else []
         _offers_cache[corporation_id] = (_now(), data)

@@ -601,6 +601,10 @@ async def acl_search(request: Request, db: AsyncSession = Depends(get_db)):
     category = request.query_params.get("category", "corporation")
     if len(q) < 3:
         return HTMLResponse("")
+    # ISS-178: only the three types the ACL picker offers. Any other value
+    # used to go to ESI's search as-is; answer it like a short query instead.
+    if category not in ("character", "corporation", "alliance"):
+        return HTMLResponse("")
 
     from app.esi.client import ESIClient, get_client
 
