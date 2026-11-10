@@ -156,7 +156,11 @@ async def _visible_group_ids(db: AsyncSession, user_id: int) -> set[int] | None:
 async def _can_modify_timer(db: AsyncSession, user_id: int, timer) -> bool:
     """Check if user can edit/delete a timer.
     Allowed: timer creator, app admins/managers, or in-game Directors/CEOs
-    for timers visible to them."""
+    for timers visible to them. An 'esi' timer also needs a character in the
+    corporation it was synced from, whatever the role (ISS-173)."""
+    corp_ids = (await _get_user_identities(db, user_id))["corporation"]
+    if not _esi_member(timer, corp_ids):
+        return False
     if timer.created_by == user_id:
         return True
     user_result = await db.execute(select(User).where(User.id == user_id))
@@ -167,7 +171,7 @@ async def _can_modify_timer(db: AsyncSession, user_id: int, timer) -> bool:
         return True
     # An in-game Director or CEO may manage timers they can see, never ones an
     # ACL group hides from them.
-    if not _timer_visible(timer, await _visible_group_ids(db, user_id)):
+    if not _timer_visible(timer, await _visible_group_ids(db, user_id), corp_ids):
         return False
     # Check in-game Director role via ESI
     chars = await db.execute(select(Character).where(Character.user_id == user_id))
@@ -197,10 +201,23 @@ async def _can_modify_acl_group(db: AsyncSession, user_id: int, group: TimerACLG
     return bool(user and user.role in ("admin", "manager"))
 
 
-def _timer_visible(timer, visible_groups: set[int]) -> bool:
-    """Check if a timer is visible given the user's accessible groups."""
+def _esi_member(timer, corp_ids: set[int]) -> bool:
+    """False for an 'esi' timer unless one of the user's characters is in the
+    corporation it was synced from. ESI shows a corporation's structures only
+    to its members, so the board must not show them to anyone else. A row
+    with no recorded corporation (synced before ISS-173) fails closed."""
+    if timer.source != "esi":
+        return True
+    return timer.esi_corporation_id is not None and timer.esi_corporation_id in corp_ids
+
+
+def _timer_visible(timer, visible_groups: set[int], corp_ids: set[int]) -> bool:
+    """Check if a timer is visible given the user's accessible groups and the
+    corporations their characters are in now."""
+    if not _esi_member(timer, corp_ids):
+        return False
     if timer.acl_group_id is None:
-        return True  # No ACL = visible to everyone
+        return True  # No ACL = visible to everyone ('esi': everyone in the corp)
     return timer.acl_group_id in visible_groups
 
 
@@ -214,22 +231,25 @@ async def timers_page(request: Request, db: AsyncSession = Depends(get_db)):
 
     await _cleanup_timers(db)
 
-    # Get user's visible ACL groups
+    # Get user's visible ACL groups and current corporations
     visible_groups = await _visible_group_ids(db, user_id)
+    corp_ids = (await _get_user_identities(db, user_id))["corporation"]
 
     active_result = await db.execute(
         select(StructureTimer)
         .where(StructureTimer.is_archived == False)
         .order_by(StructureTimer.timer_expires.asc())
     )
-    active_timers = [t for t in active_result.scalars().all() if _timer_visible(t, visible_groups)]
+    active_timers = [t for t in active_result.scalars().all()
+                     if _timer_visible(t, visible_groups, corp_ids)]
 
     archived_result = await db.execute(
         select(StructureTimer)
         .where(StructureTimer.is_archived == True)
         .order_by(StructureTimer.archived_at.desc())
     )
-    archived_timers = [t for t in archived_result.scalars().all() if _timer_visible(t, visible_groups)]
+    archived_timers = [t for t in archived_result.scalars().all()
+                       if _timer_visible(t, visible_groups, corp_ids)]
 
     # Get ACL groups for the create form dropdown
     acl_result = await db.execute(
@@ -483,12 +503,14 @@ async def delete_acl_group(group_id: int, request: Request, db: AsyncSession = D
     group = result.scalar_one_or_none()
     if not group or not await _can_modify_acl_group(db, user_id, group):
         return HTMLResponse("", status_code=403)
-    # Unlink timers using this group
-    timer_result = await db.execute(
-        select(StructureTimer).where(StructureTimer.acl_group_id == group_id)
+    # Refused while any timer still uses the group, active or archived,
+    # whether or not the deleter can see it. Unlinking them used to show
+    # them to everyone.
+    in_use = await db.execute(
+        select(StructureTimer.id).where(StructureTimer.acl_group_id == group_id).limit(1)
     )
-    for t in timer_result.scalars().all():
-        t.acl_group_id = None
+    if in_use.first() is not None:
+        return RedirectResponse("/structure-timers", status_code=302)
     await db.delete(group)
     await db.commit()
     return RedirectResponse("/structure-timers", status_code=302)
@@ -725,9 +747,19 @@ REINFORCE_STATES = {
 }
 
 
-async def sync_esi_structure_timers(db: AsyncSession, raw_structs: list):
-    """Auto-create/update timers for reinforced corp structures."""
+async def sync_esi_structure_timers(db: AsyncSession, raw_structs: list, *, corporation_id: int):
+    """Auto-create/update timers for reinforced corp structures.
+
+    raw_structs is corporation_id's /corporations/{id}/structures/ list.
+    Every row written is stamped with that corporation, and only accounts
+    with a character in it see the row (_timer_visible)."""
+    if not corporation_id:
+        return
     for s in raw_structs:
+        # ESI lists only the asked corporation's structures; anything else
+        # is not this corporation's to file.
+        if s.get("corporation_id", corporation_id) != corporation_id:
+            continue
         state = s.get("state", "")
         timer_end_str = s.get("state_timer_end")
         if state not in REINFORCE_STATES or not timer_end_str:
@@ -754,6 +786,10 @@ async def sync_esi_structure_timers(db: AsyncSession, raw_structs: list):
 
         if timer:
             timer.timer_expires = timer_expires
+            # Claims a row synced before ISS-173 (no corporation recorded),
+            # and moves one whose structure changed hands, so the old owner
+            # never sees the new owner's timer.
+            timer.esi_corporation_id = corporation_id
             continue
 
         # Resolve names
@@ -774,6 +810,7 @@ async def sync_esi_structure_timers(db: AsyncSession, raw_structs: list):
             priority="critical",
             source="esi",
             esi_structure_id=structure_id,
+            esi_corporation_id=corporation_id,
         ))
 
     await db.commit()

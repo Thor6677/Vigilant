@@ -146,7 +146,7 @@
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.35rem;">
                 <span style="font-size:11px;font-weight:600;color:var(--text);">{{ group.name }}</span>
                 <form method="POST" action="/structure-timers/acl/{{ group.id }}/delete"
-                      data-confirm="Delete this ACL group? Timers using it will become visible to everyone.">
+                      data-confirm="Delete this ACL group? A group that any timer still uses is not deleted.">
                     <button class="b-btn st-tap" style="padding:0.1rem 0.3rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
                 </form>
             </div>
@@ -374,7 +374,8 @@
                     <div style="flex:1;min-width:100px;">
                         <span class="st-flabel" style="font-size:9px;color:var(--muted);display:block;margin-bottom:2px;">Visibility</span>
                         <select name="acl_group_id" style="width:100%;padding:0.25rem 0.4rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:10px;">
-                            <option value="">Everyone</option>
+                            {# An ESI timer never reaches past its own corporation (ISS-173). #}
+                            <option value="">{% if t.source == 'esi' %}Corporation members{% else %}Everyone{% endif %}</option>
                             {% for g in acl_groups %}
                             <option value="{{ g.id }}" {% if t.acl_group_id == g.id %}selected{% endif %}>{{ g.name }}</option>
                             {% endfor %}

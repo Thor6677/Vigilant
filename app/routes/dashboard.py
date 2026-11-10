@@ -4099,7 +4099,7 @@ async def timer_alert_banners(request: Request, db: AsyncSession = Depends(get_d
         return HTMLResponse(_empty)
 
     from app.db.models import StructureTimer, TimerACLEntry
-    from app.routes.structure_timers import _visible_group_ids, _timer_visible
+    from app.routes.structure_timers import _get_user_identities, _visible_group_ids, _timer_visible
 
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     cutoff = now + timedelta(hours=24)
@@ -4117,9 +4117,10 @@ async def timer_alert_banners(request: Request, db: AsyncSession = Depends(get_d
     if not timers:
         return HTMLResponse(_empty)
 
-    # Filter by ACL visibility
+    # Filter by ACL visibility, and ESI timers by the viewer's corporations
     visible_groups = await _visible_group_ids(db, user_id)
-    timers = [t for t in timers if _timer_visible(t, visible_groups)]
+    corp_ids = (await _get_user_identities(db, user_id))["corporation"]
+    timers = [t for t in timers if _timer_visible(t, visible_groups, corp_ids)]
 
     if not timers:
         return HTMLResponse(_empty)
