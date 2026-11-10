@@ -188,6 +188,21 @@ def eligible_rollback_targets(deployed_text: str, current_tag: str | None) -> li
     return [t for t, _ in sorted(out.items(), key=lambda kv: kv[1], reverse=True)]
 
 
+def is_forward_update(tag, current_tag: str | None) -> bool:
+    """Whether an `update` to `tag` moves the running release forward.
+
+    An update only ever goes forward. Anything older is a rollback and must
+    pass eligible_rollback_targets(): a release this host has run, at or above
+    MIN_ROLLBACK_TAG. Without this, an `update` request naming an old tag
+    reached releases this host never ran and releases below the floor, whose
+    compose file has no /control mount — the one-way door the floor refuses.
+
+    `is_newer` fails closed on an unknown or "dev" running version, like the
+    rollback list: with nothing to compare against, nothing is newer.
+    """
+    return validate_tag(tag) and is_newer(tag, current_tag)
+
+
 def is_stale_lock(lock: dict | None, now: float, pid_alive: Callable[[int], bool]) -> bool:
     """Whether a held `update.lock` may be reclaimed.
 
@@ -1382,7 +1397,9 @@ def run_action(request: dict) -> dict:
     """
     action = request.get("action")
     tag = request.get("tag")
-    status = _new_status(**_request_fields(request), from_tag=_current_tag())
+    # Read once, so the from_tag published and the checks below agree.
+    current = _current_tag()
+    status = _new_status(**_request_fields(request), from_tag=current)
 
     # Re-validate on pickup, BEFORE the first publish. The heartbeat's target
     # list is UX; this is the authority, and it must not trust anything the app
@@ -1403,11 +1420,22 @@ def run_action(request: dict) -> dict:
         return status
     _publish(status)
     if action == "rollback" and tag not in eligible_rollback_targets(
-            _deployed_text(), _current_tag()):
+            _deployed_text(), current):
         status.update(
             state="failed", step="failed", finished_at=_now_iso(),
             error=(f"{tag} is not an eligible rollback target — it must be a "
                    f"release this host has run, at or above {MIN_ROLLBACK_TAG}"))
+        _publish(status)
+        return status
+    # The other half of the same rule: going back is only ever a rollback, so
+    # an `update` cannot be used to skip the history and the floor above.
+    if action == "update" and not is_forward_update(tag, current):
+        status.update(
+            state="failed", step="failed", finished_at=_now_iso(),
+            error=(f"{tag} is not newer than the running release "
+                   f"({current or 'unknown'}), and an update only moves forward. "
+                   f"Use Roll back for an earlier release: it must be one this "
+                   f"host has run, at or above {MIN_ROLLBACK_TAG}."))
         _publish(status)
         return status
 

@@ -1264,24 +1264,32 @@ async def search_ships_api(request: Request, db: AsyncSession = Depends(get_db))
 # ── Gap analysis (htmx partial) ──────────────────────────────────────────────
 
 @router.get("/{plan_id}/gap/{character_id}", response_class=HTMLResponse)
-async def gap_analysis(plan_id: int, character_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+async def gap_analysis(plan_id: int, character_id: int, request: Request,
+                       token: str | None = None, db: AsyncSession = Depends(get_db)):
     user_id = request.session.get("user_id")
     if not user_id:
         return HTMLResponse("", status_code=401)
 
-    # View permission: owner, any scope that grants access, or anyone with a
-    # valid share_token on the plan (read-only public URL flow).
+    # View permission: owner, any scope that grants access, or anyone holding
+    # the plan's current share token (the shared page sends it as ?token=).
     ident = await perms.resolve_identities(db, user_id)
     plan = await _load_plan_for(db, plan_id, ident, "view")
-    if plan is None:
-        # Fall back to share_token lookup — a viewer may arrive here from a
-        # shared link rather than scope membership.
+    if plan is None and token:
         result = await db.execute(
             select(SkillPlan)
-            .where(SkillPlan.id == plan_id, SkillPlan.share_token.isnot(None))
+            .where(SkillPlan.id == plan_id)
             .options(selectinload(SkillPlan.entries))
         )
         plan = result.scalar_one_or_none()
+        # Sharing being on is not enough: plan ids are sequential, so the
+        # token is the only secret. Bytes, because compare_digest refuses
+        # non-ASCII str.
+        if plan is not None and not (
+                plan.share_token
+                and secrets.compare_digest(plan.share_token.encode(), token.encode())):
+            plan = None
+    # A plan the caller cannot see answers like a missing one, so the reply
+    # does not reveal which ids have sharing turned on.
     if not plan or not plan.entries:
         return HTMLResponse('<div class="b-empty">No skills in this plan.</div>')
 

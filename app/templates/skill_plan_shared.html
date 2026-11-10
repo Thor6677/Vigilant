@@ -78,7 +78,9 @@
 function runGap() {
     var charId = document.getElementById('gap-char').value;
     if (!charId) { alert('Select a character.'); return; }
-    htmx.ajax('GET', '/skill-plans/{{ plan.id }}/gap/' + charId, '#gap-results');
+    {# The gap route needs the token: a viewer here may have no other access. #}
+    var token = {{ share_token | tojson }};
+    htmx.ajax('GET', '/skill-plans/{{ plan.id }}/gap/' + charId + '?token=' + encodeURIComponent(token), '#gap-results');
 }
 </script>
 {% endif %}

@@ -501,8 +501,9 @@ What it does instead:
   listener. It runs one compose command and exits.
 
 A compromised admin session can restart your app and roll it back to any release
-this host has previously run. Rollback targets are restricted to that list, but
-an older release with a known bug is still reachable. If that trade is not worth
+this host has previously run. Rollback targets are restricted to that list, and
+an update only moves forward (the sidecar refuses an older tag), but an older
+release with a known bug is still reachable. If that trade is not worth
 it to you, leave this off and keep using SSH — nothing else depends on it.
 
 #### Enabling it
