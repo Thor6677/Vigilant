@@ -248,13 +248,19 @@ async def _can_modify_timer(db: AsyncSession, user_id: int, timer) -> bool:
                        creator_corps=creator_corps)
 
 
+def _may_modify_acl_group(group, user_id: int, *, staff: bool) -> bool:
+    """The rule _can_modify_acl_group applies. The page uses it too, to show
+    a group's delete and entry controls only where they would work."""
+    return group.created_by == user_id or staff
+
+
 async def _can_modify_acl_group(db: AsyncSession, user_id: int, group: TimerACLGroup) -> bool:
     """Allowed: group creator or app admin/manager."""
     if group.created_by == user_id:
         return True
     user_result = await db.execute(select(User).where(User.id == user_id))
     user = user_result.scalar_one_or_none()
-    return bool(user and user.role in ("admin", "manager"))
+    return _may_modify_acl_group(group, user_id, staff=bool(user and user.role in ("admin", "manager")))
 
 
 def _esi_member(timer, corp_ids: set[int]) -> bool:
@@ -331,13 +337,16 @@ async def timers_page(request: Request, db: AsyncSession = Depends(get_db)):
                       if _may_modify(t, user_id, staff=staff, corp_ids=corp_ids,
                                      visible_groups=visible_groups, director_corps=director_corps,
                                      creator_corps=creator_corps.get(t.created_by, set()))}
+    # Likewise the groups whose entries and delete this user may change.
+    modifiable_group_ids = {g.id for g in acl_groups if _may_modify_acl_group(g, user_id, staff=staff)}
 
     return templates.TemplateResponse(request, "structure_timers.html", {"active_timers": active_timers,
         "archived_timers": archived_timers,
         "acl_groups": acl_groups,
         "acl_groups_in_use": acl_groups_in_use,
         "user_id": user_id,
-        "modifiable_ids": modifiable_ids})
+        "modifiable_ids": modifiable_ids,
+        "modifiable_group_ids": modifiable_group_ids})
 
 
 # ── Create timer ─────────────────────────────────────────────────────────────
@@ -501,8 +510,10 @@ async def acl_add_entry(group_id: int, request: Request, db: AsyncSession = Depe
 
     group_result = await db.execute(select(TimerACLGroup).where(TimerACLGroup.id == group_id))
     group = group_result.scalar_one_or_none()
+    # Refused, or no such group: back to the page with the message, as a
+    # refused timer edit is.
     if not group or not await _can_modify_acl_group(db, user_id, group):
-        return HTMLResponse("", status_code=403)
+        return RedirectResponse("/structure-timers?err=not_allowed", status_code=302)
 
     form = await request.form()
     entry_type = form.get("entry_type", "corporation")
@@ -545,7 +556,7 @@ async def acl_remove_entry(group_id: int, entry_id: int, request: Request, db: A
     group_result = await db.execute(select(TimerACLGroup).where(TimerACLGroup.id == group_id))
     group = group_result.scalar_one_or_none()
     if not group or not await _can_modify_acl_group(db, user_id, group):
-        return HTMLResponse("", status_code=403)
+        return RedirectResponse("/structure-timers?err=not_allowed", status_code=302)
 
     result = await db.execute(
         select(TimerACLEntry).where(TimerACLEntry.id == entry_id, TimerACLEntry.group_id == group_id)
@@ -566,7 +577,7 @@ async def delete_acl_group(group_id: int, request: Request, db: AsyncSession = D
     result = await db.execute(select(TimerACLGroup).where(TimerACLGroup.id == group_id))
     group = result.scalar_one_or_none()
     if not group or not await _can_modify_acl_group(db, user_id, group):
-        return HTMLResponse("", status_code=403)
+        return RedirectResponse("/structure-timers?err=not_allowed", status_code=302)
     # Refused while any timer still uses the group, active or archived,
     # whether or not the deleter can see it. Unlinking them used to show
     # them to everyone.

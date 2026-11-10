@@ -26,6 +26,9 @@ Follow-ups:
 - A refused edit or delete, a refused filing and a refused group delete say
   so on the page (?err=<code>), and the page offers Edit and Delete only on
   the timers the user may change, and no delete for a group in use.
+- A group's delete and its entry add/remove controls show only to its
+  creator and app admins/managers, the ones the routes allow. A refused
+  group change comes back to the page with ?err=not_allowed, not a bare 403.
 
 Names and ids are invented.
 """
@@ -790,11 +793,93 @@ def test_an_archived_timer_offers_delete_only_to_those_who_may(board):
 def test_a_group_in_use_offers_no_delete_even_when_its_timers_are_hidden(board):
     _seed_restricted(board)                          # group 30 (corp A), used by Manual Keep
     _add_group(board, 31, CORP_B, created_by=B_USER)  # used by nothing
-    page = _html(B_USER)
+    # An admin may manage every group; their only character is in C.
+    page = _html(ADMIN_USER)
     assert "Manual Keep" not in _shown(page)
     assert _forms(page, "/structure-timers/acl/30/delete") == 0
     assert "Timers still use this group" in page
     assert _forms(page, "/structure-timers/acl/31/delete") == 1
+
+
+# ── managing an ACL group ───────────────────────────────────────────────
+
+
+def _group_state(SessionLocal, gid):
+    async def go():
+        async with SessionLocal() as db:
+            group = (await db.execute(select(TimerACLGroup).where(TimerACLGroup.id == gid))).scalar_one_or_none()
+            entries = (await db.execute(select(TimerACLEntry.id, TimerACLEntry.entry_type, TimerACLEntry.eve_id)
+                                        .where(TimerACLEntry.group_id == gid)
+                                        .order_by(TimerACLEntry.id))).all()
+            return (group.name if group else None, [tuple(e) for e in entries])
+    return _run(go())
+
+
+def _entry_id(SessionLocal, gid):
+    return _group_state(SessionLocal, gid)[1][0][0]
+
+
+def _acl_add(user_id, gid):
+    return _client(user_id).post(f"/structure-timers/acl/{gid}/add", follow_redirects=False, data={
+        "entry_type": "corporation", "eve_id": str(CORP_C), "name": "Sample Corp C"})
+
+
+def _acl_remove(user_id, gid, entry_id):
+    return _client(user_id).post(f"/structure-timers/acl/{gid}/remove/{entry_id}", follow_redirects=False)
+
+
+def _acl_delete(user_id, gid):
+    return _client(user_id).post(f"/structure-timers/acl/{gid}/delete", follow_redirects=False)
+
+
+def test_a_refused_group_change_says_so_and_changes_nothing(board):
+    _add_group(board, 40, CORP_A, created_by=A_USER)
+    before = _group_state(board, 40)
+    eid = _entry_id(board, 40)
+    for r in (_acl_add(B_USER, 40), _acl_remove(B_USER, 40, eid), _acl_delete(B_USER, 40)):
+        assert r.status_code == 302
+        assert r.headers["location"] == "/structure-timers?err=not_allowed"
+    assert _group_state(board, 40) == before
+    assert _banner(_html(B_USER, "?err=not_allowed")) == "You can't edit or delete that timer."
+
+
+def test_a_missing_group_gets_the_same_answer_as_a_refused_one(board):
+    for r in (_acl_add(A_USER, 999), _acl_remove(A_USER, 999, 1), _acl_delete(A_USER, 999)):
+        assert r.headers["location"] == "/structure-timers?err=not_allowed"
+
+
+@pytest.mark.parametrize("user_id", [A_USER, A_MANAGER, ADMIN_USER])
+def test_the_owner_and_staff_still_may_change_a_group(board, user_id):
+    _add_group(board, 40, CORP_A, created_by=A_USER)
+    eid = _entry_id(board, 40)
+    assert _acl_add(user_id, 40).headers["location"] == "/structure-timers"
+    assert [e[1:] for e in _group_state(board, 40)[1]] == [("corporation", CORP_A), ("corporation", CORP_C)]
+    assert _acl_remove(user_id, 40, eid).headers["location"] == "/structure-timers"
+    assert [e[1:] for e in _group_state(board, 40)[1]] == [("corporation", CORP_C)]
+    assert _acl_delete(user_id, 40).headers["location"] == "/structure-timers"
+    assert _group(board, 40) is None
+
+
+def test_the_group_controls_show_only_to_those_who_may_use_them(board):
+    _add_group(board, 40, CORP_A, created_by=A_USER)
+    eid = _entry_id(board, 40)
+    controls = ("/structure-timers/acl/40/delete", f"/structure-timers/acl/40/remove/{eid}")
+    for user_id in (A_USER, A_MANAGER, ADMIN_USER):
+        page = _html(user_id)
+        assert all(_forms(page, a) == 1 for a in controls), user_id
+        assert 'id="acl-search-40"' in page and 'data-click="addACLEntry" data-group-id="40"' in page, user_id
+    page = _html(B_USER)
+    assert "Group 40" in page               # the group itself is still listed
+    assert all(_forms(page, a) == 0 for a in controls)
+    assert 'id="acl-search-40"' not in page and 'data-group-id="40"' not in page
+    # Anyone may still create a group of their own.
+    assert _forms(page, "/structure-timers/acl/create") == 1
+
+
+def test_a_group_in_use_shows_its_disabled_delete_only_to_those_who_may_delete(board):
+    _seed_restricted(board)                          # group 30, created by A_USER, in use
+    assert "Timers still use this group" in _html(A_USER)
+    assert "Timers still use this group" not in _html(B_USER)
 
 
 # ── the startup migration ───────────────────────────────────────────────

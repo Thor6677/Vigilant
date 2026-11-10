@@ -153,9 +153,12 @@
 
         {% if acl_groups %}
         {% for group in acl_groups %}
+        {# Delete and entry controls only where _can_modify_acl_group would allow them #}
+        {% set can_manage = group.id in modifiable_group_ids %}
         <div style="padding:0.5rem 0.75rem;border-bottom:1px solid var(--border);">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.35rem;">
                 <span style="font-size:11px;font-weight:600;color:var(--text);">{{ group.name }}</span>
+                {% if can_manage %}
                 {% if group.id in acl_groups_in_use %}
                 {# Timers still use it, so the delete would be refused. #}
                 <button type="button" class="b-btn st-tap" disabled title="Timers still use this group, so it can't be deleted."
@@ -165,6 +168,7 @@
                       data-confirm="Delete this ACL group? A group that any timer still uses is not deleted.">
                     <button class="b-btn st-tap" style="padding:0.1rem 0.3rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
                 </form>
+                {% endif %}
                 {% endif %}
             </div>
 
@@ -180,12 +184,15 @@
                 {% endif %}
                 <span style="flex:1;color:var(--text);">{{ entry.name or entry.eve_id }}</span>
                 <span class="st-acl-type" style="font-size:8px;color:var(--muted);border:1px solid var(--border);padding:0 3px;border-radius:2px;">{{ entry.entry_type | capitalize }}</span>
+                {% if can_manage %}
                 <form method="POST" action="/structure-timers/acl/{{ group.id }}/remove/{{ entry.id }}" style="display:inline;">
                     <button class="b-btn st-tap" style="padding:0 0.2rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);">&times;</button>
                 </form>
+                {% endif %}
             </div>
             {% endfor %}
 
+            {% if can_manage %}
             {# Add entry #}
             <div class="st-form m-stack" style="margin-top:0.35rem;display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;">
                 <select id="acl-type-{{ group.id }}" style="padding:0.2rem 0.3rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:9px;"
@@ -205,6 +212,7 @@
                 <button class="b-btn st-tap" data-click="addACLEntry" data-group-id="{{ group.id }}"
                         style="padding:0.2rem 0.4rem;border:1px solid var(--accent);color:var(--accent);font-size:9px;">Add</button>
             </div>
+            {% endif %}
         </div>
         {% endfor %}
         {% else %}
