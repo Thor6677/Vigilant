@@ -607,6 +607,7 @@ def test_a_held_window_satisfied_some_other_way_is_not_a_skip(control):
 
 
 def test_a_missed_schedule_whose_tag_is_now_running_is_not_a_skip(control):
+    _clear_audit()
     handoff = {"state": "pulling", "target": "v1.2.0", "error": None, "at": "x"}
     _beat(control, current_tag="v1.2.0", self_update=handoff)
     base = datetime(2026, 9, 13, 4, 0, tzinfo=UTC)
@@ -616,6 +617,10 @@ def test_a_missed_schedule_whose_tag_is_now_running_is_not_a_skip(control):
     _beat(control, current_tag="v1.3.0")                    # deployed from the CLI
     assert _run(us.tick(base + timedelta(hours=3))) == "scheduled tag already running"
     assert _reports() == []
+    # Not a report, but not silent either: one audit row naming both tags.
+    rows = _audit("scheduled_update_")
+    assert [e for e, _ in rows] == ["scheduled_update_already_current"]
+    assert "v1.3.0" in rows[0][1]
 
 
 def test_a_restart_after_a_window_vigilant_saw_is_not_a_skip(control, monkeypatch):

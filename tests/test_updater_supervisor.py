@@ -667,25 +667,84 @@ def _marker_deploy(tmp_path, monkeypatch, current=None):
     return sup, marker
 
 
+@pytest.mark.parametrize("who", [
+    {"requested_by": 7},               # an admin clicked Update
+    {},                                # nobody said: treated the same way
+], ids=["manual", "no-requester"])
 @pytest.mark.parametrize("tag", [
     _rel_to_floor(minor_delta=-1),     # below the floor: no /control mount
     MIN_ROLLBACK_TAG,                  # an eligible rollback target, as an update
     _rel_to_floor(minor_delta=3),      # the running release itself
 ])
-def test_an_update_request_for_an_older_release_is_refused(tmp_path, monkeypatch, tag):
+def test_an_update_request_for_an_older_release_is_refused(tmp_path, monkeypatch, tag, who):
     """ISS-165: the app (or anything that can write request.json) could ask
     for an `update` to any older tag, and pickup only checked its format.
-    The refusal happens on this side, before deploy.sh runs."""
+    The refusal happens on this side, before deploy.sh runs.
+
+    A request somebody made, or one that does not say who asked. The
+    scheduler's own requests (requested_by: null) are the skip below."""
     current = _rel_to_floor(minor_delta=3)
     sup, marker = _marker_deploy(tmp_path, monkeypatch)
     # A history in which the floor release really did run here.
     (tmp_path / ".deployed").write_text(
         f"t {MIN_ROLLBACK_TAG}\nt {_rel_to_floor(minor_delta=1)}\nt {current}\n")
-    status = sup.run_action({"id": "u1", "action": "update", "tag": tag})
+    status = sup.run_action({"id": "u1", "action": "update", "tag": tag, **who})
     assert status["state"] == "failed"
     assert "Roll back" in status["error"]
     assert not marker.exists(), "deploy.sh ran for a refused update"
     assert json.loads((tmp_path / "status.json").read_text())["state"] == "failed"
+
+
+@pytest.mark.parametrize("tag", [
+    _rel_to_floor(minor_delta=3),      # the running release itself
+    _rel_to_floor(minor_delta=2),      # one the host has since passed
+])
+def test_an_unattended_update_the_host_has_reached_is_skipped(tmp_path, monkeypatch, tag):
+    """A schedule or weekly window whose release was deployed over SSH, or
+    overtaken, after the app last saw the heartbeat. Still never run, but
+    published as a no-op rather than a failure: a failure pauses the
+    automatic policy and pages the admin over nothing."""
+    current = _rel_to_floor(minor_delta=3)
+    sup, marker = _marker_deploy(tmp_path, monkeypatch, current=current)
+    status = sup.run_action({"id": "s1", "action": "update", "tag": tag,
+                             "requested_by": None})
+    assert status["state"] == "skipped"
+    assert status["error"] is None
+    assert status["from_tag"] == current and status["to_tag"] == tag
+    assert current in status["message"] and tag in status["message"]
+    assert not marker.exists(), "deploy.sh ran for a skipped update"
+    assert json.loads((tmp_path / "status.json").read_text())["state"] == "skipped"
+    # Not a success: that is what moves the sidecar onto a newer image.
+    assert sup.self_update_target("v0.0.1", current, status["state"]) is None
+
+
+def test_an_unattended_update_to_a_newer_release_still_runs(tmp_path, monkeypatch):
+    sup, marker = _marker_deploy(tmp_path, monkeypatch, current=_rel_to_floor(minor_delta=3))
+    status = sup.run_action({"id": "s2", "action": "update", "requested_by": None,
+                             "tag": _rel_to_floor(minor_delta=4)})
+    assert status["state"] == "success"
+    assert marker.exists()
+
+
+@pytest.mark.parametrize("current", [None, "dev"])
+def test_an_unattended_update_still_fails_on_an_unknown_running_release(
+        tmp_path, monkeypatch, current):
+    """Only a running release that parses can be "already reached". Without
+    one there is no knowing, and that stays the failure it always was."""
+    sup, marker = _marker_deploy(tmp_path, monkeypatch, current=current)
+    status = sup.run_action({"id": "s3", "action": "update", "requested_by": None,
+                             "tag": _rel_to_floor(minor_delta=4)})
+    assert status["state"] == "failed"
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("tag", ["v1.0.0-rc1", "latest", "v01.0.0", None])
+def test_an_unattended_update_to_an_invalid_tag_still_fails(tmp_path, monkeypatch, tag):
+    sup, marker = _marker_deploy(tmp_path, monkeypatch, current=_rel_to_floor(minor_delta=3))
+    status = sup.run_action({"id": "s4", "action": "update", "requested_by": None,
+                             "tag": tag})
+    assert status["state"] == "failed"
+    assert not marker.exists()
 
 
 def test_an_update_request_for_a_newer_release_runs(tmp_path, monkeypatch):

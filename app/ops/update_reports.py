@@ -5,6 +5,11 @@ report: succeeded, failed, reverted, or skipped (its grace ran out before a
 request ever reached the updater). Nobody was watching either kind, so the
 report is the only way anyone finds out.
 
+The exception is a request the updater found already done: the host was on
+that release or a newer one by the time it was picked up (an SSH deploy got
+there first). Nothing ran and nobody needs to act, so it gets an audit row and
+a log line, not a report. See update_schedule._note_already_current.
+
 Delivery is layered so that nothing depends on an external service:
 
   1. An admin audit-log row, written in the SAME commit as the report row and

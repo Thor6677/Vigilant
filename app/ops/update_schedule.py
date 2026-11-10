@@ -368,23 +368,30 @@ async def _reconcile_outcome(db, policy) -> None:
     manual deploy inside the minute after an unattended one finishes) and it
     fails toward silence rather than toward a wrong report, so it is recorded
     rather than fixed with more bookkeeping.
+
+    A "skipped" status is not a run that ended: the sidecar found the host
+    already on that release or a newer one. See _note_already_current.
     """
     status = updater_client.read_status()
     if not isinstance(status, dict):
         return
-    if status.get("state") not in ("success", "failed"):
+    if status.get("state") not in ("success", "failed", "skipped"):
         return
     rid = status.get("id")
     if not rid:
         return
 
     automatic = bool(policy.awaiting_request_id) and rid == policy.awaiting_request_id
+    sched = None
     if not automatic:
-        fired = (await db.execute(
-            select(UpdateSchedule.id).where(UpdateSchedule.fired_request_id == rid)
-        )).first()
-        if fired is None:
+        sched = (await db.execute(
+            select(UpdateSchedule).where(UpdateSchedule.fired_request_id == rid)
+        )).scalars().first()
+        if sched is None:
             return          # a run somebody started by hand: not ours to report
+    if status.get("state") == "skipped":
+        await _note_already_current(db, policy, sched, status)
+        return
     if await update_reports.already_reported(db, rid):
         if automatic:
             policy.awaiting_request_id = None
@@ -432,6 +439,60 @@ async def _reconcile_outcome(db, policy) -> None:
         await update_reports.dispatch(db, report)
 
 
+async def _note_already_current(db, policy, sched, status) -> None:
+    """Close out a request the sidecar skipped because the host already runs
+    that release or a newer one. Quietly, and once.
+
+    This is the race the checks in tick() cannot see: they read the
+    heartbeat, which can be a minute old, and a request can wait out a
+    sidecar handoff. An SSH deploy of the same release, or a newer one, lands
+    in between and the sidecar, which reads .deployed itself at pickup, finds
+    nothing to do. That is the outcome the schedule or the policy wanted, so it
+    is not reported as a run (a report is a banner and a push), the policy is
+    not paused, and the release is not marked as failed here. What remains is
+    a log line and an audit row naming both tags, from_tag being the sidecar's
+    view of what is running.
+
+    Once: the policy forgets the request id, and a schedule leaves "fired"
+    for "superseded", as one overtaken before it fired does. Either way the
+    next tick no longer finds it ours. The policy keeps last_fired_window, so
+    the window neither fires again nor reads as missed.
+    """
+    if sched is not None:
+        if sched.state != "fired":
+            return
+        sched.state = "superseded"
+    else:
+        policy.awaiting_request_id = None
+    await _record_already_current(
+        db, automatic=sched is None, to_tag=status.get("to_tag"),
+        from_tag=status.get("from_tag"), request_id=status.get("id"))
+
+
+async def _record_already_current(db, *, automatic: bool, to_tag, from_tag,
+                                  request_id: str | None = None) -> None:
+    """The trace a skipped update leaves instead of a report: an audit row and
+    a log line naming both tags. Commits the caller's pending state change
+    with it.
+
+    Also used when tick() drops a due schedule because the heartbeat already
+    shows its release or a newer one. Not for the policy's own "already up to
+    date", which is the normal state of every window and would be noise.
+    """
+    label = "Automatic" if automatic else "Scheduled"
+    detail = (f"{label} update to {to_tag} skipped: the host already runs "
+              f"{from_tag}, which is that release or newer"
+              + (f" (request {request_id})" if request_id else ""))
+    db.add(AdminAuditLog(
+        user_id=None,
+        event_type=("auto_update_already_current" if automatic
+                    else "scheduled_update_already_current"),
+        detail=detail,
+    ))
+    await db.commit()
+    logger.info("updater: %s", detail)
+
+
 async def _fire(db, action: str, tag: str, *, policy=None, schedule=None,
                 key: str | None = None) -> bool:
     """Record the decision, THEN write the request, then record that it went in.
@@ -467,6 +528,9 @@ async def _fire(db, action: str, tag: str, *, policy=None, schedule=None,
     await db.commit()
 
     try:
+        # requested_by=None: nobody asked. The sidecar also reads it as
+        # "unattended", and skips rather than fails an update to a release
+        # the host has meanwhile reached (see _note_already_current).
         updater_client.submit(action, tag, None, request_id=request_id)
     except (updater_client.UpdaterUnavailable, updater_client.UpdaterBusy,
             updater_client.InvalidRequest) as e:
@@ -752,7 +816,9 @@ async def tick(now_utc: datetime | None = None) -> str:
             if due:
                 if sched.target_tag == current_tag:
                     sched.state = "superseded"
-                    await db.commit()
+                    await _record_already_current(
+                        db, automatic=False, to_tag=sched.target_tag,
+                        from_tag=current_tag)
                     return "scheduled tag already running"
                 if parse_version(current_tag) is None:
                     # Cannot tell an upgrade from a downgrade. Hold, not drop:
@@ -762,7 +828,9 @@ async def tick(now_utc: datetime | None = None) -> str:
                     # Something newer got deployed meanwhile. Applying this
                     # now would be a downgrade nobody asked for.
                     sched.state = "superseded"
-                    await db.commit()
+                    await _record_already_current(
+                        db, automatic=False, to_tag=sched.target_tag,
+                        from_tag=current_tag)
                     return "scheduled tag is not newer than the running release"
                 if hold:
                     await _note_hold(db, hold, schedule=sched)
@@ -777,7 +845,9 @@ async def tick(now_utc: datetime | None = None) -> str:
                         and not is_newer(sched.target_tag, current_tag)):
                     # Deployed (or overtaken) some other way meanwhile:
                     # nothing was missed.
-                    await db.commit()
+                    await _record_already_current(
+                        db, automatic=False, to_tag=sched.target_tag,
+                        from_tag=current_tag)
                     return "scheduled tag already running"
                 logger.warning("updater: scheduled update to %s missed its window",
                                sched.target_tag)
