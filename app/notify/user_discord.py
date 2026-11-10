@@ -36,6 +36,8 @@ import httpx
 from sqlalchemy import select
 
 from app.db.models import AsyncSessionLocal, UserNotifySettings
+# Every Discord message body is built by webhook_payload (mentions off).
+from app.notify.discord import webhook_payload
 # Importing log_redaction installs the filter that keeps httpx's own request
 # line from printing the URL; redact_request_urls() marks the send.
 from app.notify.log_redaction import redact_request_urls
@@ -321,16 +323,12 @@ def _kill_alert_text(event: dict) -> tuple[str, str, str]:
 
 def build_payload(title: str, body: str, alert_type: str) -> dict:
     label = ALERT_LABELS.get(alert_type) or _EXTRA_LABELS.get(alert_type) or alert_type
-    return {
-        "username": "Vigilant",
-        "embeds": [{
-            "title": neutralise_mentions(title)[:256],
-            "description": neutralise_mentions(body)[:2048],
-            "footer": {"text": f"Vigilant · {label}"[:2048]},
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }],
-        "allowed_mentions": {"parse": []},
-    }
+    return webhook_payload(username="Vigilant", embeds=[{
+        "title": neutralise_mentions(title)[:256],
+        "description": neutralise_mentions(body)[:2048],
+        "footer": {"text": f"Vigilant · {label}"[:2048]},
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }])
 
 
 @dataclass

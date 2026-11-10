@@ -330,6 +330,7 @@ async def import_year(year: int) -> dict:
 async def _notify_discord_complete() -> None:
     """POST a one-shot message to DISCORD_WEBHOOK_URL when the backfill finishes."""
     from app.config import get_settings
+    from app.notify.discord import webhook_payload
     webhook = get_settings().discord_webhook
     if not webhook:
         log.info("everef_ingest: backfill complete — no DISCORD_WEBHOOK_URL set, skipping notify")
@@ -350,7 +351,7 @@ async def _notify_discord_complete() -> None:
     )
     try:
         async with httpx.AsyncClient(timeout=10.0) as http:
-            resp = await http.post(webhook, json={"content": msg})
+            resp = await http.post(webhook, json=webhook_payload(content=msg))
             if resp.status_code not in (200, 204):
                 log.warning("everef_ingest: Discord notify failed HTTP %s", resp.status_code)
             else:
