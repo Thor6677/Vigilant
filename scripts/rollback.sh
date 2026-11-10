@@ -141,8 +141,13 @@ echo "[3/4] Recreate app"
 # resolve the image to :latest and silently undo this rollback. See
 # _pin_tag_in_env in deploy.sh for the full explanation.
 touch .env
-grep -v '^VIGILANT_TAG=' .env > .env.tmp 2>/dev/null || true
-echo "VIGILANT_TAG=$TARGET" >> .env.tmp
+# Owner-only from creation (umask in a subshell), as in deploy.sh.
+rm -f .env.tmp
+(
+    umask 077
+    grep -v '^VIGILANT_TAG=' .env > .env.tmp 2>/dev/null || true
+    echo "VIGILANT_TAG=$TARGET" >> .env.tmp
+)
 chmod 600 .env.tmp
 mv .env.tmp .env
 
