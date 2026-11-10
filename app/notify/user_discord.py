@@ -77,6 +77,11 @@ INVALID_STORED_ERROR = "the saved webhook URL is no longer accepted — paste a 
 # row off, and only a new URL (which clears last_error) brings it back.
 _GONE_ERRORS = (GONE_ERROR, INVALID_STORED_ERROR)
 
+
+def is_marked_gone(last_error: str | None) -> bool:
+    """True when the row's last_error says the stored webhook was marked gone."""
+    return last_error in _GONE_ERRORS
+
 # ── Alert types ───────────────────────────────────────────────────────────────
 # Every "type" _emit_notification is handed, grouped for the Account page. The
 # relay only ever sends a type that is in here AND in the user's opt-in list.
