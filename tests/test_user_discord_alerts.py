@@ -17,6 +17,8 @@ import base64
 import json
 import logging
 import os
+import time
+from collections import deque
 
 import pytest
 from fastapi.testclient import TestClient
@@ -667,6 +669,101 @@ def test_the_test_route_without_a_webhook():
     assert c.post("/account/notifications/discord/test").status_code == 303
     assert _FakeClient.posts == []
     assert "No webhook saved yet" in _page(c)
+
+
+# ── The test message's limits (ISS-174) ──────────────────────────────────────
+# A test is one press away and goes out from the instance's own address, so it
+# is held to the alert path's limits. The clock is not frozen here (the routes
+# run on TestClient's own loop); the limiter's timestamps are moved instead.
+
+def _press_test(c) -> str:
+    assert c.post("/account/notifications/discord/test").status_code == 303
+    return _page(c)
+
+
+def test_a_second_test_inside_the_cooldown_is_refused_without_a_request():
+    uid = ensure_user(90213)
+    c = _client(uid)
+    c.post("/account/notifications/discord", data={"discord_webhook_url": HOOK, "alert_types": []})
+    assert "Test message sent" in _press_test(c)
+    html = _press_test(c)
+    assert len(_FakeClient.posts) == 1
+    assert "Test message not delivered: one test every 30 seconds, try again in" in html
+    user_discord._last_test[uid] -= user_discord._TEST_COOLDOWN_SECONDS
+    assert "Test message sent" in _press_test(c)
+    assert len(_FakeClient.posts) == 2
+
+
+def test_a_test_is_refused_while_discord_has_paused_the_user():
+    uid = ensure_user(90214)
+    c = _client(uid)
+    c.post("/account/notifications/discord", data={"discord_webhook_url": HOOK, "alert_types": ["structure_attack"]})
+    _FakeClient.status = 429
+    _FakeClient.headers = {"retry-after": "600"}
+    assert _run(_send(uid)).startswith("failed: HTTP 429")     # an alert gets the pause
+    _FakeClient.status = 204
+    html = _press_test(c)
+    assert len(_FakeClient.posts) == 1
+    assert "Test message not delivered: Discord asked for a pause, try again in 10 minutes." in html
+    assert _run(_row(uid)).last_error.startswith("HTTP 429")    # the refusal left the row alone
+
+
+def test_a_429_on_a_test_pauses_alerts_and_the_next_test():
+    uid = ensure_user(90215)
+    c = _client(uid)
+    c.post("/account/notifications/discord", data={"discord_webhook_url": HOOK, "alert_types": ["structure_attack"]})
+    _FakeClient.status = 429
+    _FakeClient.headers = {"retry-after": "600"}
+    assert "Test message not delivered: HTTP 429" in _press_test(c)
+    _FakeClient.status = 204
+    user_discord._last_test.pop(uid, None)                      # not the cooldown's refusal
+    assert _run(_send(uid)) == user_discord.NOT_SENT_MUTED
+    assert "Test message not delivered: Discord asked for a pause" in _press_test(c)
+    assert len(_FakeClient.posts) == 1
+
+
+def test_a_test_to_a_webhook_marked_gone_is_refused_until_a_new_url():
+    uid = ensure_user(90216)
+    c = _client(uid)
+    c.post("/account/notifications/discord", data={"discord_webhook_url": HOOK, "alert_types": []})
+    _FakeClient.status = 404
+    _press_test(c)                                              # Discord: gone
+    _FakeClient.status = 204
+    user_discord._last_test.pop(uid, None)
+    refused = f"Test message not delivered: {user_discord.GONE_ERROR}."
+    assert refused in _press_test(c)
+    # Ticking "Send alerts" again is not a new URL.
+    c.post("/account/notifications/discord",
+           data={"discord_webhook_url": "", "alert_types": [], "enabled": "on"})
+    assert refused in _press_test(c)
+    assert len(_FakeClient.posts) == 1
+    assert _run(_row(uid)).last_error == user_discord.GONE_ERROR
+    c.post("/account/notifications/discord", data={"discord_webhook_url": HOOK2, "alert_types": []})
+    assert "Test message sent" in _press_test(c)
+    assert [p[0] for p in _FakeClient.posts] == [HOOK, HOOK2]
+
+
+def test_a_paused_webhook_can_still_be_tested():
+    uid = ensure_user(90217)
+    c = _client(uid)
+    c.post("/account/notifications/discord", data={"discord_webhook_url": HOOK, "alert_types": []})
+    c.post("/account/notifications/discord", data={"discord_webhook_url": "", "alert_types": []})
+    assert _run(_row(uid)).enabled is False
+    assert "Test message sent" in _press_test(c)
+
+
+def test_tests_count_against_the_per_user_cap_and_are_refused_at_it():
+    uid = ensure_user(90218)
+    c = _client(uid)
+    c.post("/account/notifications/discord", data={"discord_webhook_url": HOOK, "alert_types": []})
+    assert "Test message sent" in _press_test(c)
+    assert len(user_discord._sent_times.get(uid, ())) == 1      # counted like an alert
+    user_discord._last_test.pop(uid, None)
+    user_discord._sent_times[uid] = deque([time.monotonic()] * user_discord._RATE_LIMIT)
+    html = _press_test(c)
+    assert len(_FakeClient.posts) == 1
+    assert "Test message not delivered: at most 20 messages go out every 10 minutes" in html
+    assert user_discord.dropped_count(uid) == 0                 # not an alert the cap dropped
 
 
 def test_remove_clears_the_url():

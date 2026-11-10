@@ -65,6 +65,30 @@ def relay_scope() -> str:
     return SCOPE_ADMINS
 
 
+def webhook_payload(*, content: str | None = None, embeds: list[dict] | None = None,
+                    username: str | None = None) -> dict:
+    """The JSON body of every message the app posts to a Discord webhook.
+
+    Every sender builds its body here (the instance relay, update reports
+    and the update check through send_discord_alert, the per-user relay in
+    user_discord, the EVERef backfill ping), and a test holds the rest of
+    app/ to that, so no sender can leave out `allowed_mentions`. Alert text
+    can carry what a user typed into a form, such as a corp threshold's item
+    or location name or a contract keyword, and an empty `parse` list stops
+    Discord turning an @everyone, @here, role or user mention in it into a
+    ping. It is set last, so nothing passed in can replace it.
+    """
+    payload: dict = {}
+    if username is not None:
+        payload["username"] = username
+    if content is not None:
+        payload["content"] = content
+    if embeds is not None:
+        payload["embeds"] = embeds
+    payload["allowed_mentions"] = {"parse": []}
+    return payload
+
+
 def _enabled_types(raw: str) -> set[str]:
     return {t.strip() for t in raw.split(",") if t.strip()}
 
@@ -120,7 +144,7 @@ async def send_discord_alert(title: str, body: str, alert_type: str, key: str | 
         return NOT_SENT_SUPPRESSED  # an identical alert already went out recently
     _last_sent[dedup_key] = now
 
-    payload = {"content": f"**{title}**\n{body}" if body else f"**{title}**"}
+    payload = webhook_payload(content=f"**{title}**\n{body}" if body else f"**{title}**")
     try:
         with redact_request_urls():
             async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
