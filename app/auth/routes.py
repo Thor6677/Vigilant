@@ -46,7 +46,7 @@ from app.auth import scopes as perms
 from app.auth.purge import (
     REASON_SELF, REASON_TRANSFER, clear_esi_cache_in_background, clear_live_state, finish_relink,
     narrowing_cache_patterns, owner_from_token, purge_history, remove_character_from_account,
-    removal_cache_patterns, settle_history_for_relink, withdrawn_keys,
+    remove_with_history, removal_cache_patterns, settle_history_for_relink, withdrawn_keys,
 )
 from app.auth.session_guard import SESSION_EPOCH_KEY, new_session_epoch, rotate_session_epoch
 from app.auth.tokens import issued_to_us, revoke_refresh_token
@@ -305,17 +305,23 @@ async def _release_transferred(db: AsyncSession, request: Request, char: Charact
     """
     cid = char.character_id
     old_user_id = char.user_id
-    cache_patterns = removal_cache_patterns(char)
-    await remove_character_from_account(db, char, reason=REASON_TRANSFER, delete_history=True)
-    db.add(AdminAuditLog(
-        user_id=old_user_id, character_id=cid, event_type="character_transferred",
-        detail="EVE reports a new owner; removed from the previous account with its stored data",
-        ip_address=request.client.host if request.client else None,
-    ))
-    await db.commit()
+    # Shared with the expiry sweep, which finds transfers a refresh noticed.
+    cache_patterns = await remove_with_history(
+        db, char, REASON_TRANSFER, "character_transferred",
+        "EVE reports a new owner; removed from the previous account with its stored data",
+        ip=request.client.host if request.client else None)
     # ISS-077: the old owner's cached corp contracts, after the response.
     background_tasks.add_task(clear_esi_cache_in_background, db.bind, None, cache_patterns)
     logger.warning("character %s changed EVE owner; removed from user %s", cid, old_user_id)
+
+
+def _stamp_sign_in(char: Character) -> None:
+    """A full EVE SSO sign-in with this character: both expiry clocks start
+    again (app/auth/expiry.py), whatever the intent and whether or not the
+    stored token was replaced. Caller commits."""
+    now = datetime.now(timezone.utc)
+    char.last_authorized_at = now
+    char.last_sso_at = now
 
 
 def _ensure_session_epoch(user: User) -> None:
@@ -450,9 +456,12 @@ async def callback(request: Request, code: str, state: str, background_tasks: Ba
     # Before anything else looks at `existing`: after a transfer it belongs to
     # the previous owner, and the person signing in now is a newcomer — subject
     # to the allowlist below like any other.
+    # ISS-162: rows from before owner_hash existed have it NULL; their stored
+    # token's `owner` claim still names the owner (as at removal). Only when
+    # neither says who owns it is the first sign-in taken to record the owner.
     owner_hash = _owner_hash(access_token, verify_data)
-    if (existing is not None and owner_hash and existing.owner_hash
-            and existing.owner_hash != owner_hash):
+    known_owner = existing and (existing.owner_hash or owner_from_token(existing.access_token))
+    if existing is not None and owner_hash and known_owner and known_owner != owner_hash:
         await _release_transferred(db, request, existing, background_tasks)
         existing = None
 
@@ -511,6 +520,8 @@ async def callback(request: Request, code: str, state: str, background_tasks: Ba
         existing.character_name = character_name
         if owner_hash:
             existing.owner_hash = owner_hash
+        # Counts as a sign-in even though the stored token stays as it was.
+        _stamp_sign_in(existing)
         user.last_login = datetime.now(timezone.utc)
         _ensure_session_epoch(user)
         await db.commit()
@@ -617,6 +628,7 @@ async def callback(request: Request, code: str, state: str, background_tasks: Ba
         _apply_metadata(existing, meta)
         if owner_hash:
             existing.owner_hash = owner_hash
+        _stamp_sign_in(existing)
         if intent == SIGNUP:
             user.last_login = datetime.now(timezone.utc)
             _ensure_session_epoch(user)
@@ -664,6 +676,7 @@ async def callback(request: Request, code: str, state: str, background_tasks: Ba
     _apply_metadata(existing, meta)
     if owner_hash:
         existing.owner_hash = owner_hash
+    _stamp_sign_in(existing)
     # ISS-051: what the last sync found wrong was found with the OLD token. A
     # failed fetch still stamps its field as synced, so without this reset the
     # queued sync below saw nothing stale and "Authorization expired" stayed up

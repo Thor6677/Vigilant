@@ -15,8 +15,10 @@ import app.routes.admin as admin_mod
 
 
 def test_overview_handler_passes_app_version():
-    src = inspect.getsource(admin_mod.admin_overview)
+    # The route and the held-removal actions all render through _overview.
+    src = inspect.getsource(admin_mod._overview)
     assert "app_version" in src, "admin_overview must pass app_version to the template"
+    assert "_overview(" in inspect.getsource(admin_mod.admin_overview)
 
 
 def test_overview_template_renders_version_tile():

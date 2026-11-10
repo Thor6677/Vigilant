@@ -219,9 +219,29 @@ async def _do_refresh(character: Character, db: AsyncSession, *,
             raise
     data = resp.json()
 
+    from app.auth.purge import owner_from_token
+    # Who owned the character before this refresh: owner_hash, or for a row
+    # that never had one, the claim in the token about to be replaced (ISS-162).
+    owner_before = character.owner_hash or owner_from_token(character.access_token)
     character.access_token = data["access_token"]
     character.refresh_token = data.get("refresh_token", character.refresh_token)
     character.token_expiry = datetime.now(timezone.utc) + timedelta(seconds=data["expires_in"])
+    # Authorization expiry (app/auth/expiry.py): EVE accepting the refresh
+    # shows the authorization still works, unless the new token names another
+    # EVE account. Then nothing is stamped and the old owner stays recorded,
+    # so the expiry sweep sees the mismatch and removes it as a transfer. Rows
+    # are never deleted here: this runs in the middle of syncs and page loads.
+    owner_after = owner_from_token(character.access_token)
+    if owner_before and owner_after and owner_after != owner_before:
+        character.owner_hash = owner_before
+        import logging
+        logging.getLogger(__name__).warning(
+            "character %s: refreshed token names a different EVE owner; "
+            "left for the expiry sweep", character.character_id)
+    else:
+        character.last_authorized_at = datetime.now(timezone.utc)
+        if not character.owner_hash and owner_after:
+            character.owner_hash = owner_after
     # Keep the stored scopes equal to what the token can actually do (its scp
     # claim — the same source the scope guard reads). If EVE ever narrows an
     # authorization underneath us, the Account page and the sync layer see it

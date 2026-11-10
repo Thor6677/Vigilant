@@ -1,0 +1,18 @@
+{# Character removals the authorization-expiry sweep held for review
+   (app/auth/expiry.py). Admin-only: /status/held-removals returns empty
+   content for everyone else.
+
+   Visible by default, like the update-report banner, and with no dismiss of
+   its own: it is a task, and it goes when an admin removes or keeps the held
+   characters in Admin › Overview (or a later sweep holds nothing). No data-alert-id, so
+   base.html's applyDismissState() never touches it. No script. #}
+<div class="structure-alert-banner is-warn held-removals-banner">
+    <div style="display:flex;align-items:center;gap:0.6rem;flex:1;min-width:0;">
+        <span class="alert-icon">&#9888;</span>
+        <span class="alert-text">
+            <strong>{{ count }} character removal{{ 's are' if count != 1 else ' is' }} held for review</strong>
+            &mdash; the daily authorization check stopped more removals than it makes at once.
+            <a href="/admin?tab=overview">Review in Admin &rsaquo; Overview</a>
+        </span>
+    </div>
+</div>

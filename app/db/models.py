@@ -119,8 +119,16 @@ class Character(Base):
     # EVE SSO's CharacterOwnerHash: which EVE account owns the character. It
     # changes when the character moves to another account, which is how a
     # login by the new owner is told apart from the old owner's. Null until
-    # the character next signs in (rows from before this column existed).
+    # the character next signs in (rows from before this column existed); until
+    # then the stored access token's `owner` claim stands in (ISS-162).
     owner_hash = Column(String, nullable=True)
+    # Authorization expiry (app/auth/expiry.py). last_authorized_at: the last
+    # time the EVE authorization was shown to work, by a sign-in with the
+    # character or a token refresh EVE accepted. last_sso_at: the last full EVE
+    # SSO sign-in with it. Both set when the row is created; rows from before
+    # these columns get the time of the upgrade (backfill_authorization_stamps).
+    last_authorized_at = Column(DateTime, nullable=True, default=lambda: datetime.now(timezone.utc))
+    last_sso_at = Column(DateTime, nullable=True, default=lambda: datetime.now(timezone.utc))
 
     user = relationship("User", back_populates="characters")
 
@@ -1745,3 +1753,30 @@ class KeptCharacterHistory(Base):
     # The Vigilant account that removed it.
     user_id = Column(Integer, nullable=True)
     removed_at = Column(DateTime, nullable=False)       # naive UTC
+
+
+# ── Authorization expiry: removals held for review ──────────────────────────
+
+class HeldCharacterRemoval(Base):
+    """A removal the authorization-expiry sweep held for an admin to review.
+
+    When the sweep's breaker trips (app/auth/expiry.py) it makes none of the
+    expiry and sign-in-cap removals it found and records each one here; Admin
+    › Overview lists them with "Remove these characters" and "Keep for now".
+    Every sweep replaces the whole set with its own result, so a run that
+    holds nothing empties it. One row per character. Rows go with their
+    account (USER_OWNED_TABLES in app/routes/admin.py).
+    """
+    __tablename__ = "held_character_removals"
+
+    character_id = Column(Integer, primary_key=True, autoincrement=False)
+    character_name = Column(String, nullable=False)
+    # The account it was on when it was held.
+    user_id = Column(Integer, nullable=False)
+    rule = Column(String(16), nullable=False)           # expiry.RULE_EXPIRY / RULE_SSO_CAP
+    # The stamp the rule was judged on: last_authorized_at for the expiry
+    # rule, last_sso_at for the sign-in cap. A later one on the character
+    # means it has proved itself since, and approving the hold keeps it.
+    last_proof_at = Column(DateTime, nullable=False)    # naive UTC
+    # First held; kept while later sweeps go on holding it under the same rule.
+    held_at = Column(DateTime, nullable=False)          # naive UTC

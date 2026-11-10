@@ -296,6 +296,18 @@
      hx-trigger="load delay:500ms, every 120s"
      hx-swap="innerHTML"
      data-htmx-no-error="1"></div>
+{# Character removals the expiry sweep held for review (app/auth/expiry.py).
+   Placed only for a session marked admin, as the nav's admin links are, so
+   nobody else even asks; the endpoint checks the role in the database and
+   answers empty for anyone else. Changes at most daily or when an admin acts,
+   hence the slow poll; innerHTML for the same reason as the slots above. #}
+{% if request.session.get('is_admin') %}
+<div id="held-removals-slot"
+     hx-get="/status/held-removals"
+     hx-trigger="load delay:600ms, every 300s"
+     hx-swap="innerHTML"
+     data-htmx-no-error="1"></div>
+{% endif %}
 
 {# ── Command palette (Ctrl+K) — Phase 2 Task 1 ──────────────────────────────
    MUST be a direct child of <body> (a backdrop-filter / transform ancestor

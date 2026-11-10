@@ -52,6 +52,10 @@ hand — no ESI calls, no per-pilot query. Each dict:
                                                          granted fields; absent -> judged from last_synced
                                                          alone (the pre-ISS-069 rule)
     no_perms           bool (optional)                — the pilot shares no permissions at all
+    last_authorized_at datetime | None (optional)    — Character.last_authorized_at and
+    last_sso_at        datetime | None (optional)      Character.last_sso_at, the authorization
+                                                         expiry clocks (app.auth.expiry); absent ->
+                                                         no expiry item
 
 `"no_scope"` for a field means the character never shared the permission that
 feeds it — matches `app.routes.dashboard._build_data_from_caches`'s own
@@ -90,8 +94,9 @@ about training-account counts with (`group_skill_data` in
 
 | Severity | Signal | Condition | Action | Ages out? |
 |---|---|---|---|---|
-| red | Re-auth | `needs_reauth` | Renew -> `/account/permissions/{cid}` | never |
+| red | Re-auth | `needs_reauth`; its text also gives the removal date (`app.auth.expiry`), which is then not a row of its own | Renew -> `/account/permissions/{cid}` | never |
 | red | Account idle | no pilot on the account is training (see "Account grouping") | Skills -> the paused pilot's page if there is one, else the first counted pilot's | never |
+| amber | Removal ahead | not `needs_reauth`, and `app.auth.expiry.removal_warning` gives a date: the authorization has had no proof for a few days (removed 90 days after its last), or the 365-day sign-in cap is within 30 days | Renew -> `/account/permissions/{cid}` | no (clears on the next sign-in or working refresh) |
 | red | PI expired | any planet's `expiry_time` <= now, and not expired more than `PI_ABANDONED_DAYS` ago | Planets -> `/industry/planetary` | yes, to grey after `AGE_OUT_DAYS`; dropped entirely (no item at all) once past `PI_ABANDONED_DAYS` — an abandoned colony, not something to act on |
 | amber | PI ending soon | any planet's `expiry_time` within 24h (pi.py's "critical" <1h band and "warning" <24h band both collapse to this one amber signal here — the brief's own 24h amber threshold already covers pi.py's tighter 1h one) | Planets -> `/industry/planetary` | no (resolves into red or clears on its own) |
 | amber | Skill queue critical | `skill_warning` == "critical" (<=7 days by whole-day floor, i.e. up to but not including 8 days) | Skills | no |
@@ -126,6 +131,8 @@ best-effort:
   a set of pilots that individually went stale at different times.
 - Reauth, account idle: `None` — nothing records when the authorization died
   or an account's last pilot stopped training.
+- Removal ahead: the last proof the authorization worked (90-day rule), or
+  the date the sign-in cap's warning window opened.
 - Jobs ready: the earliest `end_date` among the ready jobs (exact). For cache
   rows written before ISS-064 (no `job_id`/`end_date` yet) it falls back to
   `industry_synced_at`, the last industry sync — a lower bound — and to the
@@ -156,6 +163,7 @@ import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+from app.auth import expiry as _expiry
 from app.dashboard import staleness as _shared_staleness
 from app.dashboard.staleness import STALE_CRITICAL_SECONDS, STALE_WARNING_SECONDS  # noqa: F401  (re-exported)
 
@@ -499,16 +507,37 @@ def build_attention(pilots: list[dict], now: datetime) -> list[AttentionItem]:
         cid = p["character_id"]
         name = p["character_name"]
 
+        # The character is heading for removal (app.auth.expiry). With a dead
+        # token that is said on the red item below rather than a second row.
+        removal = _expiry.removal_warning(p, now, token_dead=bool(p.get("needs_reauth")))
+
         # ── red: authorization expired ──────────────────────────────────────
         if p.get("needs_reauth"):
+            text = "authorization expired, EVE no longer accepts this token"
+            if removal:
+                text += "; it " + _expiry.warning_text(removal[1], now)
             items.append(AttentionItem(
                 key=f"reauth:{cid}",
-                fingerprint=_fp("reauth"),
+                # The removal date is part of the state: a new one shows again.
+                fingerprint=_fp("reauth", removal[1].isoformat()) if removal else _fp("reauth"),
                 severity="red",
                 character_id=cid, character_name=name,
-                text="authorization expired, EVE no longer accepts this token",
+                text=text,
                 action_label="Renew", action_url=f"/account/permissions/{cid}", action_method="get",
                 since=None,
+            ))
+
+        # ── amber: heading for removal, token not known dead ────────────────
+        elif removal:
+            rule, due = removal
+            items.append(AttentionItem(
+                key=f"auth_expiry:{cid}",
+                fingerprint=_fp("auth_expiry", rule, due.isoformat()),
+                severity="amber",
+                character_id=cid, character_name=name,
+                text=_expiry.warning_text(due, now),
+                action_label="Renew", action_url=f"/account/permissions/{cid}", action_method="get",
+                since=_expiry.warning_since(rule, due),
             ))
 
         # ── skill queue: critical (amber) / warning (gold), per training

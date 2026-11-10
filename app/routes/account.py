@@ -19,9 +19,11 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import expiry
 from app.auth import scopes as perms
 from app.auth import status as perm_status
 from app.auth.routes import UPDATE, picker_context
+from app.config import get_settings
 from app.db.models import Character, CharacterDashboardCache, UserNotifySettings, get_db
 from app.notify import user_discord
 
@@ -70,8 +72,22 @@ async def _notify_row(db: AsyncSession, user_id: int) -> UserNotifySettings | No
         UserNotifySettings.user_id == user_id))).scalar_one_or_none()
 
 
+def _expiry_view(char: Character, token_failed: bool) -> dict | None:
+    """The removal warning for one character (app/auth/expiry.py), or None."""
+    now = datetime.now(timezone.utc)
+    warning = expiry.removal_warning(char, now, token_dead=token_failed)
+    if warning is None:
+        return None
+    rule, due = warning
+    last = char.last_sso_at if rule == expiry.RULE_SSO_CAP else char.last_authorized_at
+    return {"rule": rule, "text": expiry.warning_text(due, now),
+            "last": f"{last:%Y-%m-%d}" if last else None,
+            "cap_days": get_settings().character_sso_cap_days}
+
+
 def _char_view(char: Character, warnings: dict | None) -> dict:
     """Plain dict for the template (no lazy loads on a detached row)."""
+    failed = perm_status.token_failed(warnings)
     return {
         "character_id": char.character_id,
         "character_name": char.character_name,
@@ -80,7 +96,8 @@ def _char_view(char: Character, warnings: dict | None) -> dict:
         "is_main": bool(char.is_main),
         "scopes": char.scopes or "",
         "declined_scopes": char.declined_scopes or "",
-        "token_failed": perm_status.token_failed(warnings),
+        "token_failed": failed,
+        "expiry": _expiry_view(char, failed),
         **perm_status.summary(char),
     }
 

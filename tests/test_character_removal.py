@@ -88,11 +88,18 @@ def test_purge_waits_out_a_running_sync():
 
 
 def test_every_removal_path_uses_the_one_helper():
+    from app.auth.expiry import _remove
     from app.auth.routes import _release_transferred, remove_character
     from app.routes.admin import admin_remove_character, admin_remove_user
-    for fn in (remove_character, _release_transferred, admin_remove_character, admin_remove_user):
+    for fn in (remove_character, purge.remove_with_history, admin_remove_character, admin_remove_user):
         src = inspect.getsource(fn)
         assert "remove_character_from_account(" in src, fn.__name__
+    # A transfer and the expiry sweep go through remove_with_history.
+    for fn in (_release_transferred, _remove):
+        assert "remove_with_history(" in inspect.getsource(fn), fn.__name__
+    for fn in (remove_character, purge.remove_with_history, _release_transferred, _remove,
+               admin_remove_character, admin_remove_user):
+        src = inspect.getsource(fn)
         # The inline full-table LIKE on esi_cache must not come back.
         assert "clear_live_state(" not in src and "clear_esi_cache(" not in src, fn.__name__
 

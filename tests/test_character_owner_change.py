@@ -57,6 +57,17 @@ def _set_owner(env, cid, owner_hash):
     env.q(go)
 
 
+def _set_stored_token_owner(env, cid, owner):
+    """A legacy row (ISS-162): owner_hash never filled in, but the stored
+    access token still carries the `owner` claim."""
+    async def go(db):
+        c = await _scalar(db, select(Character).where(Character.character_id == cid))
+        c.owner_hash = None
+        c.access_token = _jwt(owner=owner)
+        await db.commit()
+    env.q(go)
+
+
 def _seed_data(env, cid):
     """Things the old owner's tokens collected for this character."""
     from datetime import datetime, timezone
@@ -142,6 +153,62 @@ def test_new_owner_does_not_sign_into_the_old_account(env, monkeypatch):
     assert [(e.user_id, e.character_id) for e in events] == [(USER_ID, ALT_ID)]
     # Old tokens are never revoked: EVE's one grant per character per app is now the buyer's.
     assert env.calls["revoked"] == []
+
+
+def test_legacy_row_new_owner_does_not_sign_into_the_old_account(env, monkeypatch):
+    """ISS-162: owner_hash NULL, but the stored token names the old owner."""
+    _set_stored_token_owner(env, ALT_ID, "owner-A")
+    _seed_data(env, ALT_ID)
+    _sso(monkeypatch, ALT_ID, "Alt Pilot", owner="owner-B")
+
+    r = _login(env)
+
+    assert r.status_code == 303
+    new_user = env.session_of(r)["user_id"]
+    assert new_user not in (USER_ID, OTHER_ID)
+    char = env.char(ALT_ID)
+    assert char.user_id == new_user
+    assert char.owner_hash == "owner-B"
+    assert _count(env, WalletSnapshot, character_id=ALT_ID) == 0
+    assert _count(env, CharacterDashboardCache, character_id=ALT_ID) == 0
+    assert env.char(MAIN_ID).user_id == USER_ID
+    events = env.q(lambda db: _events(db, "character_transferred"))
+    assert [(e.user_id, e.character_id) for e in events] == [(USER_ID, ALT_ID)]
+    assert env.calls["revoked"] == []
+
+
+def test_legacy_row_same_owner_signs_in_as_before(env, monkeypatch):
+    _set_stored_token_owner(env, ALT_ID, "owner-A")
+    _seed_data(env, ALT_ID)
+    _sso(monkeypatch, ALT_ID, "Alt Pilot", owner="owner-A")
+
+    r = _login(env)
+
+    assert env.session_of(r)["user_id"] == USER_ID
+    char = env.char(ALT_ID)
+    assert char.user_id == USER_ID
+    assert char.owner_hash == "owner-A"
+    assert _count(env, WalletSnapshot, character_id=ALT_ID) == 1
+    assert _count(env, CharacterDashboardCache, character_id=ALT_ID) == 1
+    assert env.q(lambda db: _events(db, "character_transferred")) == []
+
+
+def test_legacy_row_new_owner_via_signup_gets_a_new_account(env, monkeypatch):
+    """ISS-162: the signup path used to match the old row by character_id too."""
+    _set_stored_token_owner(env, ALT_ID, "owner-A")
+    _sso(monkeypatch, ALT_ID, "Alt Pilot", owner="owner-B",
+         scopes=cat.scopes_for(["wallet", "assets"]))
+
+    r = env.client(_pending("signup", ["wallet", "assets"])).get(
+        "/auth/callback?code=x&state=S")
+
+    assert r.status_code == 303
+    new_user = env.session_of(r)["user_id"]
+    assert new_user not in (USER_ID, OTHER_ID)
+    char = env.char(ALT_ID)
+    assert char.user_id == new_user
+    assert char.owner_hash == "owner-B"
+    assert env.char(MAIN_ID).user_id == USER_ID
 
 
 def test_new_owner_of_an_admins_main_gets_no_admin(env, monkeypatch):
