@@ -122,7 +122,10 @@ def detect_paste_type(text: str) -> str:
 def _parse_distance(raw: str) -> float | None:
     if not raw:
         return None
-    m = re.match(r'^([\d,.\s]+)\s*(m|km|AU)$', raw.strip(), re.IGNORECASE)
+    # The number already takes spaces ("12 345 km"). A separate \s* before the
+    # unit only gave the engine a second way to split every run of spaces,
+    # which made a long run quadratic (ISS-166).
+    m = re.match(r'^([\d,.\s]+)(m|km|AU)$', raw.strip(), re.IGNORECASE)
     if not m:
         return None
     num_str = m.group(1).replace(",", "").replace(" ", "")

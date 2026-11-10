@@ -42,6 +42,7 @@ from app.routes.fitting import _character_skills_map
 from app.market import lp as market_lp
 from app.esi.client import ESIClient
 from app.esi import market as esi_market
+from app.utils.paste import paste_limit_error
 
 router = APIRouter(tags=["industry"])
 templates = Jinja2Templates(directory="app/templates")
@@ -1004,6 +1005,21 @@ from app.industry.hauling import (
     parse_eve_paste, categorize_item, recommend_ships,
 )
 
+# Paste limits for hauling and appraisal (ISS-166). One item per line, so a
+# thousand lines is a very large manifest; each distinct name costs an SDE
+# lookup, and on appraisal a market request. No EVE copy format writes a
+# line anywhere near the length limit.
+MAX_PASTE_LINES = 1000
+MAX_PASTE_LINE_CHARS = 1000
+
+
+def _paste_refusal(paste_text: str) -> HTMLResponse | None:
+    too_big = paste_limit_error(paste_text, max_lines=MAX_PASTE_LINES,
+                                max_line_chars=MAX_PASTE_LINE_CHARS)
+    if too_big:
+        return HTMLResponse(f'<div class="b-empty" style="color:var(--danger);">{too_big}</div>')
+    return None
+
 
 @router.get("/industry/hauling", response_class=HTMLResponse)
 async def industry_hauling(request: Request):
@@ -1022,11 +1038,16 @@ async def hauling_resolve(
     db: AsyncSession = Depends(get_db),
 ):
     """Parse pasted item list, resolve names, look up volumes, categorize."""
+    if not request.session.get("user_id"):   # ISS-166: login-only, like its page
+        return HTMLResponse("", status_code=401)
     form = await request.form()
     paste_text = form.get("paste_text", "")
 
     if not paste_text.strip():
         return HTMLResponse('<div class="b-empty">Paste items above to resolve</div>')
+    refusal = _paste_refusal(paste_text)
+    if refusal:
+        return refusal
 
     parsed = parse_eve_paste(paste_text)
     if not parsed:
@@ -1093,12 +1114,17 @@ async def appraisal_calculate(
     db: AsyncSession = Depends(get_db),
 ):
     """Parse pasted items, resolve via SDE, fetch live sell prices from trade hub."""
+    if not request.session.get("user_id"):   # ISS-166: login-only, like its page
+        return HTMLResponse("", status_code=401)
     form = await request.form()
     paste_text = form.get("paste_text", "")
     hub_key = form.get("hub", "jita")
 
     if not paste_text.strip():
         return HTMLResponse('<div class="b-empty">Paste items above to appraise</div>')
+    refusal = _paste_refusal(paste_text)
+    if refusal:
+        return refusal
 
     if hub_key not in APPRAISAL_HUBS:
         hub_key = "jita"
