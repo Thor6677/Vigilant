@@ -88,14 +88,18 @@ async def assets_search(
     except (ValueError, TypeError):
         from_char_id = active_id
 
+    # The cookie's active id can outlive the character's place in this account,
+    # so it only counts while the session user still owns it.
     if from_char_id not in characters:
-        from_char_id = active_id
+        from_char_id = active_id if active_id in characters else None
 
     origin_system_id = None
-    loc_cache_result = await db.execute(
-        select(CharacterDashboardCache).where(CharacterDashboardCache.character_id == from_char_id)
-    )
-    loc_cache = loc_cache_result.scalar_one_or_none()
+    loc_cache = None
+    if from_char_id is not None:
+        loc_cache_result = await db.execute(
+            select(CharacterDashboardCache).where(CharacterDashboardCache.character_id == from_char_id)
+        )
+        loc_cache = loc_cache_result.scalar_one_or_none()
     if loc_cache and loc_cache.location_json:
         try:
             loc_data = json.loads(loc_cache.location_json)
