@@ -1,5 +1,6 @@
 """Image host tool — upload an image, convert to JPEG, share via short URL."""
 
+import asyncio
 import io
 import secrets
 import string
@@ -25,8 +26,21 @@ settings = get_settings()
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 MAX_DIMENSION = 4096                 # downscale longest side to this
 JPEG_QUALITY = 85
-# Decompression bomb guard — refuse images that decode to more than ~80 MP
-Image.MAX_IMAGE_PIXELS = 80_000_000
+# Largest canvas accepted, checked from the header before anything is decoded
+# (ISS-169). An 8K screenshot is 33 MP, and the output is cut to 4096 px on
+# its longest side anyway. The 10 MB file cap does not bound this: a flat
+# PNG under 1 MB can declare over 100 MP.
+MAX_PIXELS = 40_000_000
+# Pillow's own guard, as a backstop: it warns above this and refuses above
+# twice it, while opening.
+Image.MAX_IMAGE_PIXELS = MAX_PIXELS
+_TOO_LARGE = f"Image too large — the limit is {MAX_PIXELS // 1_000_000} megapixels."
+
+# Conversions run in a worker thread so the event loop keeps serving (ISS-169).
+# A full-size decode and its copies come to hundreds of MB, so one runs at a
+# time and a few may wait; past that an upload is refused, not queued.
+CONVERT_CONCURRENCY = 1
+CONVERT_QUEUE = 4
 
 EXPIRY_OPTIONS = {
     "never":  None,
@@ -79,12 +93,22 @@ def _convert_to_jpeg(raw_bytes: bytes) -> tuple[bytes, int, int]:
     """Decode an arbitrary image, normalize, downscale if huge, return JPEG bytes + dims.
 
     Strips EXIF/metadata, flattens transparency over white, applies orientation tag.
-    Raises ValueError on invalid input.
+    Raises ValueError on invalid input. Blocking: the upload route runs it
+    through _convert_off_loop.
     """
     try:
         img = Image.open(io.BytesIO(raw_bytes))
+    except (Image.DecompressionBombError, Image.DecompressionBombWarning):
+        # The warning only arrives here where warnings are raised as errors.
+        raise ValueError(_TOO_LARGE)
+    except (UnidentifiedImageError, OSError) as exc:
+        raise ValueError(f"Could not read image: {exc}")
+    # Opening reads only the header, so the size is known before decoding.
+    if img.width * img.height > MAX_PIXELS:
+        raise ValueError(_TOO_LARGE)
+    try:
         img.load()
-    except (UnidentifiedImageError, Image.DecompressionBombError, OSError) as exc:
+    except (Image.DecompressionBombError, OSError) as exc:
         raise ValueError(f"Could not read image: {exc}")
 
     # Honor EXIF rotation, then drop the metadata
@@ -111,6 +135,55 @@ def _convert_to_jpeg(raw_bytes: bytes) -> tuple[bytes, int, int]:
     out = io.BytesIO()
     img.save(out, format="JPEG", quality=JPEG_QUALITY, optimize=True, progressive=True)
     return out.getvalue(), img.width, img.height
+
+
+class ConverterBusy(Exception):
+    """Every conversion slot is taken and the queue is full."""
+
+
+_convert_sem: asyncio.Semaphore | None = None
+_convert_loop = None
+_convert_waiting = 0
+
+
+def _convert_gate() -> asyncio.Semaphore:
+    """The conversion slots for the running loop. asyncio objects belong to
+    one loop: production has one, each test client its own."""
+    global _convert_sem, _convert_loop
+    loop = asyncio.get_running_loop()
+    if _convert_loop is not loop:
+        _convert_sem, _convert_loop = asyncio.Semaphore(CONVERT_CONCURRENCY), loop
+    return _convert_sem
+
+
+async def _convert_off_loop(raw_bytes: bytes) -> tuple[bytes, int, int]:
+    """_convert_to_jpeg in a worker thread, at most CONVERT_CONCURRENCY at once
+    with CONVERT_QUEUE more waiting. Raises ConverterBusy past that."""
+    global _convert_waiting
+    gate = _convert_gate()
+    if _convert_waiting >= CONVERT_QUEUE:
+        raise ConverterBusy
+    _convert_waiting += 1
+    try:
+        await gate.acquire()
+    finally:
+        _convert_waiting -= 1
+    try:
+        work = asyncio.get_running_loop().run_in_executor(None, _convert_to_jpeg, raw_bytes)
+    except BaseException:
+        gate.release()
+        raise
+
+    def _done(fut):
+        gate.release()
+        if not fut.cancelled():
+            fut.exception()   # seen, even when its request has gone
+
+    # The slot is held until the thread finishes, even if the request is
+    # cancelled first: the thread can't be stopped, and its memory is what
+    # the limit is for.
+    work.add_done_callback(_done)
+    return await asyncio.shield(work)
 
 
 async def cleanup_expired_images(db: AsyncSession) -> int:
@@ -191,7 +264,9 @@ async def images_upload(
         return await _error("Pick a file before uploading.", 400)
 
     try:
-        jpeg_bytes, width, height = _convert_to_jpeg(raw)
+        jpeg_bytes, width, height = await _convert_off_loop(raw)
+    except ConverterBusy:
+        return await _error("Too many uploads are being converted — try again in a moment.", 503)
     except ValueError as exc:
         return await _error(str(exc), 400)
 
