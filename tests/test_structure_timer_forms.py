@@ -136,9 +136,12 @@ def _timer(tid, phase, expires=datetime(2030, 1, 2, 3, 4, 5)):
 
 
 def _render(timers, archived=()):
+    # Every timer here is the viewer's own, so the route would let them
+    # change each one.
     return render_page(st_mod, "structure_timers.html", "/structure-timers",
                        active_timers=list(timers), archived_timers=list(archived), acl_groups=[],
-                       user_id=1, is_privileged=False)
+                       acl_groups_in_use=set(), user_id=1,
+                       modifiable_ids={t.id for t in list(timers) + list(archived)})
 
 
 @pytest.mark.parametrize("phase", PHASES)

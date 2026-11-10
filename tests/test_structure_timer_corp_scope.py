@@ -13,13 +13,25 @@ needs a character in that corporation, on top of the existing role rule.
 Deleting an ACL group that any timer still uses is refused: it used to
 unlink the timers and so show them to everyone.
 
+Follow-ups:
+- The Director or CEO role counts for an 'esi' timer only when the character
+  holding it is in the timer's corporation. A Director of another
+  corporation with a plain member character in this one may not.
+- A timer may be filed (created, or moved on edit) only under an ACL group
+  the user can see. A refused request changes nothing.
+- A refused edit or delete, a refused filing and a refused group delete say
+  so on the page (?err=<code>), and the page offers Edit and Delete only on
+  the timers the user may change, and no delete for a group in use.
+
 Names and ids are invented.
 """
 import asyncio
 import base64
 import json
+import re
 import tempfile
 from datetime import datetime, timedelta, timezone
+from html import unescape
 
 import itsdangerous
 import pytest
@@ -43,6 +55,8 @@ BOTH_USER = 5203     # one character in A, one in B
 ADMIN_USER = 5204    # app admin, character in C only
 A_MANAGER = 5205     # app manager, character in A
 B_DIRECTOR = 5206    # in-game Director, character in B only
+SPLIT_DIRECTOR = 5207  # plain member in A, in-game Director in B
+A_DIRECTOR = 5208    # in-game Director, character in A
 
 SID_ALPHA, SID_BRAVO, SID_LEGACY, SID_BRAVO_OLD = (
     1030000000001, 1030000000002, 1030000000003, 1030000000004)
@@ -104,7 +118,7 @@ def board(monkeypatch):
         async with SessionLocal() as db:
             db.add_all([User(id=A_USER), User(id=B_USER), User(id=BOTH_USER),
                         User(id=ADMIN_USER, role="admin"), User(id=A_MANAGER, role="manager"),
-                        User(id=B_DIRECTOR)])
+                        User(id=B_DIRECTOR), User(id=SPLIT_DIRECTOR), User(id=A_DIRECTOR)])
             db.add_all([
                 _char(93000001, A_USER, CORP_A, scopes="esi-corporations.read_structures.v1"),
                 _char(93000002, B_USER, CORP_B),
@@ -114,12 +128,18 @@ def board(monkeypatch):
                 _char(93000006, A_MANAGER, CORP_A),
                 _char(93000007, B_DIRECTOR, CORP_B,
                       scopes="esi-characters.read_corporation_roles.v1"),
+                _char(93000008, SPLIT_DIRECTOR, CORP_A),
+                _char(93000009, SPLIT_DIRECTOR, CORP_B,
+                      scopes="esi-characters.read_corporation_roles.v1"),
+                _char(93000010, A_DIRECTOR, CORP_A,
+                      scopes="esi-characters.read_corporation_roles.v1"),
             ])
             await db.commit()
     _run(seed())
 
-    # B_DIRECTOR's character holds Director in game. Nobody else has the
-    # roles scope, so no other user reaches this.
+    # Every character with the roles scope (B_DIRECTOR's, SPLIT_DIRECTOR's
+    # corp B one and A_DIRECTOR's) holds Director in game. Nobody else has
+    # the scope, so no other character reaches this.
     async def fake_refresh(char, db):
         return "token"
 
@@ -382,6 +402,61 @@ def test_a_row_with_no_recorded_corporation_may_not_be_modified(board):
     assert _row(board, "Legacy Keep") is not None
 
 
+# ── the role and the corporation belong to the same character ──────────
+
+
+def _add_manual(SessionLocal, *, created_by, archived=False, acl_group_id=None):
+    async def go():
+        async with SessionLocal() as db:
+            db.add(StructureTimer(
+                structure_name="Manual Keep", structure_type="astrahus", system_name="Sample-02",
+                region_name="Sample Region", owner_name="Sample Hostile Corp",
+                disposition="hostile", timer_phase="shield", notes="Sample note",
+                timer_expires=_now() + (timedelta(hours=-3) if archived else timedelta(hours=6)),
+                is_archived=archived, archived_at=_now() if archived else None,
+                source="manual", acl_group_id=acl_group_id, created_by=created_by))
+            await db.commit()
+    _run(go())
+
+
+def test_a_director_elsewhere_with_a_member_here_may_not_modify_this_corporations_timer(board):
+    # SPLIT_DIRECTOR sees Alpha Keep through a plain member in A. Their
+    # Director is a character in B, and that role is not one in A.
+    _seed_esi(board)
+    tid = _row(board, "Alpha Keep").id
+    assert "Alpha Keep" in _page(SPLIT_DIRECTOR)
+    _edit(SPLIT_DIRECTOR, tid, "Renamed Keep")
+    _delete(SPLIT_DIRECTOR, tid)
+    row = _row(board, "Alpha Keep")
+    assert row is not None and row.id == tid
+
+
+def test_the_same_director_may_modify_their_own_corporations_timer(board):
+    _seed_esi(board)
+    tid = _row(board, "Bravo Keep").id
+    _edit(SPLIT_DIRECTOR, tid, "Bravo Keep Renamed")
+    assert _row(board, "Bravo Keep Renamed") is not None
+    _delete(SPLIT_DIRECTOR, tid)
+    assert _row(board, "Bravo Keep Renamed") is None
+
+
+def test_a_director_in_the_timers_corporation_may_modify_it(board):
+    _seed_esi(board)
+    tid = _row(board, "Alpha Keep").id
+    _edit(A_DIRECTOR, tid, "Alpha Keep Renamed")
+    assert _row(board, "Alpha Keep Renamed") is not None
+    _delete(A_DIRECTOR, tid)
+    assert _row(board, "Alpha Keep Renamed") is None
+
+
+def test_a_manual_timer_still_takes_a_director_of_any_corporation(board):
+    # Unchanged: a manual timer records no corporation to bind the role to.
+    _add_manual(board, created_by=A_USER)
+    tid = _row(board, "Manual Keep").id
+    _edit(B_DIRECTOR, tid, "Manual Keep Renamed")
+    assert _row(board, "Manual Keep Renamed") is not None
+
+
 # ── deleting an ACL group ───────────────────────────────────────────────
 
 
@@ -435,6 +510,184 @@ def test_the_delete_confirmation_no_longer_promises_to_publish_timers():
     with open("app/templates/structure_timers.html", encoding="utf-8") as fh:
         src = fh.read()
     assert "will become visible to everyone" not in src
+
+
+# ── filing a timer under an ACL group ───────────────────────────────────
+
+
+def _add_group(SessionLocal, gid, corp, *, created_by):
+    async def go():
+        async with SessionLocal() as db:
+            db.add(TimerACLGroup(id=gid, name=f"Group {gid}", created_by=created_by))
+            db.add(TimerACLEntry(group_id=gid, entry_type="corporation", eve_id=corp))
+            await db.commit()
+    _run(go())
+
+
+def _create(user_id, name, acl):
+    return _client(user_id).post("/structure-timers/create", follow_redirects=False, data={
+        "structure_name": name, "structure_type": "astrahus", "system_name": "Sample-03",
+        "owner_name": "Sample Hostile Corp", "timer_mode": "countdown", "countdown_text": "5h",
+        "acl_group_id": acl})
+
+
+def _edit_acl(user_id, timer_id, name, acl):
+    return _client(user_id).post(f"/structure-timers/{timer_id}/edit", follow_redirects=False, data={
+        "structure_name": name, "timer_mode": "countdown", "countdown_text": "1h",
+        "region_name": "", "notes": "", "acl_group_id": acl})
+
+
+def _snapshot(row):
+    return {c: getattr(row, c) for c in ("structure_name", "region_name", "notes",
+                                         "timer_expires", "acl_group_id")}
+
+
+def test_creating_a_timer_under_a_group_the_user_is_not_in_is_refused(board):
+    _add_group(board, 40, CORP_A, created_by=A_USER)
+    r = _create(B_USER, "Planted Keep", "40")
+    assert r.status_code == 302
+    assert r.headers["location"] == "/structure-timers?err=acl_group"
+    assert _row(board, "Planted Keep") is None
+
+
+def test_creating_a_timer_under_a_group_that_does_not_exist_is_refused(board):
+    r = _create(A_USER, "Planted Keep", "999")
+    assert r.headers["location"] == "/structure-timers?err=acl_group"
+    assert _row(board, "Planted Keep") is None
+
+
+def test_creating_a_timer_under_a_group_the_user_is_in_still_works(board):
+    _add_group(board, 40, CORP_A, created_by=A_USER)
+    r = _create(A_USER, "Filed Keep", "40")
+    assert r.headers["location"] == "/structure-timers"
+    row = _row(board, "Filed Keep")
+    assert row is not None and row.acl_group_id == 40
+    r = _create(B_USER, "Open Keep", "")
+    assert r.headers["location"] == "/structure-timers"
+    assert _row(board, "Open Keep").acl_group_id is None
+
+
+def test_moving_a_timer_into_a_group_the_editor_is_not_in_is_refused_and_changes_nothing(board):
+    _add_group(board, 40, CORP_A, created_by=A_USER)
+    _add_manual(board, created_by=B_USER)
+    before = _row(board, "Manual Keep")
+    r = _edit_acl(B_USER, before.id, "Manual Keep Renamed", "40")
+    assert r.headers["location"] == "/structure-timers?err=acl_group"
+    after = _row(board, "Manual Keep")
+    assert after is not None and _snapshot(after) == _snapshot(before)
+
+
+def test_a_director_may_not_move_their_corporations_timer_into_a_group_they_are_not_in(board):
+    _seed_esi(board)
+    _add_group(board, 41, CORP_B, created_by=B_USER)
+    before = _row(board, "Alpha Keep")
+    r = _edit_acl(A_DIRECTOR, before.id, "Alpha Keep Renamed", "41")
+    assert r.headers["location"] == "/structure-timers?err=acl_group"
+    assert _snapshot(_row(board, "Alpha Keep")) == _snapshot(before)
+
+
+def test_moving_a_timer_into_a_group_the_editor_is_in_still_works(board):
+    _add_group(board, 40, CORP_A, created_by=A_USER)
+    _add_manual(board, created_by=B_USER)
+    tid = _row(board, "Manual Keep").id
+    r = _edit_acl(A_MANAGER, tid, "Manual Keep Renamed", "40")
+    assert r.headers["location"] == "/structure-timers"
+    assert _row(board, "Manual Keep Renamed").acl_group_id == 40
+
+
+def test_leaving_a_timer_in_a_group_the_editor_cannot_see_is_not_a_filing(board):
+    # An admin may change any timer. Keeping its group as it is files it
+    # nowhere new, so the save goes through.
+    _seed_restricted(board)
+    tid = _row(board, "Manual Keep").id
+    r = _edit_acl(ADMIN_USER, tid, "Manual Keep Renamed", "30")
+    assert r.headers["location"] == "/structure-timers"
+    assert _row(board, "Manual Keep Renamed").acl_group_id == 30
+
+
+# ── refusals say so, and the controls follow the rules ──────────────────
+
+
+def _html(user_id, query=""):
+    r = _client(user_id).get("/structure-timers" + query, follow_redirects=False)
+    assert r.status_code == 200, r.text[:300]
+    return r.text
+
+
+def _banner(html):
+    m = re.search(r'<div class="b-banner is-danger" role="alert">(.*?)</div>', html, re.S)
+    return unescape(m.group(1)).strip() if m else None
+
+
+def _forms(html, action):
+    return html.count(f'action="{action}"')
+
+
+def test_a_refused_edit_or_delete_says_so(board):
+    _seed_esi(board)
+    tid = _row(board, "Alpha Keep").id
+    for r in (_edit(A_USER, tid, "Renamed Keep"), _delete(A_USER, tid)):
+        assert r.status_code == 302
+        assert r.headers["location"] == "/structure-timers?err=not_allowed"
+    assert _banner(_html(A_USER, "?err=not_allowed")) == "You can't edit or delete that timer."
+
+
+def test_a_missing_timer_gets_the_same_answer_as_a_refused_one(board):
+    for r in (_edit(A_USER, 999999, "Renamed Keep"), _delete(A_USER, 999999)):
+        assert r.headers["location"] == "/structure-timers?err=not_allowed"
+
+
+def test_a_refused_filing_says_so(board):
+    _add_group(board, 40, CORP_A, created_by=A_USER)
+    assert _create(B_USER, "Planted Keep", "40").headers["location"].endswith("?err=acl_group")
+    assert _banner(_html(B_USER, "?err=acl_group")).startswith("Not saved:")
+
+
+def test_a_refused_group_delete_says_so(board):
+    _seed_restricted(board)
+    r = _client(A_USER).post("/structure-timers/acl/30/delete", follow_redirects=False)
+    assert r.headers["location"] == "/structure-timers?err=acl_in_use"
+    assert _banner(_html(A_USER, "?err=acl_in_use")).startswith("Not deleted:")
+
+
+def test_no_banner_without_a_known_code(board):
+    assert _banner(_html(A_USER)) is None
+    page = _html(A_USER, "?err=%3Cb%3ESample%20text%3C%2Fb%3E")
+    assert _banner(page) is None
+    assert "Sample text" not in page
+
+
+def test_edit_and_delete_show_only_on_timers_the_user_may_change(board):
+    _seed_esi(board)
+    alpha, bravo, archive = (_row(board, n).id for n in ("Alpha Keep", "Bravo Keep", "Bravo Archive"))
+    page = _html(SPLIT_DIRECTOR)
+    assert _shown(page) == {"Alpha Keep", "Bravo Keep", "Bravo Archive"}
+    # Alpha Keep: seen through the corp A member, but the Director is in B.
+    assert _forms(page, f"/structure-timers/{alpha}/edit") == 0
+    assert _forms(page, f"/structure-timers/{alpha}/delete") == 0
+    assert f'data-timer-id="{alpha}"' not in page
+    # Bravo Keep: desktop and phone delete, one edit form.
+    assert _forms(page, f"/structure-timers/{bravo}/edit") == 1
+    assert _forms(page, f"/structure-timers/{bravo}/delete") == 2
+    assert _forms(page, f"/structure-timers/{archive}/delete") == 1
+
+
+def test_an_archived_timer_offers_delete_only_to_those_who_may(board):
+    _add_manual(board, created_by=A_USER, archived=True)
+    tid = _row(board, "Manual Keep").id
+    assert "Manual Keep" in _page(B_USER)
+    assert _forms(_html(A_USER), f"/structure-timers/{tid}/delete") == 1
+    assert _forms(_html(B_USER), f"/structure-timers/{tid}/delete") == 0
+
+
+def test_a_group_in_use_offers_no_delete_even_when_its_timers_are_hidden(board):
+    _seed_restricted(board)                          # group 30 (corp A), used by Manual Keep
+    _add_group(board, 31, CORP_B, created_by=B_USER)  # used by nothing
+    page = _html(B_USER)
+    assert "Manual Keep" not in _shown(page)
+    assert _forms(page, "/structure-timers/acl/30/delete") == 0
+    assert "Timers still use this group" in page
+    assert _forms(page, "/structure-timers/acl/31/delete") == 1
 
 
 # ── the startup migration ───────────────────────────────────────────────
