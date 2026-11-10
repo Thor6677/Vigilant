@@ -655,6 +655,12 @@ async def admin_force_sync(character_id: int, request: Request,
     if not char:
         return HTMLResponse('<div class="b-empty" style="color:var(--danger);">Character not found.</div>')
 
+    # Same rule as the other routes that act on another user's account.
+    owner_role = (await db.execute(
+        select(User.role).where(User.id == char.user_id))).scalar_one_or_none()
+    if manager_blocked(admin.role, owner_role):
+        return HTMLResponse('<div class="b-empty" style="color:var(--danger);">Managers cannot sync an admin\'s characters.</div>')
+
     # Clear field_synced to force all fields stale
     cache_result = await db.execute(
         select(CharacterDashboardCache).where(CharacterDashboardCache.character_id == character_id)

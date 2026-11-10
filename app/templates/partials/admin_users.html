@@ -88,11 +88,11 @@
                 </span>
                 <span style="flex:0 0 60px;font-size:10px;color:var(--muted);text-align:center;">{{ format_age(c.last_synced) }}</span>
                 <span class="adm-char-btns" style="display:flex;gap:3px;">
+                    {# The routes refuse both for a manager on an admin's character. #}
+                    {% if not manager_blocked(admin_role, u.user.role) %}
                     <button class="b-btn" style="padding:0.1rem 0.3rem;border:1px solid var(--border);font-size:8px;"
                             hx-post="/admin/action/force-sync/{{ c.character_id }}"
                             hx-target="#admin-content" hx-swap="innerHTML">Sync</button>
-                    {# The route refuses this for a manager on an admin's character. #}
-                    {% if not manager_blocked(admin_role, u.user.role) %}
                     <button class="b-btn" style="padding:0.1rem 0.3rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);"
                             hx-post="/admin/action/remove-character/{{ c.character_id }}"
                             hx-target="#admin-content" hx-swap="innerHTML"

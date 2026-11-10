@@ -92,6 +92,38 @@ def test_other_pairs_still_remove_the_character(env, revoked, actor, target):
     assert revoked == ["old-refresh"]
 
 
+# ── Force sync ───────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def synced(monkeypatch):
+    calls = []
+
+    async def fake_sync(character_id):
+        calls.append(character_id)
+    monkeypatch.setattr("app.routes.dashboard._sync_task", fake_sync)
+    return calls
+
+
+def test_a_manager_cannot_force_sync_an_admins_character(env, synced):
+    _roles(env, actor="manager", target="admin")
+    r = env.user().post(f"/admin/action/force-sync/{STRANGER_ID}")
+    assert r.status_code == 200
+    assert "Managers cannot" in r.text
+    assert synced == []
+    assert _audit(env, "admin_force_sync") == []
+
+
+@pytest.mark.parametrize("actor,target", [
+    ("manager", "user"), ("manager", "manager"), ("admin", "admin"), ("admin", "user"),
+])
+def test_other_pairs_still_force_sync(env, synced, actor, target):
+    _roles(env, actor=actor, target=target)
+    r = env.user().post(f"/admin/action/force-sync/{STRANGER_ID}")
+    assert r.status_code == 200
+    assert "Sync queued" in r.text
+    assert len(_audit(env, "admin_force_sync")) == 1
+
+
 # ── The two routes that already had the rule keep it ─────────────────────────
 
 def test_a_manager_cannot_change_an_admins_role(env):
@@ -119,7 +151,7 @@ def test_a_manager_cannot_delete_an_admin(env):
 def test_every_user_action_route_uses_the_one_rule():
     """So the next route that acts on another user's account can't drift."""
     for fn in (admin_mod.admin_set_role, admin_mod.admin_remove_user,
-               admin_mod.admin_remove_character):
+               admin_mod.admin_remove_character, admin_mod.admin_force_sync):
         src = inspect.getsource(fn)
         assert "manager_blocked(" in src, fn.__name__
         # No inline copy of the target check left beside it.
@@ -165,6 +197,8 @@ def test_a_manager_is_not_offered_removal_of_an_admins_character():
     assert "/admin/action/remove-character/90000101" in html   # their own
     assert "/admin/action/remove-character/90000102" in html   # a manager's
     assert "/admin/action/remove-character/90000103" not in html
+    assert "/admin/action/force-sync/90000102" in html
+    assert "/admin/action/force-sync/90000103" not in html
     assert "/admin/action/remove-user/3" not in html
     assert "/admin/action/remove-user/2" in html
 
@@ -173,4 +207,5 @@ def test_an_admin_is_offered_every_removal():
     html = _panel("admin")
     for cid in (90000101, 90000102, 90000103):
         assert f"/admin/action/remove-character/{cid}" in html
+        assert f"/admin/action/force-sync/{cid}" in html
     assert "/admin/action/remove-user/2" in html and "/admin/action/remove-user/3" in html
