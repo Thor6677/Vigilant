@@ -24,6 +24,7 @@ user's row (`last_ok`, `last_error`, no URL) where the Account page shows it.
 from __future__ import annotations
 
 import logging
+import math
 import re
 import time
 from collections import deque
@@ -35,6 +36,8 @@ import httpx
 from sqlalchemy import select
 
 from app.db.models import AsyncSessionLocal, UserNotifySettings
+# Every Discord message body is built by webhook_payload (mentions off).
+from app.notify.discord import webhook_payload
 # Importing log_redaction installs the filter that keeps httpx's own request
 # line from printing the URL; redact_request_urls() marks the send.
 from app.notify.log_redaction import redact_request_urls
@@ -52,6 +55,7 @@ _RATE_LIMIT = 20                   # messages per user ...
 _RATE_WINDOW_SECONDS = 10 * 60     # ... per this window; the excess is dropped
 _MUTE_MAX_SECONDS = 15 * 60        # cap on how long a Discord 429 mutes a user
 _DEDUP_PRUNE_AT = 5000             # entries; prune expired ones past this
+_TEST_COOLDOWN_SECONDS = 30        # Account-page test messages: one per user per this
 
 URL_MAX_LENGTH = 300
 ALLOWED_HOSTS = frozenset({"discord.com", "discordapp.com", "ptb.discord.com", "canary.discord.com"})
@@ -69,6 +73,9 @@ NOT_SENT_MUTED = "not sent: Discord asked for a pause"
 
 GONE_ERROR = "Discord says this webhook no longer exists — paste a new one"
 INVALID_STORED_ERROR = "the saved webhook URL is no longer accepted — paste a new one"
+# The last_error values that mean "marked gone": record_outcome switched the
+# row off, and only a new URL (which clears last_error) brings it back.
+_GONE_ERRORS = (GONE_ERROR, INVALID_STORED_ERROR)
 
 # ── Alert types ───────────────────────────────────────────────────────────────
 # Every "type" _emit_notification is handed, grouped for the Account page. The
@@ -226,6 +233,7 @@ _last_sent: dict[tuple[int, str, str], float] = {}
 _sent_times: dict[int, deque[float]] = {}
 _dropped: dict[int, int] = {}          # rate-capped drops per user, for the report
 _muted_until: dict[int, float] = {}    # Discord 429: don't try again before this
+_last_test: dict[int, float] = {}      # when each user last sent an Account-page test
 
 
 def invalidate(user_id: int) -> None:
@@ -240,6 +248,7 @@ def _reset_state() -> None:
     _sent_times.clear()
     _dropped.clear()
     _muted_until.clear()
+    _last_test.clear()
 
 
 async def _load_config(user_id: int) -> _Config:
@@ -273,12 +282,13 @@ def _suppressed(user_id: int, alert_type: str, key: str, now: float) -> bool:
     return False
 
 
-def _rate_capped(user_id: int, now: float) -> bool:
+def _rate_capped(user_id: int, now: float, *, count_drop: bool = True) -> bool:
     times = _sent_times.setdefault(user_id, deque())
     while times and now - times[0] >= _RATE_WINDOW_SECONDS:
         times.popleft()
     if len(times) >= _RATE_LIMIT:
-        _dropped[user_id] = _dropped.get(user_id, 0) + 1
+        if count_drop:
+            _dropped[user_id] = _dropped.get(user_id, 0) + 1
         return True
     times.append(now)
     return False
@@ -313,16 +323,12 @@ def _kill_alert_text(event: dict) -> tuple[str, str, str]:
 
 def build_payload(title: str, body: str, alert_type: str) -> dict:
     label = ALERT_LABELS.get(alert_type) or _EXTRA_LABELS.get(alert_type) or alert_type
-    return {
-        "username": "Vigilant",
-        "embeds": [{
-            "title": neutralise_mentions(title)[:256],
-            "description": neutralise_mentions(body)[:2048],
-            "footer": {"text": f"Vigilant · {label}"[:2048]},
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }],
-        "allowed_mentions": {"parse": []},
-    }
+    return webhook_payload(username="Vigilant", embeds=[{
+        "title": neutralise_mentions(title)[:256],
+        "description": neutralise_mentions(body)[:2048],
+        "footer": {"text": f"Vigilant · {label}"[:2048]},
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }])
 
 
 @dataclass
@@ -455,10 +461,56 @@ async def send_user_discord_alert(user_id: int, title: str, body: str, alert_typ
         return f"failed: {type(e).__name__}"
 
 
+def _wait_text(seconds: float) -> str:
+    """How long a refused test has to wait, rounded up: "12 seconds", "3 minutes"."""
+    s = max(1, math.ceil(seconds))
+    if s < 120:
+        return f"{s} second{'' if s == 1 else 's'}"
+    return f"{math.ceil(s / 60)} minutes"
+
+
+def _test_refusal(user_id: int, last_error: str | None, now: float) -> str | None:
+    """Why a test message may not go out now, or None, in which case the test
+    is counted against the cooldown and the per-user rate cap.
+
+    No await anywhere in here, so two presses at once cannot both pass a
+    check before either has been counted.
+    """
+    if last_error in _GONE_ERRORS:
+        return last_error
+    muted = _muted_until.get(user_id, 0.0) - now
+    if muted > 0:
+        return f"Discord asked for a pause, try again in {_wait_text(muted)}"
+    since = now - _last_test.get(user_id, float("-inf"))
+    if since < _TEST_COOLDOWN_SECONDS:
+        return (f"one test every {_TEST_COOLDOWN_SECONDS} seconds, "
+                f"try again in {_wait_text(_TEST_COOLDOWN_SECONDS - since)}")
+    if _rate_capped(user_id, now, count_drop=False):
+        return (f"at most {_RATE_LIMIT} messages go out every {_RATE_WINDOW_SECONDS // 60} "
+                f"minutes, tests included, try again later")
+    _last_test[user_id] = now
+    return None
+
+
 async def send_test_message(db, user_id: int, url: str) -> Outcome:
     """The Account page's "Send test message": one synchronous delivery to
-    `url`, past the opt-in list, the dedup window and the rate cap, recorded
-    on the user's row through the caller's session. Never raises."""
+    `url`, past the opt-in list and the dedup window, recorded on the user's
+    row through the caller's session. Never raises.
+
+    A test is one press away and goes out from the instance's own address,
+    so it is held to the same limits as alerts: nothing goes to a webhook
+    already marked gone, or while Discord's 429 pause is on, and each test
+    counts against the per-user rate cap, with at most one per
+    _TEST_COOLDOWN_SECONDS. A refused test makes no request and leaves the
+    row as it was (its last_error is what marks the webhook gone). A test
+    that gets a 429 mutes the user just as an alert would.
+    """
+    row = (await db.execute(select(UserNotifySettings).where(
+        UserNotifySettings.user_id == user_id))).scalar_one_or_none()
+    now = time.monotonic()
+    refusal = _test_refusal(user_id, row.last_error if row is not None else None, now)
+    if refusal:
+        return Outcome(False, refusal)
     try:
         outcome = await deliver(
             url, "Test message",
@@ -466,6 +518,8 @@ async def send_test_message(db, user_id: int, url: str) -> Outcome:
             TEST_TYPE)
     except Exception as e:
         outcome = Outcome(False, type(e).__name__)
+    if outcome.mute_seconds:
+        _muted_until[user_id] = now + outcome.mute_seconds
     if not outcome.ok:
         logger.warning("user discord alert: user=%s test to webhook=%s %s",
                        user_id, webhook_log_ref(url), outcome.error)
