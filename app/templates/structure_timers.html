@@ -13,6 +13,7 @@
    these codes show anything. #}
 {% set err_text = {
     'not_allowed': "You can't edit or delete that timer.",
+    'acl_group_not_allowed': "Only the group's owner or an admin can change that group.",
     'acl_group': "Not saved: a timer can only be filed under an access group that includes one of your characters.",
     'acl_in_use': "Not deleted: timers still use that access group, archived ones included.",
 }.get(request.query_params.get('err')) %}
