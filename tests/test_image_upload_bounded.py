@@ -66,14 +66,16 @@ def decodes(monkeypatch):
 # ── The size check ──────────────────────────────────────────────────────────
 
 def test_an_image_over_the_pixel_limit_is_refused_before_decoding(decodes):
-    raw = _png_header(7000, 7000)            # 49 MP, in under 200 bytes
+    raw = _png_header(8000, 8000)            # 64 MP, in under 200 bytes
     with pytest.raises(ValueError, match="megapixels"):
         images_mod._convert_to_jpeg(raw)
     assert decodes == []
 
 
-def test_the_pixel_limit_suits_screenshots():
-    assert 7680 * 4320 <= images_mod.MAX_PIXELS < 7000 * 7000   # 8K fits; 49 MP does not
+def test_the_pixel_limit_suits_screenshots_and_phone_photos():
+    assert 7680 * 4320 <= images_mod.MAX_PIXELS          # 8K screenshot
+    assert 8064 * 6048 <= images_mod.MAX_PIXELS          # 48 MP phone sensor
+    assert images_mod.MAX_PIXELS < 8000 * 8000           # 64 MP does not fit
 
 
 def test_an_image_far_over_the_limit_gets_the_same_message(decodes):
@@ -128,7 +130,7 @@ def test_a_size_that_grows_while_decoding_is_refused(monkeypatch):
 
     def _grows(self):
         out = real(self)
-        self._size = (8000, 6000)
+        self._size = (9000, 6000)
         return out
 
     monkeypatch.setattr(ImageFile.ImageFile, "load", _grows)

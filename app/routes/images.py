@@ -27,10 +27,11 @@ MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 MAX_DIMENSION = 4096                 # downscale longest side to this
 JPEG_QUALITY = 85
 # Largest canvas accepted, checked from the header before anything is decoded
-# (ISS-169). An 8K screenshot is 33 MP, and the output is cut to 4096 px on
-# its longest side anyway. The 10 MB file cap does not bound this: a flat
-# PNG under 1 MB can declare over 100 MP.
-MAX_PIXELS = 40_000_000
+# (ISS-169). An 8K screenshot is 33 MP and a full-resolution phone photo is
+# about 49 MP; the output is cut to 4096 px on its longest side anyway. The
+# 10 MB file cap does not bound this: a flat PNG under 1 MB can declare over
+# 100 MP.
+MAX_PIXELS = 50_000_000
 # Pillow's own guard, as a backstop: it warns above this and refuses above
 # twice it, while opening. The check in _convert_to_jpeg holds the exact limit;
 # turning the warning into an error per call would need warnings.catch_warnings,
