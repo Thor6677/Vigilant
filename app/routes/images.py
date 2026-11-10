@@ -32,9 +32,17 @@ JPEG_QUALITY = 85
 # PNG under 1 MB can declare over 100 MP.
 MAX_PIXELS = 40_000_000
 # Pillow's own guard, as a backstop: it warns above this and refuses above
-# twice it, while opening.
+# twice it, while opening. The check in _convert_to_jpeg holds the exact limit;
+# turning the warning into an error per call would need warnings.catch_warnings,
+# which changes process-wide state and is not safe from the worker threads
+# conversions run in.
 Image.MAX_IMAGE_PIXELS = MAX_PIXELS
 _TOO_LARGE = f"Image too large — the limit is {MAX_PIXELS // 1_000_000} megapixels."
+# Formats whose header gives the size that gets decoded. Containers such as
+# .ico pick an entry by its directory size and then decode it at whatever size
+# it really is, which a header check cannot see (ISS-169).
+ACCEPTED_FORMATS = ("PNG", "JPEG", "WEBP", "GIF", "BMP")
+_UNSUPPORTED = "Could not read image — upload a PNG, JPEG, WebP, GIF or BMP file."
 
 # Conversions run in a worker thread so the event loop keeps serving (ISS-169).
 # A full-size decode and its copies come to hundreds of MB, so one runs at a
@@ -97,19 +105,27 @@ def _convert_to_jpeg(raw_bytes: bytes) -> tuple[bytes, int, int]:
     through _convert_off_loop.
     """
     try:
-        img = Image.open(io.BytesIO(raw_bytes))
+        img = Image.open(io.BytesIO(raw_bytes), formats=ACCEPTED_FORMATS)
     except (Image.DecompressionBombError, Image.DecompressionBombWarning):
         # The warning only arrives here where warnings are raised as errors.
         raise ValueError(_TOO_LARGE)
-    except (UnidentifiedImageError, OSError) as exc:
+    except UnidentifiedImageError:
+        raise ValueError(_UNSUPPORTED)
+    except OSError as exc:
         raise ValueError(f"Could not read image: {exc}")
     # Opening reads only the header, so the size is known before decoding.
     if img.width * img.height > MAX_PIXELS:
         raise ValueError(_TOO_LARGE)
+    # Only the current frame (the first) is decoded here or below, so an
+    # animation's frame count costs nothing.
     try:
         img.load()
     except (Image.DecompressionBombError, OSError) as exc:
         raise ValueError(f"Could not read image: {exc}")
+    # Again after decoding, before the full-size copies: no accepted format is
+    # known to change size while decoding, but the copies would multiply it.
+    if img.width * img.height > MAX_PIXELS:
+        raise ValueError(_TOO_LARGE)
 
     # Honor EXIF rotation, then drop the metadata
     img = ImageOps.exif_transpose(img)

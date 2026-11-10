@@ -43,9 +43,9 @@ def _png_header(width, height):
             + chunk(b"IDAT", zlib.compress(b"\x00" * 64)) + chunk(b"IEND", b""))
 
 
-def _png(width=64, height=48, mode="RGBA"):
+def _png(width=64, height=48, mode="RGBA", colour=(200, 30, 30, 128)):
     buf = io.BytesIO()
-    Image.new(mode, (width, height), (200, 30, 30, 128)).save(buf, format="PNG")
+    Image.new(mode, (width, height), colour).save(buf, format="PNG")
     return buf.getvalue()
 
 
@@ -86,6 +86,71 @@ def test_a_normal_image_still_converts():
     jpeg, width, height = images_mod._convert_to_jpeg(_png())
     assert (width, height) == (64, 48)
     assert Image.open(io.BytesIO(jpeg)).format == "JPEG"
+
+
+# ── Containers whose header is not the decoded size ─────────────────────────
+
+def _ico_wrapping(png):
+    """An .ico whose directory says 16x16 but whose one entry is `png`:
+    Pillow trusts the directory when opening and decodes the PNG at its own
+    size, past the header check."""
+    head = struct.pack("<HHH", 0, 1, 1)
+    entry = struct.pack("<BBBBHHII", 16, 16, 0, 0, 1, 32, len(png), 6 + 16)
+    return head + entry + png
+
+
+def _saved(fmt, **kw):
+    buf = io.BytesIO()
+    Image.new("RGB", (64, 48), (200, 30, 30)).save(buf, format=fmt, **kw)
+    return buf.getvalue()
+
+
+@pytest.mark.parametrize("raw", [
+    _ico_wrapping(_png(3000, 3000, "L", 200)),
+    _saved("TIFF"),
+], ids=["ico-with-a-bigger-entry", "tiff"])
+def test_only_the_supported_formats_are_opened(raw, decodes):
+    with pytest.raises(ValueError, match="PNG, JPEG"):
+        images_mod._convert_to_jpeg(raw)
+    assert decodes == []
+
+
+@pytest.mark.parametrize("fmt", ["PNG", "JPEG", "WEBP", "GIF", "BMP"])
+def test_the_supported_formats_still_convert(fmt):
+    _jpeg, width, height = images_mod._convert_to_jpeg(_saved(fmt))
+    assert (width, height) == (64, 48)
+
+
+def test_a_size_that_grows_while_decoding_is_refused(monkeypatch):
+    """No supported format is known to do this; the check after decoding is
+    there in case one does, before the full-size copies are made."""
+    real = ImageFile.ImageFile.load
+
+    def _grows(self):
+        out = real(self)
+        self._size = (8000, 6000)
+        return out
+
+    monkeypatch.setattr(ImageFile.ImageFile, "load", _grows)
+    with pytest.raises(ValueError, match="megapixels"):
+        images_mod._convert_to_jpeg(_png())
+
+
+def test_only_the_first_frame_of_an_animation_is_decoded(monkeypatch):
+    """Why there is no frame cap: conversion never seeks past frame 0."""
+    frames = [Image.new("P", (64, 48), i) for i in range(40)]
+    buf = io.BytesIO()
+    frames[0].save(buf, format="GIF", save_all=True, append_images=frames[1:])
+    seen = []
+    real = ImageFile.ImageFile.load
+
+    def _load(self):
+        seen.append(self.tell())
+        return real(self)
+
+    monkeypatch.setattr(ImageFile.ImageFile, "load", _load)
+    images_mod._convert_to_jpeg(buf.getvalue())
+    assert seen and set(seen) == {0}
 
 
 # ── The route ───────────────────────────────────────────────────────────────
