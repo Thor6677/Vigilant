@@ -191,7 +191,7 @@ An EVE Online companion dashboard that gives you a unified view of all your char
 
 ### Structure Timers (`/structure-timers`)
 - **Shared timer board** — manual entry with countdown or absolute UTC time
-- **ESI auto-detection** — automatically detects structure reinforcement from ESI
+- **ESI auto-detection** — automatically detects structure reinforcement from ESI; those timers are shown only to members of the structure's corporation
 - **Live countdown** — real-time JavaScript countdown timers
 - **ACL groups** — control visibility by corporation, alliance, or individual character
 - **Role-based permissions** — edit and delete access based on user roles

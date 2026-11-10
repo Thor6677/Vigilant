@@ -456,7 +456,7 @@ async def corp_detail(
             # Auto-detect reinforced structure timers
             try:
                 from app.routes.structure_timers import sync_esi_structure_timers
-                await sync_esi_structure_timers(db, raw_structs)
+                await sync_esi_structure_timers(db, raw_structs, corporation_id=corp_id)
             except Exception as e:
                 logger.warning("Structure timer sync failed: %s", e)
         elif error:
