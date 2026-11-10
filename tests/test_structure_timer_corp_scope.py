@@ -28,7 +28,7 @@ Follow-ups:
   the timers the user may change, and no delete for a group in use.
 - A group's delete and its entry add/remove controls show only to its
   creator and app admins/managers, the ones the routes allow. A refused
-  group change comes back to the page with ?err=not_allowed, not a bare 403.
+  group change comes back to the page with ?err=acl_group_not_allowed, not a bare 403.
 
 Names and ids are invented.
 """
@@ -838,14 +838,18 @@ def test_a_refused_group_change_says_so_and_changes_nothing(board):
     eid = _entry_id(board, 40)
     for r in (_acl_add(B_USER, 40), _acl_remove(B_USER, 40, eid), _acl_delete(B_USER, 40)):
         assert r.status_code == 302
-        assert r.headers["location"] == "/structure-timers?err=not_allowed"
+        assert r.headers["location"] == "/structure-timers?err=acl_group_not_allowed"
     assert _group_state(board, 40) == before
+    assert _banner(_html(B_USER, "?err=acl_group_not_allowed")) == (
+        "Only the group's owner or an admin can change that group."
+    )
     assert _banner(_html(B_USER, "?err=not_allowed")) == "You can't edit or delete that timer."
+    assert _banner(_html(B_USER, "?err=bogus")) is None
 
 
 def test_a_missing_group_gets_the_same_answer_as_a_refused_one(board):
     for r in (_acl_add(A_USER, 999), _acl_remove(A_USER, 999, 1), _acl_delete(A_USER, 999)):
-        assert r.headers["location"] == "/structure-timers?err=not_allowed"
+        assert r.headers["location"] == "/structure-timers?err=acl_group_not_allowed"
 
 
 @pytest.mark.parametrize("user_id", [A_USER, A_MANAGER, ADMIN_USER])
