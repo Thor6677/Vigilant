@@ -19,6 +19,7 @@ from app.config import get_settings
 from app.db.models import (
     init_db, AsyncSessionLocal, CharacterDashboardCache, ensure_user_fittings_columns,
     ensure_user_fittings_skill_reqs_columns, ensure_dashboard_cache_columns,
+    ensure_structure_timer_columns,
     create_wallet_snapshot_index_background,
 )
 from app.auth.session_guard import check_session
@@ -496,6 +497,10 @@ async def startup():
     # ── Skill farm (T-073): character_dashboard_cache.skills_json column ───
     async with AsyncSessionLocal() as db:
         await ensure_dashboard_cache_columns(db)
+
+    # ── Structure timers (ISS-173): corporation of each ESI-synced row ──
+    async with AsyncSessionLocal() as db:
+        await ensure_structure_timer_columns(db)
 
     # SystemActivitySnapshot uniqueness — guard the insert path against the
     # double-fire race in the hourly poller. CREATE UNIQUE INDEX fails if

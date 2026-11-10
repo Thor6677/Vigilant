@@ -84,9 +84,14 @@ GROUP = _NS(id=7, name="Sample Group", entries=[
 
 
 def _render(active=ACTIVE, archived=ARCHIVED, *, is_privileged=False, user_id=1, groups=(GROUP,)):
+    # The route decides per timer (modifiable_ids); a privileged viewer may
+    # change every row, anyone else their own.
+    modifiable = {t.id for t in list(active) + list(archived)
+                  if is_privileged or t.created_by == user_id}
     return render_page(st_mod, "structure_timers.html", "/structure-timers",
                        active_timers=list(active), archived_timers=list(archived),
-                       acl_groups=list(groups), user_id=user_id, is_privileged=is_privileged)
+                       acl_groups=list(groups), acl_groups_in_use=set(), user_id=user_id,
+                       modifiable_ids=modifiable)
 
 
 def _cls(attrs):

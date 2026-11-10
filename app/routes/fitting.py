@@ -41,6 +41,7 @@ from app.routes.industry_jobs import _resolve_location_names
 from app.esi import universe as esi_universe
 from app.esi import character as esi_char
 from app.esi import market as esi_market
+from app.utils.paste import paste_limit_error
 
 logger = logging.getLogger(__name__)
 
@@ -817,6 +818,36 @@ def _autoload_cargo_charges(items: list[dict], compat_by_weapon: dict[int, set[i
     return [i for i in items if not (i["slot"] == "cargo" and i["type_id"] in loaded_charge_ids)]
 
 
+# EFT paste limits (ISS-166). A fit is a few dozen lines; the rest is room
+# for a long cargo list. No EFT line comes near the length limit.
+EFT_MAX_LINES = 1000
+EFT_MAX_LINE_CHARS = 1000
+
+# "[Ship, Fitting name]". The ship part runs to the first comma after its
+# first character, so there is one split to try rather than one per comma
+# (ISS-166).
+_EFT_HEADER_RE = re.compile(r'^\[(.[^,]*),(.+)\]$')
+# "Module Name x5". The run of spaces must follow a non-space; otherwise a
+# long run is retried from every position inside it (ISS-166).
+_EFT_QTY_RE = re.compile(r'(?<=\S)\s+x(\d+)$')
+
+
+def _split_eft_header(header: str) -> tuple[str, str] | None:
+    """(ship name, fitting name) from an EFT header line, or None."""
+    m = _EFT_HEADER_RE.match(header)
+    if not m:
+        return None
+    return m.group(1).strip(), m.group(2).strip()
+
+
+def _split_eft_quantity(line: str) -> tuple[str, int | None]:
+    """(item name, quantity) for "Name xN"; the quantity is None without one."""
+    m = _EFT_QTY_RE.search(line)
+    if not m:
+        return line, None
+    return line[:m.start()], int(m.group(1))
+
+
 @router.post("/tools/fitting/import-eft")
 async def import_eft(
     request: Request,
@@ -833,6 +864,12 @@ async def import_eft(
     eft_text = body.get("eft", "").strip()
     if not eft_text:
         return {"error": "No EFT text provided"}
+    # Checked before the per-character pass below. That pass only removes or
+    # swaps characters, so the lines it leaves are no longer than these.
+    too_big = paste_limit_error(eft_text, max_lines=EFT_MAX_LINES,
+                                max_line_chars=EFT_MAX_LINE_CHARS, sep="\n")
+    if too_big:
+        return {"error": too_big}
 
     # Aggressively normalize Unicode that breaks name matching.
     # EVE client, Discord, and browsers inject invisible chars on copy/paste.
@@ -860,13 +897,11 @@ async def import_eft(
         return {"error": "Empty EFT text"}
 
     # Parse header: [Ship Name, Fitting Name]
-    header = lines[0].strip()
-    match = re.match(r'^\[(.+?),\s*(.+?)\]$', header)
-    if not match:
+    header = _split_eft_header(lines[0].strip())
+    if not header:
         return {"error": "Invalid EFT header — expected [Ship, Name]"}
 
-    ship_name = match.group(1).strip()
-    fitting_name = match.group(2).strip()
+    ship_name, fitting_name = header
 
     # Resolve ship type
     ship_type_id = await sde.type_name_to_id(db, ship_name)
@@ -893,12 +928,9 @@ async def import_eft(
             continue
 
         # Handle quantity suffix: "Module Name x5"
-        qty_match = re.match(r'^(.+?)\s+x(\d+)$', line)
-        if qty_match:
-            item_name = qty_match.group(1).strip()
-            quantity = int(qty_match.group(2))
-        else:
-            item_name = line
+        item_name, quantity = _split_eft_quantity(line)
+        has_qty = quantity is not None
+        if not has_qty:
             quantity = 1
 
         # Skip empty slot markers
@@ -933,7 +965,7 @@ async def import_eft(
             "quantity": quantity,
         })
         charge_names_eft.append(charge_name_eft)
-        had_qty_suffix.append(bool(qty_match))
+        had_qty_suffix.append(has_qty)
 
     # Batched slot resolution (SDEModuleSlot, with the drone/cargo fallback
     # via group -> category) for every distinct type_id parsed above.

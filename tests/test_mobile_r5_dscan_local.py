@@ -166,8 +166,9 @@ def _local_ctx():
         "by_alliance": {"Sample Alliance": 2},
         "corp_to_alliance": {"Sample Corp One": "Sample Alliance", "Sample Corp Two": None},
     }
-    return {"dscan": _NS(label="Sample staging", paste_data="Sample Pilot Alpha\nSample Pilot Bravo"),
-            "items": _PILOTS, "non_ship_items": [], "summary": summary}
+    paste = "Sample Pilot Alpha\nSample Pilot Bravo"
+    return {"dscan": _NS(label="Sample staging", paste_data=paste),
+            **dscan_mod.bounded_view(_PILOTS, [], paste), "summary": summary}
 
 
 def _dscan_ctx():
@@ -184,7 +185,7 @@ def _dscan_ctx():
     summary = dscan_mod.build_dscan_summary(items)
     non_ship = [i for i in items if i["category"] not in set(dscan_mod.SHIP_GROUP_CATEGORIES.values())]
     return {"dscan": _NS(label="Sample gate", paste_data="raw paste"),
-            "items": items, "non_ship_items": non_ship, "summary": summary}
+            **dscan_mod.bounded_view(items, non_ship, "raw paste"), "summary": summary}
 
 
 def _render_view(view, *, anon):

@@ -201,9 +201,15 @@ except Exception:
 _pin_tag_in_env() {
     local tag="$1"
     touch .env
-    grep -v '^VIGILANT_TAG=' .env > .env.tmp 2>/dev/null || true
-    echo "VIGILANT_TAG=$tag" >> .env.tmp
-    # Set the mode BEFORE the rename so the file is never briefly world-readable.
+    # Create .env.tmp owner-only from the start (umask in a subshell) so the
+    # secrets are never in a world-readable file, not even briefly. rm first so
+    # a leftover file with looser permissions cannot be reused.
+    rm -f .env.tmp
+    (
+        umask 077
+        grep -v '^VIGILANT_TAG=' .env > .env.tmp 2>/dev/null || true
+        echo "VIGILANT_TAG=$tag" >> .env.tmp
+    )
     chmod 600 .env.tmp
     mv .env.tmp .env
 }

@@ -588,6 +588,14 @@ def recommend_ships(
 
 # ── Paste parser ──────────────────────────────────────────────────────────────
 
+# "Item x5" and "Item 5". Each match starts at a run of spaces that follows a
+# non-space, so the engine tries one split per run. The old `^(.+?)\s+...`
+# form retried every position inside a run, which is quadratic in its length
+# (ISS-166). The leftmost match is the one the lazy group used to find.
+_QTY_X_RE = re.compile(r'(?<=\S)\s+x\s*([\d,]+)\s*$', re.IGNORECASE)
+_QTY_RE = re.compile(r'(?<=\S)\s+([\d,]+)\s*$')
+
+
 def parse_eve_paste(text: str) -> list[dict]:
     """Parse EVE clipboard formats into [{name, qty}]."""
     items: dict[str, int] = {}
@@ -608,15 +616,15 @@ def parse_eve_paste(text: str) -> list[dict]:
                     qty = int(cleaned)
                     break
         else:
-            m = re.match(r'^(.+?)\s+x\s*([\d,]+)\s*$', line, re.IGNORECASE)
+            m = _QTY_X_RE.search(line)
             if m:
-                name = m.group(1).strip()
-                qty = int(m.group(2).replace(",", ""))
+                name = line[:m.start()]
+                qty = int(m.group(1).replace(",", ""))
             else:
-                m = re.match(r'^(.+?)\s+([\d,]+)\s*$', line)
-                if m and not m.group(2).startswith("0"):
-                    name = m.group(1).strip()
-                    qty = int(m.group(2).replace(",", ""))
+                m = _QTY_RE.search(line)
+                if m and not m.group(1).startswith("0"):
+                    name = line[:m.start()]
+                    qty = int(m.group(1).replace(",", ""))
                 else:
                     name = line
 

@@ -577,6 +577,11 @@ class StructureTimer(Base):
     notes = Column(Text, nullable=True)
     source = Column(String(8), nullable=False, default="manual")    # manual/esi
     esi_structure_id = Column(Integer, nullable=True, index=True)
+    # For source 'esi': the corporation whose structures list the row came
+    # from. Only accounts with a character in it see the row; NULL (rows
+    # synced before ISS-173) is shown to no one. No index: see
+    # ensure_structure_timer_columns().
+    esi_corporation_id = Column(Integer, nullable=True)
     is_archived = Column(Boolean, nullable=False, default=False)
     archived_at = Column(DateTime, nullable=True)
     acl_group_id = Column(Integer, ForeignKey("timer_acl_groups.id"), nullable=True)
@@ -1480,6 +1485,84 @@ async def ensure_dashboard_cache_columns(db: AsyncSession) -> None:
     if "skills_json" not in cols:
         await db.execute(text("ALTER TABLE character_dashboard_cache ADD COLUMN skills_json TEXT"))
     await db.commit()
+
+
+async def ensure_structure_timer_columns(db: AsyncSession) -> None:
+    """Add ISS-173's esi_corporation_id to an old-shape structure_timers table
+    and fill it for the 'esi' rows whose corporation can still be found.
+
+    The sync never recorded which corporation an 'esi' row came from. The
+    only record left is corp_detail's cached /corporations/{id}/structures/
+    responses in esi_cache (24h TTL, kept until the GC removes them). A
+    structure listed there for exactly one corporation gets it. Every other
+    row stays NULL and is shown to no one until a member's next sync claims
+    it (sync_esi_structure_timers).
+
+    The backfill runs once, right after the ALTER. If it fails, it is logged
+    and the rows stay NULL: hidden, the safe side, and no failed start. A
+    fresh install has the column from create_all and skips all of it. No
+    index on the column: _create_missing_indexes runs before this ALTER on
+    existing databases (the trap the UserFitting docstring describes).
+    """
+    cols = {r[1] for r in (await db.execute(text("PRAGMA table_info(structure_timers)"))).fetchall()}
+    if "esi_corporation_id" in cols:
+        return
+    await db.execute(text("ALTER TABLE structure_timers ADD COLUMN esi_corporation_id INTEGER"))
+    await db.commit()
+    try:
+        await _backfill_esi_timer_corporations(db)
+    except Exception as e:
+        await db.rollback()
+        logging.warning("structure_timers: corporation backfill failed; ESI timers stay hidden "
+                        "until their corporation syncs again: %s", e)
+
+
+async def _backfill_esi_timer_corporations(db: AsyncSession) -> None:
+    import json
+    import re
+
+    pending = (await db.execute(text(
+        "SELECT id, esi_structure_id FROM structure_timers "
+        "WHERE source = 'esi' AND esi_structure_id IS NOT NULL"))).fetchall()
+    has_cache = (await db.execute(text(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'esi_cache'"))).first()
+    owners: dict[int, set[int]] = {}
+    if pending and has_cache:
+        # Keys end in the request path (app/db/cache.py _cache_key).
+        path_corp = re.compile(r"/corporations/(\d+)/structures/")
+        cached = (await db.execute(text(
+            "SELECT key, data FROM esi_cache WHERE key LIKE '%/structures/%'"))).fetchall()
+        for key, data in cached:
+            m = path_corp.search(key)
+            if not m:
+                continue
+            corp = int(m.group(1))
+            try:
+                items = json.loads(data)
+            except ValueError:
+                continue
+            if not isinstance(items, list):
+                continue
+            for s in items:
+                if not isinstance(s, dict) or s.get("structure_id") is None:
+                    continue
+                # ESI names each structure's owner; one that disagrees with
+                # the corporation asked about is not evidence for either.
+                if s.get("corporation_id", corp) != corp:
+                    continue
+                owners.setdefault(s["structure_id"], set()).add(corp)
+
+    filled = 0
+    for timer_id, structure_id in pending:
+        corps = owners.get(structure_id, set())
+        if len(corps) == 1:
+            await db.execute(text("UPDATE structure_timers SET esi_corporation_id = :c WHERE id = :i"),
+                             {"c": next(iter(corps)), "i": timer_id})
+            filled += 1
+    await db.commit()
+    if pending:
+        logging.info("structure_timers: recorded the corporation of %d of %d ESI timers; "
+                     "the rest stay hidden until their corporation syncs again", filled, len(pending))
 
 
 
