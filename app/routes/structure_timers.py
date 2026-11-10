@@ -513,7 +513,7 @@ async def acl_add_entry(group_id: int, request: Request, db: AsyncSession = Depe
     # Refused, or no such group: back to the page with the message, as a
     # refused timer edit is.
     if not group or not await _can_modify_acl_group(db, user_id, group):
-        return RedirectResponse("/structure-timers?err=not_allowed", status_code=302)
+        return RedirectResponse("/structure-timers?err=acl_group_not_allowed", status_code=302)
 
     form = await request.form()
     entry_type = form.get("entry_type", "corporation")
@@ -556,7 +556,7 @@ async def acl_remove_entry(group_id: int, entry_id: int, request: Request, db: A
     group_result = await db.execute(select(TimerACLGroup).where(TimerACLGroup.id == group_id))
     group = group_result.scalar_one_or_none()
     if not group or not await _can_modify_acl_group(db, user_id, group):
-        return RedirectResponse("/structure-timers?err=not_allowed", status_code=302)
+        return RedirectResponse("/structure-timers?err=acl_group_not_allowed", status_code=302)
 
     result = await db.execute(
         select(TimerACLEntry).where(TimerACLEntry.id == entry_id, TimerACLEntry.group_id == group_id)
@@ -577,7 +577,7 @@ async def delete_acl_group(group_id: int, request: Request, db: AsyncSession = D
     result = await db.execute(select(TimerACLGroup).where(TimerACLGroup.id == group_id))
     group = result.scalar_one_or_none()
     if not group or not await _can_modify_acl_group(db, user_id, group):
-        return RedirectResponse("/structure-timers?err=not_allowed", status_code=302)
+        return RedirectResponse("/structure-timers?err=acl_group_not_allowed", status_code=302)
     # Refused while any timer still uses the group, active or archived,
     # whether or not the deleter can see it. Unlinking them used to show
     # them to everyone.
