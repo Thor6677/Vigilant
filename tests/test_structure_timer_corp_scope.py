@@ -17,6 +17,10 @@ Follow-ups:
 - The Director or CEO role counts for an 'esi' timer only when the character
   holding it is in the timer's corporation. A Director of another
   corporation with a plain member character in this one may not.
+- A manual timer records no corporation, so the role counts only in a
+  corporation the timer's creator has a character in. A Director or CEO of
+  any other corporation (anyone can found one) may not, and with no creator
+  on record the role counts for nothing.
 - A timer may be filed (created, or moved on edit) only under an ACL group
   the user can see. A refused request changes nothing.
 - A refused edit or delete, a refused filing and a refused group delete say
@@ -449,12 +453,115 @@ def test_a_director_in_the_timers_corporation_may_modify_it(board):
     assert _row(board, "Alpha Keep Renamed") is None
 
 
-def test_a_manual_timer_still_takes_a_director_of_any_corporation(board):
-    # Unchanged: a manual timer records no corporation to bind the role to.
+def _manual_snapshot(SessionLocal):
+    row = _row(SessionLocal, "Manual Keep")
+    assert row is not None
+    return {c: getattr(row, c) for c in ("id", "structure_name", "region_name", "notes",
+                                         "timer_expires", "acl_group_id", "created_by")}
+
+
+def test_a_director_in_the_creators_corporation_may_modify_a_manual_timer(board):
     _add_manual(board, created_by=A_USER)
+    tid = _row(board, "Manual Keep").id
+    assert _edit(A_DIRECTOR, tid, "Manual Keep Renamed").headers["location"] == "/structure-timers"
+    assert _row(board, "Manual Keep Renamed") is not None
+    assert _delete(A_DIRECTOR, tid).headers["location"] == "/structure-timers"
+    assert _row(board, "Manual Keep Renamed") is None
+
+
+def test_any_of_the_creators_corporations_counts(board):
+    # BOTH_USER has characters in A and B: a Director in B qualifies.
+    _add_manual(board, created_by=BOTH_USER)
     tid = _row(board, "Manual Keep").id
     _edit(B_DIRECTOR, tid, "Manual Keep Renamed")
     assert _row(board, "Manual Keep Renamed") is not None
+
+
+@pytest.mark.parametrize("user_id", [B_DIRECTOR, SPLIT_DIRECTOR])
+def test_a_director_of_another_corporation_may_not_modify_a_manual_timer(board, user_id):
+    # B_DIRECTOR shares no corporation with the creator. SPLIT_DIRECTOR has
+    # a plain member in the creator's corporation, but the role is in B.
+    _add_manual(board, created_by=A_USER)
+    before = _manual_snapshot(board)
+    for r in (_edit(user_id, before["id"], "Manual Keep Renamed"), _delete(user_id, before["id"])):
+        assert r.status_code == 302
+        assert r.headers["location"] == "/structure-timers?err=not_allowed"
+    assert _manual_snapshot(board) == before
+
+
+@pytest.mark.parametrize("user_id", [A_USER, ADMIN_USER, A_MANAGER])
+def test_the_creator_admins_and_managers_still_may_modify_a_manual_timer(board, user_id):
+    _add_manual(board, created_by=A_USER)
+    tid = _row(board, "Manual Keep").id
+    assert _edit(user_id, tid, "Manual Keep Renamed").headers["location"] == "/structure-timers"
+    assert _row(board, "Manual Keep Renamed") is not None
+    assert _delete(user_id, tid).headers["location"] == "/structure-timers"
+    assert _row(board, "Manual Keep Renamed") is None
+
+
+def _drop_characters(SessionLocal, user_id):
+    async def go():
+        async with SessionLocal() as db:
+            for c in (await db.execute(select(Character).where(Character.user_id == user_id))).scalars():
+                await db.delete(c)
+            await db.commit()
+    _run(go())
+
+
+@pytest.mark.parametrize("creator", ["none", "no_characters", "gone"])
+def test_with_no_creator_on_record_the_director_role_counts_for_nothing(board, creator):
+    if creator == "none":
+        _add_manual(board, created_by=None)
+    elif creator == "no_characters":
+        _add_manual(board, created_by=A_USER)
+        _drop_characters(board, A_USER)
+    else:
+        _add_manual(board, created_by=5299)  # no such account
+    before = _manual_snapshot(board)
+    for user_id in (A_DIRECTOR, B_DIRECTOR, SPLIT_DIRECTOR):
+        assert _edit(user_id, before["id"], "Manual Keep Renamed").headers["location"] \
+            == "/structure-timers?err=not_allowed"
+        assert _delete(user_id, before["id"]).headers["location"] == "/structure-timers?err=not_allowed"
+    assert _manual_snapshot(board) == before
+    # An admin still may.
+    _edit(ADMIN_USER, before["id"], "Manual Keep Renamed")
+    assert _row(board, "Manual Keep Renamed") is not None
+
+
+def test_a_director_with_no_corporation_on_record_does_not_match_a_creator_without_one(board):
+    # Both accounts' characters have no corporation recorded; None is not a
+    # corporation the two share.
+    _set_corp(board, 93000001, None)    # A_USER, the creator
+    _set_corp(board, 93000010, None)    # A_DIRECTOR
+    _add_manual(board, created_by=A_USER)
+    before = _manual_snapshot(board)
+    _edit(A_DIRECTOR, before["id"], "Manual Keep Renamed")
+    _delete(A_DIRECTOR, before["id"])
+    assert _manual_snapshot(board) == before
+
+
+def test_the_page_offers_a_manual_timers_controls_only_to_a_director_in_the_creators_corporation(board):
+    _add_manual(board, created_by=A_USER)
+    tid = _row(board, "Manual Keep").id
+    page = _html(A_DIRECTOR)
+    assert _forms(page, f"/structure-timers/{tid}/edit") == 1
+    assert _forms(page, f"/structure-timers/{tid}/delete") == 2
+    for user_id in (B_DIRECTOR, SPLIT_DIRECTOR):
+        page = _html(user_id)
+        assert "Manual Keep" in _shown(page), user_id
+        assert _forms(page, f"/structure-timers/{tid}/edit") == 0, user_id
+        assert _forms(page, f"/structure-timers/{tid}/delete") == 0, user_id
+        assert f'data-timer-id="{tid}"' not in page, user_id
+
+
+def test_the_page_offers_no_director_controls_on_a_timer_with_no_creator(board):
+    _add_manual(board, created_by=None)
+    tid = _row(board, "Manual Keep").id
+    page = _html(A_DIRECTOR)
+    assert "Manual Keep" in _shown(page)
+    assert _forms(page, f"/structure-timers/{tid}/edit") == 0
+    assert _forms(page, f"/structure-timers/{tid}/delete") == 0
+    assert _forms(_html(ADMIN_USER), f"/structure-timers/{tid}/edit") == 1
 
 
 # ── deleting an ACL group ───────────────────────────────────────────────
