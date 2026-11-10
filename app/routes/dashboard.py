@@ -2561,6 +2561,17 @@ async def _background_scheduler():
                 from app.auth.purge import run_due_purges
                 _background_scheduler._character_purge_task = asyncio.create_task(run_due_purges())
 
+            # Daily: remove characters whose EVE authorization expired
+            # (app/auth/expiry.py). Its own task, like the purge above: it
+            # refreshes quiet characters' tokens at SSO, one at a time.
+            if not hasattr(_background_scheduler, '_last_auth_expiry_sweep') or \
+               (now - _background_scheduler._last_auth_expiry_sweep).total_seconds() >= 86400:
+                _sweep_task = getattr(_background_scheduler, '_auth_expiry_task', None)
+                if _sweep_task is None or _sweep_task.done():
+                    from app.auth.expiry import run_expiry_sweep
+                    _background_scheduler._last_auth_expiry_sweep = now
+                    _background_scheduler._auth_expiry_task = asyncio.create_task(run_expiry_sweep())
+
             # ISS-061: daily batched purge of expired d-scans. Left unstamped
             # while rows remain (or its index isn't built yet), so it carries
             # on next minute instead of next day.

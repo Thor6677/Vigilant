@@ -80,7 +80,7 @@ async def _load_pilots(db: AsyncSession, user_id: int) -> tuple[list[dict], date
     rows = (await db.execute(
         select(
             Character.character_id, Character.character_name, Character.scopes,
-            Character.account_group,
+            Character.account_group, Character.last_authorized_at, Character.last_sso_at,
             CharacterDashboardCache.sync_warnings_json,
             CharacterDashboardCache.skillqueue_json,
             CharacterDashboardCache.pi_json,
@@ -101,7 +101,8 @@ async def _load_pilots(db: AsyncSession, user_id: int) -> tuple[list[dict], date
     )).all()
 
     pilots: list[dict] = []
-    for (cid, name, scopes, account_group, sync_warnings_raw, skillqueue_raw, pi_raw, industry_raw,
+    for (cid, name, scopes, account_group, last_authorized_at, last_sso_at,
+         sync_warnings_raw, skillqueue_raw, pi_raw, industry_raw,
          field_synced_raw, last_synced, sync_status, sync_error) in rows:
         scopes = scopes or ""
         sync_warnings = _parse_json(sync_warnings_raw) or {}
@@ -143,6 +144,8 @@ async def _load_pilots(db: AsyncSession, user_id: int) -> tuple[list[dict], date
             # ISS-069: per-field staleness, from rows already in hand.
             "staleness": staleness_of(now, scopes, field_synced, _aware(last_synced)),
             "no_perms": not has_permissions(scopes),
+            "last_authorized_at": _aware(last_authorized_at),
+            "last_sso_at": _aware(last_sso_at),
         })
 
     return pilots, now

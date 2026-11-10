@@ -356,3 +356,28 @@ async def update_reports_banner(request: Request, db: AsyncSession = Depends(get
     return templates.TemplateResponse(request, "partials/update_report_banner.html", {
         "reports": [update_reports.report_view(r) for r in reports],
     })
+
+
+@router.get("/status/held-removals", response_class=HTMLResponse)
+async def held_removals_banner(request: Request, db: AsyncSession = Depends(get_db)):
+    """Character removals the expiry sweep held for review (app/auth/expiry.py).
+    Empty for non-admins.
+
+    On the status router, answering empty rather than 403, for the reasons
+    given on /status/update-reports beside it. Admin means admin or manager,
+    the roles require_admin lets act on the held set, read from the database
+    by _is_admin. base.html only places the slot for a session marked admin,
+    so other users never ask; this check is the gate either way.
+    """
+    from app.auth.expiry import held_count
+
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("")
+    if not await _is_admin(request, db):
+        return HTMLResponse("")
+    count = await held_count(db)
+    if not count:
+        return HTMLResponse("")
+    return templates.TemplateResponse(request, "partials/held_removals_banner.html",
+                                      {"count": count})

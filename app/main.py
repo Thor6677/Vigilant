@@ -354,6 +354,9 @@ async def startup():
             "ALTER TABLE characters ADD COLUMN declined_scopes TEXT NOT NULL DEFAULT ''",
             # EVE account that owns the character, to notice a transfer
             "ALTER TABLE characters ADD COLUMN owner_hash TEXT",
+            # Authorization expiry clocks (app/auth/expiry.py); filled below
+            "ALTER TABLE characters ADD COLUMN last_authorized_at DATETIME",
+            "ALTER TABLE characters ADD COLUMN last_sso_at DATETIME",
             "ALTER TABLE sde_types ADD COLUMN volume REAL",
             "ALTER TABLE sde_types ADD COLUMN portion_size INTEGER",
             "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
@@ -454,6 +457,20 @@ async def startup():
         except Exception as e:
             logging.warning("characters AUTOINCREMENT rebuild failed, table unchanged: %s: %s",
                             type(e).__name__, e)
+
+    # ── Authorization expiry clocks ─────────────────────────────────────
+    # Rows from before the two columns start both clocks at this upgrade, so
+    # nobody is removed sooner than 90 days after it. After the rebuild above,
+    # which copies the table. A row left NULL is never removed.
+    from app.auth.expiry import backfill_authorization_stamps
+    async with AsyncSessionLocal() as db:
+        try:
+            filled = await backfill_authorization_stamps(db)
+            if filled:
+                logging.info("Started authorization expiry clocks for %d characters", filled)
+        except Exception as e:
+            await db.rollback()
+            logging.warning("authorization expiry backfill failed: %s: %s", type(e).__name__, e)
 
     # ── Add killmail_attackers columns introduced for /intel/kills ─────
     # SQLite ALTER TABLE ADD COLUMN is idempotent-safe via PRAGMA check.

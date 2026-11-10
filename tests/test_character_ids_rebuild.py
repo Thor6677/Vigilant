@@ -85,14 +85,20 @@ STARTUP_ALTERS = (
     "ALTER TABLE characters ADD COLUMN declined_scopes TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE characters ADD COLUMN owner_hash TEXT",
 )
+# Added after v1.7.1. Startup runs its ALTERs before the rebuild, so either
+# shape has these by the time the rebuild sees it.
+LATER_ALTERS = (
+    "ALTER TABLE characters ADD COLUMN last_authorized_at DATETIME",
+    "ALTER TABLE characters ADD COLUMN last_sso_at DATETIME",
+)
 INDEX_DDL = (
     "CREATE UNIQUE INDEX ix_characters_character_id ON characters (character_id)",
     "CREATE INDEX ix_characters_user_id ON characters (user_id)",
 )
 
 SHAPES = {
-    "create_all": (CREATE_ALL_DDL,),
-    "altered": (ALTERED_BASE_DDL,) + STARTUP_ALTERS,
+    "create_all": (CREATE_ALL_DDL,) + LATER_ALTERS,
+    "altered": (ALTERED_BASE_DDL,) + STARTUP_ALTERS + LATER_ALTERS,
 }
 
 # Fake pilots: (EVE character id, name, access token, refresh token).
@@ -489,7 +495,7 @@ def test_a_table_with_an_inline_unique_constraint_is_left_alone(tmp_path, caplog
     caplog.set_level(logging.WARNING, logger="app.db.character_ids")
     inline = CREATE_ALL_DDL.replace(
         "character_id INTEGER NOT NULL,", "character_id INTEGER NOT NULL UNIQUE,", 1)
-    SHAPES["inline_unique"] = (inline,)
+    SHAPES["inline_unique"] = (inline,) + LATER_ALTERS
     try:
         async def body(Session):
             async with Session() as db:

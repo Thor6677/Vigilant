@@ -30,11 +30,12 @@
   {% for c in characters %}
     {# ISS-101: on phones a closed card is one row, and the "25/25" button in
        its head (toggleExpanded on this card) opens the rest. A card starts
-       open when anything isn't shared; a rejected token (is-lapsed) keeps its
-       Renew button visible while closed. Desktop ignores is-expanded and
-       always shows everything. #}
+       open when anything isn't shared, or when it is heading for removal (so
+       the warning shows); a rejected token (is-lapsed) keeps its Renew button
+       visible while closed. Desktop ignores is-expanded and always shows
+       everything. #}
     {% set unshared = c['granted'] | length < total_permissions %}
-    <div class="b-panel acct-char{% if unshared %} is-expanded{% endif %}{% if c['token_failed'] %} is-lapsed{% endif %}">
+    <div class="b-panel acct-char{% if unshared or c['expiry'] %} is-expanded{% endif %}{% if c['token_failed'] %} is-lapsed{% endif %}">
       <div class="acct-char-head">
         <img class="acct-portrait" alt="" src="https://images.evetech.net/characters/{{ c['character_id'] }}/portrait?size=64">
         <div class="acct-char-id">
@@ -69,6 +70,20 @@
         <span class="acct-perm is-declined"><span class="acct-perm-dot"></span>you chose not to share</span>
         {% if c['new'] %}<span class="acct-perm is-new"><span class="acct-perm-dot"></span>new — not asked when this character was added</span>{% endif %}
       </div>
+
+      {% if c['expiry'] %}
+        {# The authorization-expiry rules: app/auth/expiry.py. #}
+        <p class="acct-note is-warn">
+          {{ c['character_name'] }} {{ c['expiry']['text'] }}.
+          {% if c['expiry']['rule'] == 'sso_cap' %}
+            A character has to sign in at EVE at least once every {{ c['expiry']['cap_days'] }} days{% if c['expiry']['last'] %}; this one last did on {{ c['expiry']['last'] }}{% endif %}.
+          {% else %}
+            Its EVE authorization has not been shown to work since {{ c['expiry']['last'] }}.
+          {% endif %}
+          Removal also deletes the history Vigilant collected for it.
+          <a class="b-link" href="/account/permissions/{{ c['character_id'] }}">Renew</a>
+        </p>
+      {% endif %}
 
       {% if c['new'] and not c['token_failed'] %}
         <p class="acct-note">

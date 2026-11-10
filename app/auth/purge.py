@@ -35,9 +35,13 @@ fetched with another member's token, so it is left alone; the picker says so.
 
 Taking a character off an account (ISS-060)
 -------------------------------------------
-Four paths do it: self-removal on the Account page, admin remove-character,
-admin remove-user, and an EVE owner change (a transfer). All four call
-remove_character_from_account(), and every table with a character_id column
+Five paths do it: self-removal on the Account page, admin remove-character,
+admin remove-user, an EVE owner change (a transfer), and the daily
+authorization-expiry sweep (app/auth/expiry.py), which removes a character
+whose authorization stopped working, or that hasn't signed in for too long,
+and also catches a transfer a token refresh noticed. All of them call
+remove_character_from_account() (the last two through remove_with_history()),
+and every table with a character_id column
 is classified below (LIVE_STATE_TABLES, HISTORY_TABLES,
 PER_CHARACTER_USER_TABLES, KEPT_TABLES, REMOVAL_TABLES), so a new one can't be
 missed again: tests/test_character_removal.py fails on any that isn't.
@@ -56,8 +60,8 @@ missed again: tests/test_character_removal.py fails on any that isn't.
   year of wallet snapshots is ~260k rows, and finding a character's
   esi_cache rows means scanning that whole table — and SQLite has one
   writer, so the deletes go in small batches, one short transaction each.
-  History is always deleted for an admin removal or a transfer; on
-  self-removal only when the user ticks the box.
+  History is always deleted for an admin removal, a transfer or an expired
+  authorization; on self-removal only when the user ticks the box.
 * A purge only starts PURGE_DELAY after the removal: a sync already running
   can still write for up to the sync timeout, and waiting it out means its
   late rows are purged too. The sync itself also re-checks before its final
@@ -472,13 +476,18 @@ REMOVAL_TABLES: dict[str, str] = {
     "character_purges": "the pending-purge queue; the background purge deletes its own row",
     "kept_character_histories": ("whose kept history it is (ISS-070); written by a "
                                  "self-removal that keeps history, deleted on re-link"),
+    "held_character_removals": ("removals the expiry sweep held for an admin to review "
+                                "(app/auth/expiry.py); every sweep replaces the set, and "
+                                "approving it re-checks each character first"),
 }
 
 REASON_SELF = "self"
 REASON_ADMIN_CHARACTER = "admin_character"
 REASON_ADMIN_USER = "admin_user"
 REASON_TRANSFER = "transfer"
-REMOVAL_REASONS = (REASON_SELF, REASON_ADMIN_CHARACTER, REASON_ADMIN_USER, REASON_TRANSFER)
+REASON_EXPIRED = "expired"   # the authorization-expiry sweep (app/auth/expiry.py)
+REMOVAL_REASONS = (REASON_SELF, REASON_ADMIN_CHARACTER, REASON_ADMIN_USER, REASON_TRANSFER,
+                   REASON_EXPIRED)
 
 # A sync already running when the character was removed can still write until
 # it finishes or hits _SYNC_TIMEOUT (300s, app/routes/dashboard.py); the purge
@@ -811,6 +820,29 @@ async def remove_character_from_account(db: AsyncSession, char: Character, *,
                 "deleted now" if history_now else ("queued for deletion" if delete_history else "kept"),
                 counts)
     return counts
+
+
+async def remove_with_history(db: AsyncSession, char: Character, reason: str, event_type: str,
+                              detail: str, ip: str | None = None) -> tuple[str, ...]:
+    """Take a character off its account with its history, write the audit row
+    against the account that lost it, and commit. For an EVE owner change
+    (REASON_TRANSFER: the SSO callback, or the expiry sweep after a refresh
+    noticed one) and an expired authorization (REASON_EXPIRED, the sweep).
+
+    No token is revoked: EVE keeps one authorization per character per
+    application, so after a transfer it is the new owner's (see
+    app/auth/routes.py's docstring), and an expiry ends Vigilant's use of the
+    authorization, never the authorization at EVE.
+    Returns the corp-contract cache patterns (removal_cache_patterns) for
+    the caller to clear after this commit with clear_esi_cache_in_background.
+    """
+    cid, user_id = int(char.character_id), char.user_id
+    patterns = removal_cache_patterns(char)
+    await remove_character_from_account(db, char, reason=reason, delete_history=True)
+    db.add(AdminAuditLog(user_id=user_id, character_id=cid, event_type=event_type,
+                         detail=detail, ip_address=ip))
+    await db.commit()
+    return patterns
 
 
 async def sync_must_not_write(db: AsyncSession, character_id: int, sync_started: datetime) -> bool:

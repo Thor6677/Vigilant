@@ -98,6 +98,7 @@ USER_OWNED_TABLES = (
     "skill_farm_settings",  # T-073
     "skill_farm_pilots",    # T-073 — also in PER_CHARACTER_USER_TABLES (app/auth/purge.py)
     "user_dashboard_prefs",
+    "held_character_removals",  # the expiry sweep's held removals (app/auth/expiry.py)
 )
 
 # Where the FK is metadata rather than ownership, null it out instead of
@@ -141,6 +142,10 @@ AUDIT_FILTERS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("allowlist", "Allowlist", ("admin_allowlist",)),
     ("users", "Users & roles", ("admin_set_role", "admin_remove_user", "admin_remove_character",
                                  "character_transferred", "user_logout_everywhere",
+                                 "character_expired",  # the authorization-expiry sweep
+                                 # its breaker held a mass removal; an admin approved or kept it
+                                 "character_expiry_held", "character_expiry_approved",
+                                 "character_expiry_kept",
                                  "character_purge",    # ISS-060: background clean-up after a removal
                                  "kept_history")),     # ISS-070: kept history on a re-add
     ("syncs", "Syncs", ("admin_force_sync", "admin_sync_all")),
@@ -245,6 +250,14 @@ async def admin_page(request: Request, tab: str = "overview",
 @router.get("/section/overview", response_class=HTMLResponse)
 async def admin_overview(request: Request, db: AsyncSession = Depends(get_db),
                          admin: User = Depends(require_admin)):
+    return await _overview(request, db)
+
+
+async def _overview(request: Request, db: AsyncSession, held_note: str | None = None):
+    """The Overview tab. Removals the expiry sweep held (app/auth/expiry.py)
+    sit at its top, the tab an admin lands on; `held_note` reports what an
+    action on them just did."""
+    from app.auth.expiry import held_removals
     from app.routes.dashboard import get_scheduler_state
 
     sched = get_scheduler_state()
@@ -281,6 +294,8 @@ async def admin_overview(request: Request, db: AsyncSession = Depends(get_db),
     latest = upd.latest_tag if upd else None
 
     return templates.TemplateResponse(request, "partials/admin_overview.html", {
+        "held": await held_removals(db),
+        "held_note": held_note,
         "uptime": _format_duration(uptime_secs),
         # Build tag baked into the image by release CI, or "dev" for a source
         # build. Shown here rather than on /healthz, which is public.
@@ -340,11 +355,15 @@ async def admin_users(request: Request, db: AsyncSession = Depends(get_db),
             char_ids.append(c.character_id)
 
     cache_by_cid: dict[int, CharacterDashboardCache] = {}
+    held: dict[int, dict] = {}
     if char_ids:
         all_caches = (await db.execute(
             select(CharacterDashboardCache).where(CharacterDashboardCache.character_id.in_(char_ids))
         )).scalars().all()
         cache_by_cid = {c.character_id: c for c in all_caches}
+        # Removals the expiry sweep held for review (app/auth/expiry.py).
+        from app.auth.expiry import held_for
+        held = await held_for(db, all_chars)
 
     now = datetime.now(timezone.utc)
     user_data = []
@@ -372,6 +391,10 @@ async def admin_users(request: Request, db: AsyncSession = Depends(get_db),
                 "sync_status": cache.sync_status if cache else "never",
                 "last_synced": cache.last_synced if cache else None,
                 "scope_count": len((c.scopes or "").split()) if c.scopes else 0,
+                # The expiry clocks, for the name's tooltip.
+                "last_sso_at": c.last_sso_at,
+                "last_authorized_at": c.last_authorized_at,
+                "held": held.get(c.character_id),
             })
 
         user_data.append({
@@ -938,6 +961,52 @@ async def admin_remove_character(character_id: int, request: Request,
                      request.client.host if request.client else None)
 
     return await admin_users(request, db, admin)
+
+
+# ── Removals the expiry sweep held (app/auth/expiry.py) ─────────────────────
+# Same permission as remove-character above: require_admin, so admins and
+# managers. Both re-render Overview, where the held set is listed.
+
+def _held_changed(response):
+    """The site-wide banner (base.html) re-fetches on this event, so it does
+    not go on announcing a held set an admin has just dealt with."""
+    response.headers["HX-Trigger"] = "held-removals-changed"
+    return response
+
+
+@router.post("/action/held-removals/remove", response_class=HTMLResponse)
+async def admin_held_removals_remove(request: Request, background_tasks: BackgroundTasks,
+                                     db: AsyncSession = Depends(get_db),
+                                     admin: User = Depends(require_admin)):
+    """Remove the held characters that still qualify; keep any that signed in,
+    refreshed or left their account since they were held."""
+    from app.auth.expiry import approve_held
+    ip = request.client.host if request.client else None
+    removed, kept, cache_patterns = await approve_held(db.bind, admin_id=admin.id, ip=ip)
+    # ISS-077: their accounts' cached corp contracts, after the response.
+    background_tasks.add_task(clear_esi_cache_in_background, db.bind, None, cache_patterns)
+    await _log_audit(db, "character_expiry_approved", admin.id,
+                     detail=(f"Approved the held removals: {removed} removed, {kept} kept "
+                             f"(signed in, refreshed or left their account since they were held)"),
+                     ip=ip)
+    note = f"Removed {removed} held character{'s' if removed != 1 else ''}"
+    if kept:
+        note += f"; kept {kept} that signed in, refreshed or left their account since"
+    return _held_changed(await _overview(request, db, held_note=note + "."))
+
+
+@router.post("/action/held-removals/keep", response_class=HTMLResponse)
+async def admin_held_removals_keep(request: Request, db: AsyncSession = Depends(get_db),
+                                   admin: User = Depends(require_admin)):
+    """Drop the hold without removing anyone; the next sweep judges afresh."""
+    from app.auth.expiry import keep_held
+    held = await keep_held(db)
+    await _log_audit(db, "character_expiry_kept", admin.id,
+                     detail=(f"Kept {held} held removal{'s' if held != 1 else ''} for now; "
+                             f"the next daily sweep judges them again"),
+                     ip=request.client.host if request.client else None)
+    return _held_changed(await _overview(request, db, held_note=(
+        "Kept them for now. The next daily sweep judges them again, and may hold them again.")))
 
 
 # ── Allowlist management ─────────────────────────────────────────────────────

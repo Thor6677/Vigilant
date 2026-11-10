@@ -78,6 +78,24 @@ class Settings(BaseSettings):
     eve_login_scope: str = ""
     eve_esi_base: str = "https://esi.evetech.net/latest"
 
+    # Character authorization expiry (app/auth/expiry.py). A character whose
+    # EVE authorization hasn't been shown to work for this many days, by a
+    # sign-in with it or a token refresh EVE accepted, is removed from its
+    # account with its history by the daily sweep.
+    character_auth_expiry_days: int = 90
+    # However well its token works, a character must sign in through EVE SSO
+    # at least this often, or it is removed the same way.
+    character_sso_cap_days: int = 365
+    # How long before that cap the account is warned.
+    character_sso_warning_days: int = 30
+    # The sweep's breaker: when its expiry and sign-in-cap removals in one run
+    # come to more than this share of all linked characters (and at least 3),
+    # it makes none of them, says so in the log and the audit log, and lists
+    # them in Admin › Overview for an admin to remove or keep, since a
+    # restored old backup or a wrong clock looks exactly like that. Raise it
+    # to let such removals through without review; 1.0 or more turns it off.
+    character_expiry_max_share: float = 0.25
+
     killmails_enabled: bool = False
     killmail_dashboard_enabled: bool = False
     killmail_battles_enabled: bool = False

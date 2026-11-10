@@ -63,6 +63,10 @@ SKIP = (
     # ISS-060: production's queue of pending character purges. Those belong
     # to removals made on production; dev starts with an empty queue.
     'character_purges',
+    # Removals production's expiry sweep held for its admins to review; an
+    # approval on dev would act on production's verdict. Dev's own sweep
+    # (when its jobs run) makes its own.
+    'held_character_removals',
     # Users' claimed structure anchor dates. Their submitted_by/reviewed_by
     # are production user ids that mean nothing in dev; dev testers make
     # their own. Approved points still arrive via structure_age_calibration

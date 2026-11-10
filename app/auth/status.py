@@ -152,8 +152,9 @@ def summary(char) -> dict:
 
 
 # What app/routes/dashboard.py:_client_for records when EVE rejects the refresh
-# (TokenRevoked: SSO answered 400/401). That is definitive — the authorization
-# is gone until the user renews it. Its other warning, "token_refresh_failed:
+# (TokenRevoked: SSO answered 400/401, or the refresh came back for another EVE
+# account and was not stored). That is definitive — the authorization is gone
+# until the user renews it. Its other warning, "token_refresh_failed:
 # <Exception>", is a network or SSO outage and clears on its own, so it must
 # not tell anyone to re-authorize.
 TOKEN_REVOKED = "token_revoked"

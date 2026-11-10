@@ -1,3 +1,41 @@
+{# Removals the authorization-expiry sweep held (app/auth/expiry.py): its
+   breaker stopped more of them than it trusts itself to make at once. First
+   on the tab an admin lands on. No script: two hx-posts, which base.html's
+   configRequest hook gives the CSRF header. #}
+{% if held_note %}<p class="upd-note is-ok" role="status" style="margin-bottom:1rem;">{{ held_note }}</p>{% endif %}
+{% if held %}
+<div class="b-panel" id="held-removals" style="margin-bottom:1.5rem;">
+    <div class="b-panel-head">
+        <span class="b-label">Held removals</span>
+        <span class="b-badge is-warn">{{ held | length }}</span>
+    </div>
+    <p class="upd-note is-warn" style="padding:0.5rem 0.75rem;">
+        The daily authorization check would have removed these characters, with their
+        history, but held them because that is more than it removes at once without
+        review (a restored old backup or a wrong clock looks the same). Removing
+        checks each one again first: one that has signed in or refreshed since is kept.
+    </p>
+    {% for h in held %}
+    <div class="b-row">
+        <span class="b-row-label">{{ h['character_name'] }} <span class="b-muted-sm">· {{ h['account'] }}</span></span>
+        <span class="b-row-val">
+            {{ h['why'] }} · {{ h['last_label'] }} {{ h['last'] }} · held since {{ h['held_since'] }}
+            {% if not h['still_due'] %}<span class="b-badge" title="Signed in or refreshed since it was held; removing keeps it">will be kept</span>{% endif %}
+        </span>
+    </div>
+    {% endfor %}
+    <div class="b-row" style="justify-content:flex-end;gap:0.5rem;">
+        <button type="button" class="b-btn is-ghost"
+                hx-post="/admin/action/held-removals/keep"
+                hx-target="#admin-content" hx-swap="innerHTML">Keep for now</button>
+        <button type="button" class="b-btn is-ghost is-danger"
+                hx-post="/admin/action/held-removals/remove"
+                hx-target="#admin-content" hx-swap="innerHTML"
+                hx-confirm="Remove these characters and their history? Each is checked again first.">Remove these characters</button>
+    </div>
+</div>
+{% endif %}
+
 <div class="b-stats" style="margin-bottom:1.5rem;">
     {# Version tile doubles as the pointer to the Updates tab: everything about
        updates lives there, so Overview only says whether to go and look. #}

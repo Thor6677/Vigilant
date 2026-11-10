@@ -552,6 +552,7 @@
 .acct-legend .acct-perm { border: none; padding: 0; font-size: 9px; text-decoration: none; }
 .acct-note { margin: 0; padding: 0.55rem 0.8rem; border-top: 1px solid var(--border); font-size: var(--fs-sm); line-height: 1.6; color: var(--muted); }
 .acct-note code { font-size: 10px; color: var(--text); }
+.acct-note.is-warn { color: var(--warn); }   /* heading for removal (app/auth/expiry.py) */
 .acct-remove { margin: 0; padding: 0.5rem 0.8rem; border-top: 1px solid var(--border); text-align: right; }
 .b-link-btn.is-danger { color: var(--danger); }
 
