@@ -58,6 +58,19 @@ async def require_admin(request: Request, db: AsyncSession = Depends(get_db)) ->
     return user
 
 
+def manager_blocked(actor_role: str | None, target_role: str | None) -> bool:
+    """Whether the console must refuse this actor acting on this account.
+
+    Managers run the console but may not touch an admin's account: its role,
+    the account itself, or its characters. One rule, used by every route that
+    acts on another user and by the users panel, so they cannot drift apart.
+    """
+    return actor_role == "manager" and target_role == "admin"
+
+
+templates.env.globals["manager_blocked"] = manager_blocked
+
+
 # Tables a user owns outright: removing the user deletes these rows rather
 # than leaving them behind with a dangling user_id.
 # tests/test_admin_remove_user_cleanup.py sweeps
@@ -805,12 +818,11 @@ async def admin_set_role(user_id: int, new_role: str, request: Request,
     if not user:
         return HTMLResponse('<div class="b-empty" style="color:var(--danger);">User not found.</div>')
 
-    # Managers cannot grant/revoke admin or modify admin users
-    if admin.role == "manager":
-        if new_role == "admin":
-            return HTMLResponse('<div class="b-empty" style="color:var(--danger);">Managers cannot grant admin role.</div>')
-        if user.role == "admin":
-            return HTMLResponse('<div class="b-empty" style="color:var(--danger);">Managers cannot modify admin users.</div>')
+    # Managers cannot grant admin or modify admin users
+    if admin.role == "manager" and new_role == "admin":
+        return HTMLResponse('<div class="b-empty" style="color:var(--danger);">Managers cannot grant admin role.</div>')
+    if manager_blocked(admin.role, user.role):
+        return HTMLResponse('<div class="b-empty" style="color:var(--danger);">Managers cannot modify admin users.</div>')
 
     old_role = user.role
     user.role = new_role
@@ -837,8 +849,7 @@ async def admin_remove_user(user_id: int, request: Request, background_tasks: Ba
     if not user:
         return HTMLResponse('<div class="b-empty" style="color:var(--danger);">User not found.</div>')
 
-    # Managers cannot delete admin users
-    if admin.role == "manager" and user.role == "admin":
+    if manager_blocked(admin.role, user.role):
         return HTMLResponse('<div class="b-empty" style="color:var(--danger);">Managers cannot delete admin users.</div>')
 
     # Delete all characters belonging to this user
@@ -897,6 +908,13 @@ async def admin_remove_character(character_id: int, request: Request,
     char = result.scalar_one_or_none()
     if not char:
         return HTMLResponse('<div class="b-empty" style="color:var(--danger);">Character not found.</div>')
+
+    # Removing a character deletes its history and revokes its token, so the
+    # owner's role is checked like set-role and remove-user check it.
+    owner_role = (await db.execute(
+        select(User.role).where(User.id == char.user_id))).scalar_one_or_none()
+    if manager_blocked(admin.role, owner_role):
+        return HTMLResponse('<div class="b-empty" style="color:var(--danger);">Managers cannot remove an admin\'s characters.</div>')
 
     char_name = char.character_name
     from app.auth.tokens import issued_to_us, revoke_refresh_token

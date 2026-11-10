@@ -26,7 +26,7 @@
             <span class="adm-user-age" style="font-size:10px;color:var(--muted);min-width:70px;">{{ format_age(u.user.last_login) }}</span>
             <div style="display:flex;gap:4px;align-items:center;" data-click="noop" data-stop>
                 {% if u.user.id != admin_id %}
-                    {% set can_modify = (admin_role == 'admin') or (admin_role == 'manager' and u.user.role != 'admin') %}
+                    {% set can_modify = not manager_blocked(admin_role, u.user.role) %}
                     {% if can_modify %}
                     <select class="m-hide" data-change="adminSetRole" data-user-id="{{ u.user.id }}"
                             style="padding:0.15rem 0.3rem;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:9px;">
@@ -55,7 +55,7 @@
                select's own data-user-id, so either copy acts on this user.
                The condition is the header's can_modify, restated rather than
                read from the "set" inside the header's "if" block. #}
-            {% if u.user.id != admin_id and ((admin_role == 'admin') or (admin_role == 'manager' and u.user.role != 'admin')) %}
+            {% if u.user.id != admin_id and not manager_blocked(admin_role, u.user.role) %}
             <div class="m-only adm-user-ctl">
                 <label class="adm-user-role">Role
                     <select data-change="adminSetRole" data-user-id="{{ u.user.id }}">
@@ -91,10 +91,13 @@
                     <button class="b-btn" style="padding:0.1rem 0.3rem;border:1px solid var(--border);font-size:8px;"
                             hx-post="/admin/action/force-sync/{{ c.character_id }}"
                             hx-target="#admin-content" hx-swap="innerHTML">Sync</button>
+                    {# The route refuses this for a manager on an admin's character. #}
+                    {% if not manager_blocked(admin_role, u.user.role) %}
                     <button class="b-btn" style="padding:0.1rem 0.3rem;border:1px solid var(--danger);font-size:8px;color:var(--danger);"
                             hx-post="/admin/action/remove-character/{{ c.character_id }}"
                             hx-target="#admin-content" hx-swap="innerHTML"
                             hx-confirm="Remove {{ c.character_name }}?">&times;</button>
+                    {% endif %}
                 </span>
             </div>
             {% endfor %}
