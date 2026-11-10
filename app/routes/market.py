@@ -51,6 +51,30 @@ SEARCH_CAP = 25
 # Range toggle → lookback days. `all` means no lower bound.
 _RANGES = {"30d": 30, "90d": 90, "1y": 365, "all": None}
 
+# ESI types every type id as int32. Anything outside that range is refused
+# before any query; an id past 2**63 would otherwise fail the SQLite bind.
+_MAX_TYPE_ID = 2 ** 31 - 1
+
+
+async def _is_market_type(db: AsyncSession, type_id: int) -> bool:
+    """True when the SDE has `type_id` as a published type with a market group.
+
+    ISS-178: history.json and the order book used to send any integer to ESI.
+    Each failed lookup costs the instance-wide ESI error budget every
+    character sync shares, and nothing remembered the failure. A type with no
+    market group can't be listed, so ESI has nothing for it either: skipping
+    the fetch leaves the answer unchanged."""
+    if not 1 <= type_id <= _MAX_TYPE_ID:
+        return False
+    row = (await db.execute(
+        select(SDEType.type_id).where(
+            SDEType.type_id == type_id,
+            SDEType.published.is_(True),
+            SDEType.market_group_id.is_not(None),
+        )
+    )).first()
+    return row is not None
+
 
 async def _search_types(db: AsyncSession, q: str, cap: int = SEARCH_CAP) -> list[dict]:
     """Published SDE types matching `q`; prefix matches sort ahead of substrings.
@@ -138,7 +162,11 @@ async def market_type_history(
     days = _RANGES.get(range, 365)
 
     # Populate/refresh the cache (cache-first; one ESI fetch at most per 24h).
-    await get_history(region_id, type_id, db)
+    # An id the SDE doesn't know as a market type skips the fetch and gets
+    # the normal empty answer below (ISS-178).
+    known = await _is_market_type(db, type_id)
+    if known:
+        await get_history(region_id, type_id, db)
 
     stmt = (
         select(
@@ -152,7 +180,7 @@ async def market_type_history(
         cutoff = (datetime.now(timezone.utc).date() - timedelta(days=days))
         stmt = stmt.where(MarketHistory.date >= cutoff)
 
-    rows = (await db.execute(stmt)).all()
+    rows = (await db.execute(stmt)).all() if known else []
 
     payload = {
         "type_id": type_id,
@@ -197,7 +225,11 @@ async def market_type_orders(request: Request, type_id: int, db: AsyncSession = 
         return HTMLResponse("", status_code=401)
 
     region_id = DEFAULT_REGION_ID
-    raw_orders = await get_orders(region_id, type_id)
+    # Not a market type in the SDE: render the empty book, no ESI call (ISS-178).
+    if await _is_market_type(db, type_id):
+        raw_orders = await get_orders(region_id, type_id)
+    else:
+        raw_orders = []
     book = build_order_book(raw_orders)
 
     # Resolve names only for the ≤30 rows actually displayed, not every order
@@ -286,6 +318,13 @@ async def market_lp_offers(
         return HTMLResponse("", status_code=401)
     if not corporation_id:
         return HTMLResponse("")
+    # Not an NPC corp the app knows: the same empty table a corp with no LP
+    # store gets, without asking ESI (ISS-178).
+    if not await market_lp.is_npc_corp(db, corporation_id):
+        return templates.TemplateResponse(
+            request, "partials/market_lp_offers.html",
+            {"corporation_id": corporation_id, "rows": []},
+        )
 
     raw_offers = await market_lp.get_offers(corporation_id)
     price_map = await market_lp.get_price_map(db)
