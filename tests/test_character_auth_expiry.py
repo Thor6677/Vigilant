@@ -1094,3 +1094,17 @@ def test_the_banner_slot_listens_for_the_change_event():
     base = Path("app/templates/base.html").read_text()
     slot = base[base.index('id="held-removals-slot"'):][:400]
     assert "held-removals-changed from:body" in slot
+
+
+def test_the_result_note_holds_the_overview_refresh(env):
+    """The Overview tab re-fetches itself every 10 seconds, which wiped the
+    note saying what Keep or Remove just did."""
+    from pathlib import Path
+    _hold(env)
+    r = _make_admin(env).post("/admin/action/held-removals/keep")
+    assert 'role="status" data-refresh-hold' in r.text
+    page = Path("app/templates/admin.html").read_text()
+    fn = page[page.index("function refreshAdminSection()"):][:900]
+    assert "[data-refresh-hold]" in fn
+    # A plain load of the tab carries no note, so it refreshes as before.
+    assert "data-refresh-hold" not in _make_admin(env).get("/admin/section/overview").text

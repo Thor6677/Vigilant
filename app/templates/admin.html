@@ -101,6 +101,11 @@ function switchTab() {
    "part-way" lives with the handler that records it, in actions.js. */
 function refreshAdminSection() {
     if (window.updaterRefreshHeld && window.updaterRefreshHeld()) return;
+    /* Nor while the section shows the result of an action just taken (the
+       held-removals note in partials/admin_overview.html): the refresh would
+       wipe it within seconds. It stays until the admin switches tab or acts
+       again, both of which replace the section themselves. */
+    if (document.querySelector('#admin-content [data-refresh-hold]')) return;
     htmx.ajax('GET', '/admin/section/' + currentSection, '#admin-content');
 }
 
