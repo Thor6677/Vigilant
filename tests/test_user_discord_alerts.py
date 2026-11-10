@@ -743,6 +743,62 @@ def test_a_test_to_a_webhook_marked_gone_is_refused_until_a_new_url():
     assert [p[0] for p in _FakeClient.posts] == [HOOK, HOOK2]
 
 
+def _gone_row(uid):
+    c = _client(uid)
+    c.post("/account/notifications/discord", data={"discord_webhook_url": HOOK, "alert_types": ["pi_expiring"]})
+    _FakeClient.status = 404
+    _press_test(c)                                              # Discord: gone
+    _FakeClient.status = 204
+    row = _run(_row(uid))
+    assert row.enabled is False and row.last_error == user_discord.GONE_ERROR
+    return c
+
+
+def test_reticking_send_alerts_on_a_gone_webhook_is_refused():
+    uid = ensure_user(90230)
+    c = _gone_row(uid)
+    r = c.post("/account/notifications/discord",
+               data={"discord_webhook_url": "", "alert_types": ["stockpile_low"], "enabled": "on"})
+    assert r.status_code == 303
+    row = _run(_row(uid))
+    assert row.enabled is False
+    assert row.last_error == user_discord.GONE_ERROR
+    assert row.alert_types == "stockpile_low"                   # the choices are kept
+    html = _page(c)
+    assert "This webhook no longer exists. Paste a new webhook URL to turn alerts back on." in html
+    assert "Discord alert settings saved." not in html
+    assert "paused" in html
+    assert 'name="enabled" class="b-check" checked' not in html
+
+
+def test_a_new_url_on_a_gone_webhook_turns_alerts_on():
+    uid = ensure_user(90231)
+    c = _gone_row(uid)
+    c.post("/account/notifications/discord", data={"discord_webhook_url": HOOK2, "alert_types": ["pi_expiring"]})
+    row = _run(_row(uid))
+    assert row.enabled is True and row.last_error is None and row.discord_webhook_url == HOOK2
+
+
+def test_unticking_on_a_gone_webhook_stays_off():
+    uid = ensure_user(90232)
+    c = _gone_row(uid)
+    c.post("/account/notifications/discord", data={"discord_webhook_url": "", "alert_types": ["pi_expiring"]})
+    assert _run(_row(uid)).enabled is False
+    assert "Discord alert settings saved." in _page(c)
+
+
+def test_a_paused_working_webhook_can_be_resumed():
+    uid = ensure_user(90233)
+    c = _client(uid)
+    c.post("/account/notifications/discord", data={"discord_webhook_url": HOOK, "alert_types": ["pi_expiring"]})
+    c.post("/account/notifications/discord", data={"discord_webhook_url": "", "alert_types": ["pi_expiring"]})
+    assert _run(_row(uid)).enabled is False
+    c.post("/account/notifications/discord",
+           data={"discord_webhook_url": "", "alert_types": ["pi_expiring"], "enabled": "on"})
+    assert _run(_row(uid)).enabled is True
+    assert "Discord alert settings saved." in _page(c)
+
+
 def test_a_paused_webhook_can_still_be_tested():
     uid = ensure_user(90217)
     c = _client(uid)

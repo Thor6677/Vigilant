@@ -156,6 +156,7 @@ async def discord_alerts_save(request: Request, db: AsyncSession = Depends(get_d
         new_url = raw_url
 
     row = await _notify_row(db, user_id)
+    refused = False
     if row is None:
         if not new_url:
             _flash(request, "danger", "Paste a Discord webhook URL first.")
@@ -167,7 +168,10 @@ async def discord_alerts_save(request: Request, db: AsyncSession = Depends(get_d
         row.last_at = row.last_ok = row.last_error = None   # described the old target
         row.enabled = True                                  # a new URL un-pauses
     else:
-        row.enabled = enabled
+        # A webhook Discord reported gone stays off until a new URL is pasted;
+        # ticking the box again would only switch alerts back on against it.
+        refused = enabled and user_discord.is_marked_gone(row.last_error)
+        row.enabled = False if refused else enabled
     row.alert_types = user_discord.serialize_alert_types(chosen)
     row.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
     await db.commit()
@@ -175,6 +179,10 @@ async def discord_alerts_save(request: Request, db: AsyncSession = Depends(get_d
     if new_url:
         logger.info("user discord alert: user=%s saved webhook=%s",
                     user_id, user_discord.webhook_log_ref(new_url))
+    if refused:
+        _flash(request, "danger", "This webhook no longer exists. "
+               "Paste a new webhook URL to turn alerts back on.")
+        return RedirectResponse(DISCORD_ANCHOR, status_code=303)
     _flash(request, "ok", "Discord alert settings saved."
            + ("" if row.alert_types else " No alert types are ticked, so nothing will be sent."))
     return RedirectResponse(DISCORD_ANCHOR, status_code=303)
