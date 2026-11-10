@@ -2,7 +2,8 @@
 
 The creator and app admins/managers always may. An in-game Director or CEO may
 too, but only for timers they can see: a timer restricted to an ACL group they
-are not in stays out of their reach.
+are not in stays out of their reach. For these manual timers the Director is
+in a corporation the creator also has a character in.
 """
 import asyncio
 from datetime import datetime, timedelta
@@ -17,7 +18,7 @@ from app.db.models import (
 from app.routes.structure_timers import _can_modify_timer
 
 CREATOR, DIRECTOR, MANAGER = 1, 2, 3
-DIRECTOR_CHAR, DIRECTOR_CORP = 91000002, 98000002
+CREATOR_CHAR, DIRECTOR_CHAR, DIRECTOR_CORP = 91000001, 91000002, 98000002
 
 
 def _run(coro):
@@ -43,6 +44,11 @@ def db(tmp_path, monkeypatch):
                 corporation_id=DIRECTOR_CORP, access_token="a", refresh_token="r",
                 token_expiry=datetime.utcnow() + timedelta(days=1),
                 scopes="esi-characters.read_corporation_roles.v1"))
+            # A plain member of the Director's corporation, no roles scope.
+            s.add(Character(
+                character_id=CREATOR_CHAR, character_name="Creator", user_id=CREATOR,
+                corporation_id=DIRECTOR_CORP, access_token="a", refresh_token="r",
+                token_expiry=datetime.utcnow() + timedelta(days=1), scopes=""))
             s.add(TimerACLGroup(id=10, name="Their corp only", created_by=CREATOR))
             s.add(TimerACLEntry(group_id=10, entry_type="corporation", eve_id=98000999))
             s.add(TimerACLGroup(id=11, name="Includes the director's corp", created_by=CREATOR))

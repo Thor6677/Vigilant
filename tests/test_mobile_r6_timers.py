@@ -79,19 +79,22 @@ ARCHIVED = [
            datetime(2029, 12, 1 + i, 18, 30))
     for i in range(1, 13)
 ]
-GROUP = _NS(id=7, name="Sample Group", entries=[
+GROUP = _NS(id=7, name="Sample Group", created_by=1, entries=[
     _NS(id=3, entry_type="corporation", eve_id=98000001, name="Sample Corp")])
 
 
 def _render(active=ACTIVE, archived=ARCHIVED, *, is_privileged=False, user_id=1, groups=(GROUP,)):
-    # The route decides per timer (modifiable_ids); a privileged viewer may
-    # change every row, anyone else their own.
+    # The route decides per timer (modifiable_ids) and per group
+    # (modifiable_group_ids); a privileged viewer may change every one,
+    # anyone else their own.
     modifiable = {t.id for t in list(active) + list(archived)
                   if is_privileged or t.created_by == user_id}
     return render_page(st_mod, "structure_timers.html", "/structure-timers",
                        active_timers=list(active), archived_timers=list(archived),
                        acl_groups=list(groups), acl_groups_in_use=set(), user_id=user_id,
-                       modifiable_ids=modifiable)
+                       modifiable_ids=modifiable,
+                       modifiable_group_ids={g.id for g in groups
+                                             if is_privileged or g.created_by == user_id})
 
 
 def _cls(attrs):
