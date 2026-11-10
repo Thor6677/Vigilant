@@ -7,7 +7,10 @@ template changes — without a server-side sink, violations only surface
 in DevTools, which doesn't scale across 50+ templates.
 
 Behavior:
-- Always returns 204 (per spec, browsers ignore the response anyway).
+- Returns 204 (per spec, browsers ignore the response anyway), or 413 for
+  a body over `_MAX_BODY_BYTES`.
+- Reads at most `_MAX_BODY_BYTES` and processes at most
+  `_MAX_REPORTS_PER_REQUEST` reports of a batch (ISS-170).
 - Best-effort logging — failures here never propagate to the user.
 - Each line is one JSON object: {ts, ip, ua, doc, directive, blocked,
   source, line, col, policy, disposition, count}.
@@ -84,6 +87,14 @@ _MAX_WRITES_PER_MIN = 20
 # this without bound; evicting the oldest keeps the memory flat and costs
 # only dedupe quality for a client that is already pathological.
 _MAX_WINDOWS = 2000
+
+# Per-request bounds (ISS-170). The two caps above limit the disk and the
+# sink's memory, not what one anonymous request can make the event loop do.
+# The policy's report-uri sends one violation per request, a couple of KB with
+# the policy text, so the body cap leaves ample room; a Reporting API batch is
+# cut to its first few reports.
+_MAX_BODY_BYTES = 64 * 1024
+_MAX_REPORTS_PER_REQUEST = 20
 
 # key -> [window_opened_at, reports_seen_in_window, last_row]
 # `last_row` is kept so the rollup line describes the same violation with a
@@ -197,10 +208,33 @@ def _emit(rows: list[dict]) -> None:
             f.write(json.dumps(row, separators=(",", ":")) + "\n")
 
 
+async def _read_capped(request: Request) -> bytes | None:
+    """The request body, or None once it would pass _MAX_BODY_BYTES.
+
+    A declared length over the cap is refused before anything is read; a
+    body with none (chunked) is counted as it arrives.
+    """
+    declared = request.headers.get("content-length")
+    if declared is not None:
+        try:
+            if int(declared) > _MAX_BODY_BYTES:
+                return None
+        except ValueError:
+            return None
+    body = bytearray()
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > _MAX_BODY_BYTES:
+            return None
+    return bytes(body)
+
+
 @router.post("/csp-report", status_code=204)
 async def csp_report(request: Request) -> Response:
     try:
-        body = await request.body()
+        body = await _read_capped(request)
+        if body is None:
+            return Response(status_code=413)
         # Browsers send either application/csp-report (legacy report-uri,
         # body is {"csp-report": {...}}) or application/reports+json
         # (modern Reporting API, body is [{"type": "csp-violation", ...}]).
@@ -217,7 +251,7 @@ async def csp_report(request: Request) -> Response:
         if isinstance(payload, dict) and "csp-report" in payload:
             violations.append(payload["csp-report"])
         elif isinstance(payload, list):
-            for entry in payload:
+            for entry in payload[:_MAX_REPORTS_PER_REQUEST]:
                 if isinstance(entry, dict):
                     violations.append(entry.get("body") or entry)
         elif isinstance(payload, dict):

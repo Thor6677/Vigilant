@@ -21,6 +21,7 @@ from app.esi.client import refresh_token
 from app.esi import character as esi_char
 from app.sde import lookup as sde
 from app.routes import skill_plan_perms as perms
+from app.utils.paste import paste_limit_error
 
 logger = logging.getLogger(__name__)
 
@@ -974,6 +975,38 @@ async def shared_plan(share_token: str, request: Request, db: AsyncSession = Dep
 
 # ── Import from EVE text ────────────────────────────────────────────────────
 
+# Paste limits (ISS-166). One level per line leaves room for a very large
+# plan; no skill line comes near the length limit.
+SKILL_TEXT_MAX_LINES = 2000
+SKILL_TEXT_MAX_LINE_CHARS = 1000
+# The EFT import below reads one fit.
+FITTING_TEXT_MAX_LINES = 1000
+FITTING_TEXT_MAX_LINE_CHARS = 1000
+
+# "Skill Name V". Each pattern here starts at a run of spaces that follows a
+# non-space, so the engine tries one split per run. The old `^(.+?)\s+...`
+# form retried every position inside a run, which is quadratic in its length
+# (ISS-166). The leftmost match is the one the lazy group used to find.
+_SKILL_LEVEL_RE = re.compile(r'(?<=\S)\s+(I{1,3}V?|IV|V|[1-5])$')
+_EFT_QTY_SUFFIX_RE = re.compile(r'(?<=\S)\s+x\d+$')
+_EFT_MARKER_RE = re.compile(r'(?<=\S)\s+\[.*?\]$')
+
+
+def _paste_refusal(text: str, max_lines: int, max_line_chars: int) -> HTMLResponse | None:
+    too_big = paste_limit_error(text, max_lines=max_lines, max_line_chars=max_line_chars)
+    if too_big:
+        return HTMLResponse(f'<div class="b-empty" style="color:var(--danger);">{too_big}</div>')
+    return None
+
+
+def _split_skill_level(line: str) -> tuple[str, str] | None:
+    """(skill name, level as written) for "Skill Name V" or "Skill Name 5"."""
+    m = _SKILL_LEVEL_RE.search(line)
+    if not m:
+        return None
+    return line[:m.start()], m.group(1)
+
+
 @router.post("/{plan_id}/import", response_class=HTMLResponse)
 async def import_skills(plan_id: int, request: Request, db: AsyncSession = Depends(get_db)):
     user_id = request.session.get("user_id")
@@ -989,6 +1022,9 @@ async def import_skills(plan_id: int, request: Request, db: AsyncSession = Depen
     text = form.get("skill_text", "").strip()
     if not text:
         return HTMLResponse('<div class="b-empty" style="color:var(--danger);">No skill text provided.</div>')
+    refusal = _paste_refusal(text, SKILL_TEXT_MAX_LINES, SKILL_TEXT_MAX_LINE_CHARS)
+    if refusal:
+        return refusal
 
     # Parse lines like "Skill Name I" or "Skill Name 3"
     not_found = []
@@ -999,13 +1035,12 @@ async def import_skills(plan_id: int, request: Request, db: AsyncSession = Depen
         if not line:
             continue
 
-        match = re.match(r'^(.+?)\s+(I{1,3}V?|IV|V|[1-5])$', line)
-        if not match:
+        split = _split_skill_level(line)
+        if not split:
             not_found.append(line)
             continue
 
-        skill_name = match.group(1).strip()
-        level_str = match.group(2)
+        skill_name, level_str = split
         level = ROMAN.get(level_str) or int(level_str)
 
         skill_id = await sde.type_name_to_id(db, skill_name)
@@ -1060,8 +1095,12 @@ def _parse_eft_text(text: str) -> tuple[str | None, list[str]]:
         if not line or line.startswith("["):
             continue
         # Strip "x5" quantity suffix and "[T2]" style offline markers
-        name = re.sub(r'\s+x\d+$', '', line)
-        name = re.sub(r'\s+\[.*?\]$', '', name)
+        name = _EFT_QTY_SUFFIX_RE.sub('', line)
+        # With the closing bracket at the end, the marker pattern's first
+        # candidate always matches. Without one, every " [" on the line was
+        # a candidate scanned to the end: quadratic (ISS-166).
+        if name.endswith("]"):
+            name = _EFT_MARKER_RE.sub('', name)
         # Skip empty slots
         if name.startswith("[Empty ") or name.lower() == "[empty]":
             continue
@@ -1086,6 +1125,9 @@ async def import_from_fitting(plan_id: int, request: Request, db: AsyncSession =
     fitting_text = form.get("fitting_text", "").strip()
     if not fitting_text:
         return HTMLResponse('<div class="b-empty" style="color:var(--danger);">Paste a fitting first.</div>')
+    refusal = _paste_refusal(fitting_text, FITTING_TEXT_MAX_LINES, FITTING_TEXT_MAX_LINE_CHARS)
+    if refusal:
+        return refusal
 
     ship_name, module_names = _parse_eft_text(fitting_text)
 

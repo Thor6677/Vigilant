@@ -6,7 +6,8 @@ system detail pages with celestials and zKillboard activity, and system effects.
 import asyncio
 import json
 import logging
-from collections import Counter, defaultdict
+import time
+from collections import Counter, OrderedDict, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -15,7 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import get_db
+from app.db.models import AsyncSessionLocal, get_db
 from app.esi.client import ESIClient
 from app.sde import lookup as sde
 from app.intel.safety import zkb_get, fetch_killmail
@@ -320,15 +321,106 @@ async def wormhole_system_kills(
     days: int = Query(30, ge=30, le=90),
 ):
     """Lazy-loaded kill activity for a wormhole system."""
+    # Only login-only pages embed this, and a build spends the ESI budget
+    # every signed-in sync shares (ISS-167).
+    if not request.session.get("user_id"):
+        return HTMLResponse("", status_code=401)
     sys_detail = await sde.get_wormhole_system_detail(db, name)
     if not sys_detail:
         return HTMLResponse('<div class="b-empty">System not found.</div>')
 
-    system_id = sys_detail["system_id"]
     # Normalise to one of the supported ranges
     if days not in (30, 60, 90):
         days = 30
 
+    ctx = await _kill_activity(sys_detail["system_id"], days)
+    # The range buttons link back with the name as this request spelled it.
+    return templates.TemplateResponse(request, "partials/wormhole_kills.html",
+                                      {**ctx, "system_name": name})
+
+
+# ── Kill activity (ISS-167) ─────────────────────────────────────────────────
+# A build costs one zKillboard call and one ESI fetch per listed kill, from
+# the ESI budget and throttle that every signed-in sync shares. So a build is
+# reused for a few minutes, runs once per (system, range) however many
+# requests want it, stops fetching at the range's cutoff, and all builds
+# together hold at most KILLMAIL_FETCH_CONCURRENCY of the ten ESI slots
+# app.intel.safety allows, which the gate check uses too.
+KILLS_CACHE_TTL = 300              # seconds; zkb_get keeps the kill list as long
+KILLS_CACHE_ENTRIES = 256
+MAX_KILLMAIL_FETCHES = 200         # zKillboard lists no more than this anyway
+KILLMAIL_FETCH_CONCURRENCY = 5     # what one request used to run on its own
+KILLMAIL_FETCH_BATCH = 10
+
+_NO_KILLS = {"kill_count": 0, "kills": [], "heatmap": [], "corps": [],
+             "alliances": [], "most_recent": None}
+
+_kills_cache: "OrderedDict[tuple[int, int], tuple[float, dict]]" = OrderedDict()
+_kills_building: dict[tuple[int, int], asyncio.Future] = {}
+_kills_fetch_sem: asyncio.Semaphore | None = None
+_kills_loop = None
+
+
+def _kills_fetch_gate() -> asyncio.Semaphore:
+    """The fetch gate for the running loop. asyncio objects belong to one
+    loop: production has one, each test client its own, so builds left by
+    another loop are dropped with its gate."""
+    global _kills_fetch_sem, _kills_loop
+    loop = asyncio.get_running_loop()
+    if _kills_loop is not loop:
+        _kills_building.clear()
+        _kills_fetch_sem, _kills_loop = asyncio.Semaphore(KILLMAIL_FETCH_CONCURRENCY), loop
+    return _kills_fetch_sem
+
+
+async def _kill_activity(system_id: int, days: int) -> dict:
+    """The kill partial's context for one system and range."""
+    gate = _kills_fetch_gate()
+    key = (system_id, days)
+    hit = _kills_cache.get(key)
+    if hit and hit[0] > time.monotonic():
+        _kills_cache.move_to_end(key)
+        return hit[1]
+    build = _kills_building.get(key)
+    if build is None:
+        build = asyncio.ensure_future(_build_kill_activity(system_id, days, gate))
+        _kills_building[key] = build
+        build.add_done_callback(lambda done: _kill_activity_built(key, done))
+    # Shielded, so a request that goes away leaves the build running for
+    # the others waiting on it and for the cache.
+    ctx = await asyncio.shield(build)
+    return ctx if ctx is not None else {**_NO_KILLS, "days": days}
+
+
+def _kill_activity_built(key: tuple[int, int], build: asyncio.Future) -> None:
+    if _kills_building.get(key) is build:
+        del _kills_building[key]
+    # exception() also marks a failure as seen when no request is left.
+    if build.cancelled() or build.exception() is not None or build.result() is None:
+        return
+    _kills_cache[key] = (time.monotonic() + KILLS_CACHE_TTL, build.result())
+    _kills_cache.move_to_end(key)
+    while len(_kills_cache) > KILLS_CACHE_ENTRIES:
+        _kills_cache.popitem(last=False)
+
+
+def _kill_time(km: dict | None) -> datetime | None:
+    if not km or not km.get("killmail_time"):
+        return None
+    try:
+        return datetime.fromisoformat(km["killmail_time"].replace("Z", "+00:00"))
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def _stub_id(stub) -> int:
+    kid = stub.get("killmail_id") if isinstance(stub, dict) else None
+    return kid if isinstance(kid, int) else 0
+
+
+async def _build_kill_activity(system_id: int, days: int, gate: asyncio.Semaphore) -> dict | None:
+    """Fetch and aggregate a system's kills. None when zKillboard lists none
+    (or failed), which is not worth caching."""
     # Fetch recent killmails from zKillboard (up to 200 most recent)
     try:
         kills_data = await zkb_get(f"/systemID/{system_id}/")
@@ -336,17 +428,7 @@ async def wormhole_system_kills(
         kills_data = []
 
     if not kills_data:
-        return templates.TemplateResponse(request, "partials/wormhole_kills.html", {"kill_count": 0,
-            "kills": [],
-            "heatmap": [],
-            "corps": [],
-            "alliances": [],
-            "most_recent": None,
-            "days": days,
-            "system_name": name})
-
-    # Fetch full killmail details from ESI (for timestamps + corp/alliance)
-    sem = asyncio.Semaphore(5)
+        return None
 
     # Build npc flag lookup from zkb data
     npc_flags: dict[int, bool] = {}
@@ -356,7 +438,7 @@ async def wormhole_system_kills(
             npc_flags[kid] = km.get("zkb", {}).get("npc", False)
 
     async def _fetch_km(km_stub):
-        async with sem:
+        async with gate:
             kid = km_stub.get("killmail_id")
             khash = km_stub.get("zkb", {}).get("hash")
             if kid and khash:
@@ -366,10 +448,23 @@ async def wormhole_system_kills(
                     pass
         return None
 
-    full_kms = await asyncio.gather(*[_fetch_km(km) for km in kills_data])
-
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=days)
+
+    # Fetch full killmail details from ESI (for timestamps + corp/alliance),
+    # newest first and a batch at a time. Killmail ids rise with time, so
+    # once a batch reaches past the cutoff everything after it is older
+    # still; a batch with nothing fetched means ESI is failing, so stop
+    # asking it.
+    stubs = sorted(kills_data, key=_stub_id, reverse=True)[:MAX_KILLMAIL_FETCHES]
+    full_kms = []
+    for start in range(0, len(stubs), KILLMAIL_FETCH_BATCH):
+        batch = await asyncio.gather(
+            *[_fetch_km(km) for km in stubs[start:start + KILLMAIL_FETCH_BATCH]])
+        full_kms.extend(batch)
+        times = [t for t in map(_kill_time, batch) if t]
+        if not times or min(times) < cutoff:
+            break
 
     # Age bucket boundaries (thirds of the range)
     third = days // 3
@@ -393,18 +488,10 @@ async def wormhole_system_kills(
     alliance_kills: Counter = Counter()
 
     for km in full_kms:
-        if not km:
+        kill_time = _kill_time(km)
+        if kill_time is None or kill_time < cutoff:
             continue
-        kill_time_str = km.get("killmail_time", "")
         kid = km.get("killmail_id")
-        if not kill_time_str:
-            continue
-        try:
-            kill_time = datetime.fromisoformat(kill_time_str.replace("Z", "+00:00"))
-        except (ValueError, TypeError):
-            continue
-        if kill_time < cutoff:
-            continue
 
         d, h = kill_time.weekday(), kill_time.hour
         heatmap[d][h] += 1
@@ -489,7 +576,9 @@ async def wormhole_system_kills(
 
     # Resolve ship names
     if victim_type_ids:
-        ship_names = await sde.type_ids_to_names(db, list(victim_type_ids))
+        # Its own session: the build can outlive the request that started it.
+        async with AsyncSessionLocal() as db:
+            ship_names = await sde.type_ids_to_names(db, list(victim_type_ids))
         for kill in recent_kills:
             if kill["ship_type_id"]:
                 kill["ship_name"] = ship_names.get(kill["ship_type_id"], f"Type {kill['ship_type_id']}")
@@ -569,7 +658,7 @@ async def wormhole_system_kills(
     # Age bucket labels for the legend
     age_labels = [f"<{third}d", f"{third}-{third*2}d", f"{third*2}-{days}d"]
 
-    return templates.TemplateResponse(request, "partials/wormhole_kills.html", {"kill_count": filtered_count,
+    return {"kill_count": filtered_count,
         "heatmap": heatmap,
         "heatmap_ids": heatmap_ids,
         "heatmap_npc": heatmap_npc,
@@ -581,9 +670,8 @@ async def wormhole_system_kills(
         "days_ago": days_ago,
         "days": days,
         "age_labels": age_labels,
-        "system_name": name,
         "top_corps": top_corps,
-        "top_alliances": top_alliances})
+        "top_alliances": top_alliances}
 
 
 # ── Wormhole Types / Connection Matrix ──────────────────────────────────────

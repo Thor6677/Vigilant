@@ -38,7 +38,8 @@
         </div>
         <div style="padding:0.5rem 0.75rem;">
             <textarea id="raw-paste-text" readonly rows="12"
-                      style="width:100%;padding:0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--muted);font-family:monospace;font-size:10px;line-height:1.5;resize:vertical;">{{ dscan.paste_data }}</textarea>
+                      style="width:100%;padding:0.5rem;background:var(--bg);border:1px solid var(--border);color:var(--muted);font-family:monospace;font-size:10px;line-height:1.5;resize:vertical;">{{ paste_text }}</textarea>
+            {% if paste_cut %}<div class="b-muted-sm" style="margin-top:0.25rem;">Raw paste cut off at {{ "{:,}".format(paste_text | length) }} characters.</div>{% endif %}
         </div>
     </div>
 </div>
@@ -155,6 +156,9 @@
         </div>
         {% endfor %}
         </div>
+        {% if items_total > items | length %}
+        <div class="b-table-row b-muted-sm" style="padding:0.25rem 0.75rem;">Showing the first {{ "{:,}".format(items | length) }} of {{ "{:,}".format(items_total) }}.</div>
+        {% endif %}
     </div>
 </details>
 
