@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 
@@ -99,8 +100,28 @@ def sec_band(sec: float | None) -> str:
 
 
 # Process-level cache for entity ID → name. Alliance/corp names are stable
-# enough that a single fetch per process is plenty for our purposes.
-_entity_name_cache: dict[int, str | None] = {}
+# enough that a resolved name is kept for the life of the process. Only
+# resolved names go here; ids ESI had no name for live in
+# `_entity_name_misses` instead, which expires.
+_entity_name_cache: dict[int, str] = {}
+
+# Ids ESI answered as having no name → the monotonic time after which they
+# may be asked about again. A miss is recorded only from an answer about that
+# id itself: a 200 that left it out, or a 404 for a batch of that id alone.
+# A throttle, a 5xx, a network failure or a refused multi-id batch records
+# nothing, so a passing ESI fault can't blank names until restart.
+ENTITY_NAME_MISS_TTL = 600  # seconds
+_entity_name_misses: dict[int, float] = {}
+
+# ESI refuses a whole /universe/names/ batch (404) when any one id in it is
+# invalid. A refused batch is split in half and each half asked again, at most
+# this many extra calls per resolve, so one bad id neither blanks the good ids
+# beside it nor turns into a call per id. Ids still unresolved when the
+# budget runs out are not cached at all and are asked again next time; the
+# good ones found meanwhile are cached, so each later call narrows the search.
+ENTITY_NAME_SPLIT_CALLS = 8
+
+_NAMES_URL = "https://esi.evetech.net/latest/universe/names/"
 
 
 async def resolve_entity_names(ids: list[int]) -> dict[int, str]:
@@ -108,7 +129,9 @@ async def resolve_entity_names(ids: list[int]) -> dict[int, str]:
     /universe/names/. Returns {id: name} for resolved IDs only. Caches in
     process; safe to call with overlapping IDs from many call sites."""
     out: dict[int, str] = {}
-    missing: list[int] = []
+    # dict, not list: each id once (callers may repeat one), in first-seen order
+    missing: dict[int, None] = {}
+    now = time.monotonic()
     for i in ids:
         if not i:
             continue
@@ -116,35 +139,52 @@ async def resolve_entity_names(ids: list[int]) -> dict[int, str]:
             n = _entity_name_cache[i]
             if n:
                 out[i] = n
+        elif _entity_name_misses.get(i, 0.0) > now:
+            continue
         else:
-            missing.append(i)
+            missing[i] = None
     if not missing:
         return out
+    wanted = list(missing)
+    pending = [wanted[s:s + 1000] for s in range(0, len(wanted), 1000)]
+    splits_left = ENTITY_NAME_SPLIT_CALLS
     try:
         async with httpx.AsyncClient(timeout=15) as http:
-            for chunk_start in range(0, len(missing), 1000):
-                chunk = missing[chunk_start:chunk_start + 1000]
+            while pending:
+                chunk = pending.pop(0)
                 resp = await http.post(
-                    "https://esi.evetech.net/latest/universe/names/",
+                    _NAMES_URL,
                     json=chunk,
                     headers={"Accept": "application/json", "User-Agent": user_agent()},
                 )
-                if resp.status_code != 200:
-                    # Negative-cache the chunk so we don't keep retrying bad IDs
-                    for i in chunk:
-                        _entity_name_cache.setdefault(i, None)
+                if resp.status_code == 404:
+                    if len(chunk) == 1:
+                        # ESI says this one id has no name
+                        _entity_name_misses[chunk[0]] = (
+                            time.monotonic() + ENTITY_NAME_MISS_TTL)
+                    elif splits_left >= 2:
+                        # Some id in here is invalid; it says nothing about the rest
+                        splits_left -= 2
+                        mid = len(chunk) // 2
+                        pending += [chunk[:mid], chunk[mid:]]
                     continue
-                seen: set[int] = set()
+                if resp.status_code != 200:
+                    log.debug("resolve_entity_names: ESI answered %d", resp.status_code)
+                    continue
+                found: dict[int, str] = {}
                 for entry in resp.json():
                     eid = entry.get("id")
                     name = entry.get("name")
                     if isinstance(eid, int) and isinstance(name, str):
-                        _entity_name_cache[eid] = name
-                        out[eid] = name
-                        seen.add(eid)
+                        found[eid] = name
+                for eid, name in found.items():
+                    _entity_name_cache[eid] = name
+                    _entity_name_misses.pop(eid, None)
+                    out[eid] = name
+                expires = time.monotonic() + ENTITY_NAME_MISS_TTL
                 for i in chunk:
-                    if i not in seen:
-                        _entity_name_cache.setdefault(i, None)
+                    if i not in found:
+                        _entity_name_misses[i] = expires
     except Exception as e:
         log.debug("resolve_entity_names: %s", e)
     return out
