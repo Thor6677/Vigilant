@@ -43,6 +43,17 @@ def _validate_kind(kind: str) -> None:
         raise HTTPException(status_code=404, detail="unknown entity kind")
 
 
+# ESI types character, corporation and alliance ids as int32.
+_MAX_ENTITY_ID = 2 ** 31 - 1
+
+
+def _validate_entity_id(entity_id: int) -> None:
+    """ISS-178: an id no character, corporation or alliance can have 404s
+    like an unknown kind, rather than costing an ESI name lookup."""
+    if not 1 <= entity_id <= _MAX_ENTITY_ID:
+        raise HTTPException(status_code=404, detail="unknown entity id")
+
+
 def _window(window: int | None) -> int:
     return window if window in entity_stats.VALID_WINDOWS else entity_stats.DEFAULT_WINDOW
 
@@ -59,6 +70,7 @@ async def entity_page(request: Request, kind: str, entity_id: int):
     if not request.session.get("user_id"):
         return RedirectResponse("/")
     _validate_kind(kind)
+    _validate_entity_id(entity_id)
     name = await _entity_name(kind, entity_id)
     return templates.TemplateResponse(
         request,
