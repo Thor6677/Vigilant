@@ -17,6 +17,14 @@ HUB_ORDER = ("jita", "amarr", "dodixie", "hek", "rens")
 HAUL_SOURCE_HUB = "jita"
 STOCK_DAYS = 7          # how many days of the captured rate one seller brings
 PRICE_CAP = 1.25        # selling price is at most this multiple of the 30-day high
+_EPS = 1e-9             # float slack: a result that is whole on paper must floor to that whole
+
+
+def _floor(x: float) -> int:
+    """math.floor, forgiving a result that is a whole number up to float noise
+    (0.2 * (305 / 7) * 7 is 60.99999999999999, and should count as 61). The
+    slack is 1e-9 of a unit, so it never buys a real extra unit."""
+    return math.floor(x + _EPS)
 
 
 def captured(fig: dict, share: float) -> float:
@@ -41,12 +49,14 @@ def selling_price(fig: dict) -> tuple[float | None, str | None]:
 
 
 def hub_limit(captured_rate: float) -> int:
-    return max(1, math.floor(STOCK_DAYS * captured_rate))
+    return max(1, _floor(STOCK_DAYS * captured_rate))
 
 
 def build_quantity(budget: float, cost: float, limit: int) -> tuple[int, str]:
     """(units, which limit applied): "budget", "hub" or "over_budget"."""
-    affordable = math.floor(budget / cost) if cost > 0 else limit
+    if cost <= 0:
+        return limit, "hub"     # nothing to spend, so only the hub limit applies
+    affordable = _floor(budget / cost)
     if affordable < 1:
         return 1, "over_budget"
     if limit < affordable:
@@ -57,7 +67,11 @@ def build_quantity(budget: float, cost: float, limit: int) -> tuple[int, str]:
 def haul_quantity(ladder: list, budget: float, limit: int) -> tuple[int, float, str] | None:
     """Walk Jita's competing sell orders, cheapest first: (units, average
     price paid, which limit stopped it), or None when nothing is listed. At
-    least one unit is taken even if it costs more than the budget."""
+    least one unit is taken even if it costs more than the budget.
+
+    When more than one limit binds at once the label follows this order: the
+    hub limit wins; otherwise a budget that runs out before the stock does is
+    "budget"; stock fully taken is "jita". Levels with no units are skipped."""
     levels = [(float(p), int(u)) for p, u in ladder if u > 0]
     if not levels:
         return None
@@ -67,7 +81,7 @@ def haul_quantity(ladder: list, budget: float, limit: int) -> tuple[int, float, 
             stopped = "hub"
             break
         room = limit - units
-        affordable = math.floor((budget - spent) / price) if price > 0 else room
+        affordable = _floor((budget - spent) / price) if price > 0 else room
         take = min(available, room, max(affordable, 0))
         units += take
         spent += take * price
@@ -88,7 +102,9 @@ def option(fig: dict, source: str, cost: float, qty: int, qty_limit: str,
     price, flag = selling_price(fig)
     if price is None or fig["demand_30"] <= 0:
         return None
-    stock = 0 if flag == "none_listed" else fig["stock"]
+    # Nothing listed, or every listed unit priced above the price we would list
+    # at (capped): no stock sits ahead of us, so it does not slow the sale.
+    stock = 0 if flag in ("none_listed", "capped") else fig["stock"]
     profit_each = price * (1 - tax - broker) - cost
     days_typical = (stock + qty) / fig["demand_30"]
     units_per_day = min(qty / max(days_typical, 1.0), captured(fig, share))
@@ -151,12 +167,13 @@ def best_for_item(figs: dict[str, dict | None], build_cost: float | None, budget
         return {"status": "no_cost"}
 
     best = None     # (sort key, hub, option, the hub's other options)
-    for index, (hub, fig) in enumerate((h, usable[h]) for h in HUB_ORDER if h in usable):
+    for rank, hub in enumerate(h for h in HUB_ORDER if h in usable):
+        fig = usable[hub]
         opts = _options_at(hub, fig, build_cost, ladder, budget, share, tax, broker)
         for o in opts:
             key = (o["profit_per_day"],
                    o["margin"] if o["margin"] is not None else -math.inf,
-                   -HUB_ORDER.index(hub))
+                   -rank)
             if best is None or key > best[0]:
                 best = (key, hub, o, [x for x in opts if x is not o])
     if best is None:

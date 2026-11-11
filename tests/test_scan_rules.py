@@ -119,7 +119,8 @@ def test_row_carries_tags_and_market_figures():
                demand_30=5, demand_7=5)
     out = r.best_for_item({"rens": rens}, build_cost=100.0, budget=1e6,
                           share=0.2, tax=0, broker=0)
-    assert out["speed"] in ("fast", "steady", "slow", "thin")
+    # qty 7 (hub limit), stock 5, 5/day: (5 + 7) / 5 = 2.4 days, <= 5 -> fast
+    assert out["speed"] == "fast"
     assert out["supply"] == "under"
     assert (out["demand_30"], out["stock"], out["days_of_stock"]) == (5, 5, 1.0)
     assert out["price"] == 160.0 and out["price_flag"] is None
@@ -157,3 +158,76 @@ def test_row_has_no_inf_or_nan_and_zero_cost_margin_is_none():
     out = r.best_for_item({"jita": f}, build_cost=0.0, budget=1e6, share=0.2, tax=0, broker=0)
     assert out["margin"] is None and out["days_of_stock"] is None
     json.dumps(out, allow_nan=False)
+
+
+def test_whole_results_are_not_floored_one_short():
+    # 7 x 0.2 x (305 / 7) is 61 on paper but 60.99999999999999 in floats
+    assert r.hub_limit(0.2 * (305 / 7)) == 61
+    assert r.build_quantity(2273369.28, 2315.04, 10**9) == (982, "budget")
+
+
+def test_haul_exact_budget_takes_the_last_unit_and_never_overspends():
+    ladder = [(1118.22, 5), (1151.65, 1)]
+    budget = 6742.75
+    units, avg, label = r.haul_quantity(ladder, budget, 99)
+    assert units == 6 and label == "jita"
+    assert units * avg <= budget + 0.01
+
+
+def test_build_with_no_cost_is_limited_by_the_hub():
+    assert r.build_quantity(1000, 0, 14) == (14, "hub")
+    assert r.build_quantity(1000, -5.0, 3) == (3, "hub")
+
+
+def test_capped_price_has_no_stock_ahead():
+    kw = dict(demand_30=10, demand_7=10, lowest_sell=500.0, high_30=130.0)
+    big = r.option(fig(stock=500, **kw), "build", 50.0, 14, "hub", 0.2, 0, 0)
+    none = r.option(fig(stock=0, **kw), "build", 50.0, 14, "hub", 0.2, 0, 0)
+    assert big["price_flag"] == "capped"
+    assert big["days_typical"] == pytest.approx(none["days_typical"]) == pytest.approx(1.4)
+    assert big["units_per_day"] == pytest.approx(none["units_per_day"])
+
+
+def test_tie_on_profit_per_day_goes_to_the_higher_margin():
+    amarr = fig(lowest_sell=150.0, high_30=150.0, stock=0, demand_30=10, demand_7=10)
+    rens = fig(lowest_sell=200.0, high_30=200.0, stock=0, demand_30=5, demand_7=5)
+    # amarr: 50 each x 2/day = 100; rens: 100 each x 1/day = 100; margins 0.5 vs 1.0
+    out = r.best_for_item({"amarr": amarr, "rens": rens}, build_cost=100.0,
+                          budget=1e9, share=0.2, tax=0, broker=0)
+    assert out["hub"] == "rens"
+    assert out["profit_per_day"] == pytest.approx(100.0)
+
+
+LADDER = [(100.0, 3), (104.0, 5), (109.0, 50)]
+
+
+def test_haul_stop_label_order_when_limits_coincide():
+    assert r.haul_quantity(LADDER, 1e9, 3) == (3, 100.0, "hub")      # hub limit met exactly at a level's end
+    assert r.haul_quantity(LADDER, 820, 99)[2] == "budget"           # budget ends before stock does
+    assert r.haul_quantity([(100.0, 3)], 300, 99)[2] == "jita"       # all stock taken, budget exact
+    assert r.haul_quantity([(100.0, 0), (101.0, 2)], 1e9, 99) == (2, 101.0, "jita")
+
+
+def test_capped_haul_end_to_end():
+    jita = fig(demand_30=0, demand_7=0, ladder=[(1000.0, 2), (1050.0, 10)])
+    amarr = fig(lowest_sell=2000.0, high_30=1500.0, demand_30=3, demand_7=3, stock=4)
+    out = r.best_for_item({"jita": jita, "amarr": amarr}, build_cost=None, budget=2500,
+                          share=0.2, tax=0.04, broker=0.03)
+    # price: 2000 > 1.25 x 1500 = 1875 -> 1875, capped, so stock (4) counts as 0
+    # captured = 0.2 x 3 = 0.6/day; hub limit floor(7 x 0.6 = 4.2) = 4
+    # haul: 2 @ 1000 = 2000; then 500 left buys 0 @ 1050 -> 2 units, avg 1000, "budget"
+    # profit_each = 1875 x (1 - 0.07) - 1000 = 1743.75 - 1000 = 743.75
+    # days_typical = (0 + 2) / 3 = 0.667; units/day = min(2 / max(0.667, 1), 0.6) = 0.6
+    # profit_per_day = 743.75 x 0.6 = 446.25
+    assert (out["hub"], out["source"]) == ("amarr", "haul")
+    assert out["price_flag"] == "capped" and out["price"] == pytest.approx(1875.0)
+    assert out["qty"] == 2 and out["qty_limit"] == "budget"
+    assert out["cost"] == pytest.approx(1000.0)
+    assert out["profit_each"] == pytest.approx(743.75)
+    assert out["profit_per_day"] == pytest.approx(446.25)
+
+
+def test_no_sales_in_seven_days_earns_nothing_per_day():
+    f = fig(demand_30=10, demand_7=0, stock=0, lowest_sell=200.0, high_30=200.0)
+    o = r.option(f, "build", 100.0, 1, "budget", 0.2, 0, 0)
+    assert o["profit_each"] > 0 and o["profit_per_day"] == 0
