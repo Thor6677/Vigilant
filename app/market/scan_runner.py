@@ -12,11 +12,27 @@ The registry keeps each user's latest job after it ends, so the page can say
 user's old entry, so it is bounded by the number of users, not by scans run.
 
 A job: expand the list -> benchmark each item -> fill the five summaries per
-item -> retry the items that failed, once -> compute rows -> save. Twenty
-item failures in a row stop it early and save what it has as "incomplete".
-Cancelling, or any unexpected error, saves nothing: the previous result stays.
-A watchlist that is gone (or no longer the user's) by save time fails the job
-with nothing saved.
+item -> retry the items that failed, once -> compute rows -> save.
+
+An outage costs EVE's API little (ESI's error budget is the whole app's):
+
+  * the first failed lookup of an item cancels its other lookups; those not
+    yet started never make their request;
+  * STOP_AFTER_FAILED_REQUESTS failed upstream requests in a row, counted
+    across the whole job and reset by any success, stop the job: lookups in
+    flight are cancelled, nothing new starts, and every item not completed
+    counts as failed. So does an error budget below scan_fetch's floor;
+  * a lookup that failed is not requested again by any scan for
+    scan_fetch.FAILURE_TTL: an item with such a lookup fails at once, with no
+    request. The retry pass never waits that out: it is skipped when the job
+    stopped, and otherwise only items whose failed lookups have expired make
+    requests; the rest stay "unavailable" for "retry these" or Rescan.
+
+A stopped job saves what it has as "incomplete". A job that scanned no item
+at all saves nothing and fails with OUTAGE: the previous result stays.
+Cancelling, or any unexpected error, saves nothing either. A watchlist that
+is gone (or no longer the user's) by save time fails the job with nothing
+saved.
 
 The semaphore and pacer belong to one event loop; `reset()` rebuilds them and
 `start()` creates them on first use.
@@ -25,6 +41,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -38,9 +55,15 @@ logger = logging.getLogger(__name__)
 
 MAX_RUNNING = 2
 ITEMS_AT_ONCE = 4            # items worked on together; the Pacer bounds the requests
-STOP_AFTER_FAILURES = 20
+STOP_AFTER_FAILED_REQUESTS = 5
+ROWS_AT_ONCE = 25            # rows computed between yields to the event loop
 ACTIVE = ("queued", "running")
 LIST_GONE = "That list no longer exists."
+FAILED = "The scan failed. Scan again."
+OUTAGE = "EVE's market data is unavailable right now. Your last result is kept."
+# Why a job stopped early, for the log.
+STOPPED_REQUESTS = f"{STOP_AFTER_FAILED_REQUESTS} failed requests in a row"
+STOPPED_BUDGET = "EVE's error budget for the app is low"
 
 
 @dataclass
@@ -88,7 +111,7 @@ def _on_done(job: Job, task: asyncio.Task) -> None:
         if task.cancelled():
             job.state = "cancelled"
         else:
-            job.state, job.message = "failed", "The scan failed. Scan again."
+            job.state, job.message = "failed", FAILED
 
 
 def start(user_id: int, kind: str, ref: int, settings: scan_results.Settings) -> Job:
@@ -131,71 +154,157 @@ def forget(user_id: int) -> None:
         job.task.cancel()
 
 
-async def _wait_all(coros) -> list[asyncio.Task]:
-    """Run coroutines together and return the finished tasks. Every child is
-    finished, and its exception retrieved, before this returns or propagates:
-    if this task is cancelled the unfinished children are cancelled and
-    awaited, and children that had already failed are read so Python does not
-    log "Task exception was never retrieved". (A plain gather also waits for
-    cancelled children on current Python; the point here is retrieval and the
-    guarantee that no child outlives the job.)"""
+class _Stopped(Exception):
+    """The job has stopped, or the item has failed: the request was not made."""
+
+
+class _Tally:
+    """One job's upstream requests. `made` counts them; STOP_AFTER_FAILED_REQUESTS
+    failed in a row (reset by any success) stop the job, as does `halt`.
+    `stopped` is set once the job has stopped, with the reason in `reason`."""
+
+    def __init__(self) -> None:
+        self.made = 0
+        self.failed_in_a_row = 0
+        self.reason: str | None = None
+        self.stopped = asyncio.Event()
+
+    def after(self, ok: bool) -> None:
+        self.made += 1
+        if ok:
+            self.failed_in_a_row = 0
+            return
+        self.failed_in_a_row += 1
+        if self.failed_in_a_row >= STOP_AFTER_FAILED_REQUESTS:
+            self.halt(STOPPED_REQUESTS)
+
+    def halt(self, reason: str) -> None:
+        if self.reason is None:
+            self.reason = reason
+            self.stopped.set()
+
+
+class _ItemTally:
+    """scan_fetch.ensure_summary's `tally` for one item's lookups: no request
+    once the job has stopped or the item has failed (`failed`), and every
+    request counted on the job's tally."""
+
+    def __init__(self, job: _Tally) -> None:
+        self.job = job
+        self.failed = False
+        self.request_failed = False
+
+    def before(self) -> None:
+        if self.job.reason is not None or self.failed:
+            raise _Stopped()
+
+    def after(self, ok: bool) -> None:
+        if not ok:
+            self.failed = self.request_failed = True
+        self.job.after(ok)
+
+
+# Item failures that say nothing new (no request was made); a failed request
+# says nothing new either (the tally has it). Anything else is logged.
+_QUIET = (_Stopped, scan_fetch.RecentlyFailed, scan_fetch.ErrorBudgetLow)
+
+
+async def _wait_all(coros, *, stop: asyncio.Event | None = None,
+                    first_error: bool = False) -> list[asyncio.Task]:
+    """Run coroutines together and return their tasks, every one finished.
+    Waits for all of them, or until `stop` is set or (with `first_error`) one
+    raises: the rest are then cancelled and awaited. Every child is finished,
+    and its exception retrieved, before this returns or propagates: if this
+    task is cancelled the unfinished children are cancelled and awaited, and
+    children that had already failed are read so Python does not log "Task
+    exception was never retrieved"."""
     tasks = [asyncio.ensure_future(c) for c in coros]
+    stopper = asyncio.ensure_future(stop.wait()) if stop is not None else None
+    cut_short = False
     try:
-        await asyncio.wait(tasks)
+        pending = set(tasks)
+        while pending:
+            if stop is not None and stop.is_set():
+                cut_short = True
+                break
+            waiting = pending if stopper is None else pending | {stopper}
+            done, _ = await asyncio.wait(waiting, return_when=asyncio.FIRST_COMPLETED)
+            done.discard(stopper)
+            pending -= done
+            if first_error and any(not t.cancelled() and t.exception() is not None
+                                   for t in done):
+                cut_short = True
+                break
     finally:
         for t in tasks:
             if not t.done():
                 t.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-    if any(t.cancelled() for t in tasks):
-        raise asyncio.CancelledError()
+        extra = [stopper] if stopper is not None else []
+        for t in extra:
+            t.cancel()
+        await asyncio.gather(*tasks, *extra, return_exceptions=True)
+    if not cut_short and any(t.cancelled() for t in tasks):
+        raise asyncio.CancelledError()      # nobody here cancelled it
     return tasks
 
 
-async def _fill_item(type_id: int) -> None:
-    """All five summaries for one item, each on its own session. Raises if any fails."""
+async def _fill_item(type_id: int, tally: _Tally) -> None:
+    """All five summaries for one item, each on its own session. Raises if
+    any fails; the first failure cancels the rest (see `_ItemTally`). An item
+    with a lookup that failed under FAILURE_TTL ago fails at once, starting none."""
+    hubs = list(APPRAISAL_HUBS.values())
+    now = _now()
+    if any(scan_fetch.recently_failed(h["region_id"], type_id, now) for h in hubs):
+        raise scan_fetch.RecentlyFailed(f"type {type_id}")
+    item = _ItemTally(tally)
+
     async def one(hub: dict) -> None:
         async with AsyncSessionLocal() as db:
-            await scan_fetch.ensure_summary(db, hub["region_id"], hub["station_id"],
-                                            type_id, _now(), _pacer)
-    tasks = await _wait_all([one(h) for h in APPRAISAL_HUBS.values()])
-    errors = [t.exception() for t in tasks]      # reads them all: none goes unretrieved
-    for err in errors:
-        if err is not None:
-            raise err
+            try:
+                await scan_fetch.ensure_summary(db, hub["region_id"], hub["station_id"],
+                                                type_id, _now(), _pacer, item)
+            except scan_fetch.ErrorBudgetLow:
+                tally.halt(STOPPED_BUDGET)
+                raise
+            except Exception:
+                item.failed = True          # siblings make no request from here on
+                raise
+    tasks = await _wait_all([one(h) for h in hubs], first_error=True)
+    errors = [e for t in tasks if not t.cancelled()        # reads them all
+              if (e := t.exception()) is not None]
+    if not errors:
+        return
+    # The cause, not a sibling's "not made" that followed it.
+    err = next((e for e in errors if not isinstance(e, _Stopped)), errors[0])
+    if not item.request_failed and not isinstance(err, _QUIET):
+        logger.info("hub scan: item %s failed: %r", type_id, err)
+    raise err
 
 
-async def _fill(job: Job | None, type_ids: list[int]) -> tuple[set[int], bool]:
-    """(items that failed, stopped early?). Advances job.done per item when
-    `job` is given (the main pass; the retry pass passes None)."""
+async def _fill(job: Job | None, type_ids: list[int], tally: _Tally) -> set[int]:
+    """The items that did not complete. Advances job.done per item when `job`
+    is given (the main pass; the retry pass passes None). Once the tally has
+    stopped, the items in flight are cancelled and none is started: they and
+    the items not reached are failed."""
     failed: set[int] = set()
-    streak = 0
-    stop = False
 
     async def item(type_id: int) -> None:
         try:
-            await _fill_item(type_id)
+            await _fill_item(type_id, tally)
         finally:
             if job is not None:
                 job.done += 1
 
     for i in range(0, len(type_ids), ITEMS_AT_ONCE):
+        if tally.reason is not None:
+            failed.update(type_ids[i:])
+            break
         chunk = type_ids[i:i + ITEMS_AT_ONCE]
-        tasks = await _wait_all([item(t) for t in chunk])
+        tasks = await _wait_all([item(t) for t in chunk], stop=tally.stopped)
         for type_id, task in zip(chunk, tasks):
-            err = task.exception()
-            if err is None:
-                streak = 0
-            else:
-                logger.info("hub scan: item %s failed: %s", type_id, err)
+            if task.cancelled() or task.exception() is not None:
                 failed.add(type_id)
-                streak += 1
-                if streak >= STOP_AFTER_FAILURES:
-                    stop = True      # consecutive in list order, checked per item
-        if stop:
-            failed.update(type_ids[i + ITEMS_AT_ONCE:])
-            return failed, True
-    return failed, False
+    return failed
 
 
 async def _routes(db, settings: scan_results.Settings) -> dict:
@@ -208,10 +317,19 @@ async def _routes(db, settings: scan_results.Settings) -> dict:
     return await hub_route.hub_routes(db, settings.origin_system_id, systems)
 
 
+def _outcome(job: Job, stopped: bool) -> str:
+    if job.state == "done":
+        return "incomplete" if stopped else "complete"
+    return job.state
+
+
 async def _run(job: Job) -> None:
+    tally = _Tally()
+    began: float | None = None
     try:
         async with _slots:
             job.state = "running"
+            began = time.monotonic()
             async with AsyncSessionLocal() as db:
                 try:
                     listing = await scan_lists.expand(db, job.user_id, job.kind, job.ref)
@@ -219,6 +337,8 @@ async def _run(job: Job) -> None:
                     job.state, job.message = "failed", LIST_GONE
                     return
                 job.label, job.total = listing.label, len(listing.type_ids)
+                logger.info("hub scan started: user %s, %s %s, %d items",
+                            job.user_id, job.kind, job.ref, job.total)
                 notes = list(listing.notes)
                 if listing.total > len(listing.type_ids):
                     notes.append(f"{len(listing.type_ids)} of {listing.total} scanned; "
@@ -246,11 +366,23 @@ async def _run(job: Job) -> None:
                     routes = ({} if job.settings.origin_system_id is None else
                               {k: hub_route.UNAVAILABLE for k in APPRAISAL_HUBS})
 
-            failed, stopped = await _fill(job, listing.type_ids)
-            if failed and not stopped:
-                # One more try for the ones that failed, without advancing progress.
-                failed, stopped = await _fill(
-                    None, [t for t in listing.type_ids if t in failed])
+            failed = await _fill(job, listing.type_ids, tally)
+            if failed and tally.reason is None:
+                # One more try for the ones that failed, without advancing
+                # progress. It never waits: an item whose failed lookup is
+                # still remembered fails again at once, with no request.
+                failed = await _fill(
+                    None, [t for t in listing.type_ids if t in failed], tally)
+            if tally.reason is not None:
+                logger.warning("hub scan stopped early: user %s, %s %s, %d of %d items "
+                               "done, %d requests, %s", job.user_id, job.kind, job.ref,
+                               job.done, job.total, tally.made, tally.reason)
+            scanned = len(listing.type_ids) - len(failed)
+            if listing.type_ids and scanned == 0:
+                # Nothing to show: keep the previous result rather than
+                # replace it with a page of "unavailable".
+                job.state, job.message = "failed", OUTAGE
+                return
 
             async with AsyncSessionLocal() as db:
                 summaries = await scan_results.load_summaries(db, listing.type_ids)
@@ -266,9 +398,8 @@ async def _run(job: Job) -> None:
                     return
                 await scan_results.save(
                     db, job.user_id, job.kind, job.ref, label=listing.label,
-                    status="incomplete" if stopped else "complete",
-                    item_total=listing.total,
-                    item_scanned=len(listing.type_ids) - len(failed),
+                    status="incomplete" if tally.reason is not None else "complete",
+                    item_total=listing.total, item_scanned=scanned,
                     settings=job.settings, notes=notes, routes=routes, rows=rows,
                     now=_now())
                 job.state = "done"      # saved: a cancel after this keeps the result
@@ -278,4 +409,9 @@ async def _run(job: Job) -> None:
         raise
     except Exception:
         logger.exception("hub scan: job for user %s failed", job.user_id)
-        job.state, job.message = "failed", "The scan failed. Scan again."
+        job.state, job.message = "failed", FAILED
+    finally:
+        if began is not None:
+            logger.info("hub scan ended: user %s, %s %s, %d items, %d requests, %.1f s, %s",
+                        job.user_id, job.kind, job.ref, job.total, tally.made,
+                        time.monotonic() - began, _outcome(job, tally.reason is not None))

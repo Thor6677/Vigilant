@@ -60,6 +60,13 @@ def raw_orders():
     ]
 
 
+@pytest.fixture(autouse=True)
+def no_memory(monkeypatch):
+    """Each test starts with no remembered failures and no error-budget reading."""
+    monkeypatch.setattr(scan_fetch, "_failed", {})
+    monkeypatch.setattr(scan_fetch.rate_limit_tracker, "legacy", None)
+
+
 @pytest.fixture
 def stubs(monkeypatch):
     calls = []
@@ -198,10 +205,13 @@ def test_figures_none_when_a_part_is_missing_or_history_is_stale(factory, stubs)
 
 
 def test_a_failed_orders_fetch_keeps_the_history_part(factory, stubs, monkeypatch):
+    """The second call comes after the failure memory's 90 s (the memory
+    itself is tested below): only the orders part is fetched again."""
     async def boom(region_id, type_id):
         raise RuntimeError("down")
     real = scan_fetch.market_orders._fetch_orders_esi
     monkeypatch.setattr(scan_fetch.market_orders, "_fetch_orders_esi", boom)
+    later = NOW + scan_fetch.FAILURE_TTL
 
     async def go():
         pacer = scan_fetch.Pacer(pause=0)
@@ -217,11 +227,139 @@ def test_a_failed_orders_fetch_keeps_the_history_part(factory, stubs, monkeypatc
                      scan_fetch.figures(row, STATION, NOW))
             stubs.clear()
             monkeypatch.setattr(scan_fetch.market_orders, "_fetch_orders_esi", real)
-            n = await scan_fetch.ensure_summary(db, REGION, STATION, TYPE, NOW, pacer)
+            n = await scan_fetch.ensure_summary(db, REGION, STATION, TYPE, later, pacer)
             return state, n
     state, n = _run(go())
     assert state == (True, None)
     assert n == 1 and stubs == ["orders"]
+    assert scan_fetch._failed == {}                 # the success cleared the pair
+
+
+# ---- failure memory, budget guard, the caller's tally ----
+
+class Tally:
+    def __init__(self, refuse=False):
+        self.events, self.refuse = [], refuse
+
+    def before(self):
+        self.events.append("before")
+        if self.refuse:
+            raise LookupError("stopped")
+
+    def after(self, ok):
+        self.events.append(ok)
+
+
+def test_a_failed_pair_is_not_requested_again_for_ninety_seconds(factory, stubs, monkeypatch):
+    calls = []
+
+    async def down(region_id, type_id):
+        calls.append((region_id, type_id))
+        raise RuntimeError("503")
+    monkeypatch.setattr(scan_fetch.market_history, "_fetch_history_esi", down)
+
+    async def go():
+        pacer = scan_fetch.Pacer(pause=0)
+        out = []
+        async with factory() as db:
+            with pytest.raises(RuntimeError):
+                await scan_fetch.ensure_summary(db, REGION, STATION, TYPE, NOW, pacer)
+            await db.rollback()
+            for at in (NOW + timedelta(seconds=1), NOW + timedelta(seconds=89)):
+                with pytest.raises(scan_fetch.RecentlyFailed):
+                    await scan_fetch.ensure_summary(db, REGION, STATION, TYPE, at, pacer)
+                out.append(len(calls))
+            # Another type in the same region is not affected.
+            with pytest.raises(RuntimeError):
+                await scan_fetch.ensure_summary(db, REGION, STATION, TYPE + 1, NOW, pacer)
+            await db.rollback()
+            out.append(len(calls))
+            with pytest.raises(RuntimeError):         # the window is over: one new request
+                await scan_fetch.ensure_summary(db, REGION, STATION, TYPE,
+                                                NOW + scan_fetch.FAILURE_TTL, pacer)
+            out.append(len(calls))
+        return out
+    assert _run(go()) == [1, 1, 2, 3]
+    assert scan_fetch.recently_failed(REGION, TYPE, NOW + timedelta(seconds=100))
+    assert not scan_fetch.recently_failed(REGION, TYPE, NOW + timedelta(seconds=200))
+    assert stubs == []                                # no orders request after a failed history
+
+
+def test_the_failure_memory_is_bounded(monkeypatch):
+    monkeypatch.setattr(scan_fetch, "MAX_REMEMBERED", 3)
+    for i in range(5):
+        scan_fetch._remember_failure((REGION, i), NOW + timedelta(seconds=i))
+    assert list(scan_fetch._failed) == [(REGION, 2), (REGION, 3), (REGION, 4)]
+    # Expired stamps go on the next insert.
+    scan_fetch._remember_failure((REGION, 9), NOW + timedelta(seconds=3) + scan_fetch.FAILURE_TTL)
+    assert list(scan_fetch._failed) == [(REGION, 4), (REGION, 9)]
+
+
+def test_the_tally_sees_each_request_and_can_refuse_one(factory, stubs, monkeypatch):
+    async def go():
+        pacer = scan_fetch.Pacer(pause=0)
+        ok, refused = Tally(), Tally(refuse=True)
+        async with factory() as db:
+            n = await scan_fetch.ensure_summary(db, REGION, STATION, TYPE, NOW, pacer, ok)
+            fresh = await scan_fetch.ensure_summary(db, REGION, STATION, TYPE, NOW, pacer,
+                                                    refused)
+            with pytest.raises(LookupError):
+                await scan_fetch.ensure_summary(db, REGION, STATION, TYPE + 1, NOW, pacer,
+                                                refused)
+        return n, ok.events, fresh, refused.events
+    n, ok_events, fresh, refused_events = _run(go())
+    assert n == 2 and ok_events == ["before", True, "before", True]
+    assert fresh == 0                                 # nothing stale: the tally is not asked
+    assert refused_events == ["before"]
+    assert stubs == ["history", "orders"]             # the refused call made no request
+    assert scan_fetch._failed == {}                   # and is not remembered as a failure
+
+
+def test_a_failed_request_is_reported_to_the_tally(factory, stubs, monkeypatch):
+    async def down(region_id, type_id):
+        raise RuntimeError("503")
+    monkeypatch.setattr(scan_fetch.market_orders, "_fetch_orders_esi", down)
+
+    async def go():
+        t = Tally()
+        async with factory() as db:
+            with pytest.raises(RuntimeError):
+                await scan_fetch.ensure_summary(db, REGION, STATION, TYPE, NOW,
+                                                scan_fetch.Pacer(pause=0), t)
+        return t.events
+    assert _run(go()) == ["before", True, "before", False]
+
+
+def _legacy(remaining, age_s=0, reset_s=60):
+    from app.esi.rate_limit import LegacyErrorState
+    return LegacyErrorState(remaining=remaining, reset_in_seconds=reset_s,
+                            last_updated=datetime.now(timezone.utc) - timedelta(seconds=age_s))
+
+
+def test_error_budget_low_reads_the_trackers_error_limit(monkeypatch):
+    tracker = scan_fetch.rate_limit_tracker
+    assert scan_fetch.error_budget_low() is False                   # no reading yet
+    monkeypatch.setattr(tracker, "legacy", _legacy(scan_fetch.ERROR_BUDGET_FLOOR))
+    assert scan_fetch.error_budget_low() is False                   # at the floor is fine
+    monkeypatch.setattr(tracker, "legacy", _legacy(scan_fetch.ERROR_BUDGET_FLOOR - 1))
+    assert scan_fetch.error_budget_low() is True
+    monkeypatch.setattr(tracker, "legacy", _legacy(3, age_s=61, reset_s=60))
+    assert scan_fetch.error_budget_low() is False                   # that window has reset
+    assert scan_fetch.ERROR_BUDGET_FLOOR == 30
+
+
+def test_a_low_error_budget_makes_no_request(factory, stubs, monkeypatch):
+    monkeypatch.setattr(scan_fetch.rate_limit_tracker, "legacy", _legacy(5))
+
+    async def go():
+        t = Tally()
+        async with factory() as db:
+            with pytest.raises(scan_fetch.ErrorBudgetLow):
+                await scan_fetch.ensure_summary(db, REGION, STATION, TYPE, NOW,
+                                                scan_fetch.Pacer(pause=0), t)
+        return t.events
+    assert _run(go()) == ["before"]
+    assert stubs == [] and scan_fetch._failed == {}   # not the pair's fault: not remembered
 
 
 def test_figures_reports_truncation(factory, stubs, monkeypatch):

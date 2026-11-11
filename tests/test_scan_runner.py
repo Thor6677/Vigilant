@@ -1,4 +1,10 @@
-"""Hub Scan runner: queueing, retry, early stop, cancel, failure handling."""
+"""Hub Scan runner: queueing, retry, cancel, failure handling.
+
+`ensure_summary` is faked here and its errors are plain ones, not failed
+requests (it never reports to the tally), so the request-level stop never
+fires: these tests are about the runner's own bookkeeping. The outage rules
+(request-level stop, sibling cancel, failure memory, budget guard) are tested
+against the real `ensure_summary` in test_scan_outage.py."""
 import asyncio
 import gc
 import tempfile
@@ -11,7 +17,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db.models import Base, MarketWatchlist, User
 from app.esi.market import APPRAISAL_HUBS
-from app.market import hub_cost, hub_route, scan_lists, scan_results, scan_runner
+from app.market import hub_cost, hub_route, scan_fetch, scan_lists, scan_results, scan_runner
 
 NOW = datetime(2026, 11, 11, 12, 0, tzinfo=timezone.utc)
 S = scan_results.Settings(5e8, 20, 3.37, 1.5)
@@ -54,6 +60,7 @@ class Env:
         self.fail_once = set()
         self.fail_always = set()
         self.fail_now_region = None      # one hub's call raises at once, ignoring `hold`
+        self.fail_now_items = None       # ...for these items only (None: every item)
         self.per_item = Counter()
         self.pacers = []
         self.price_map = {34: 1.0}
@@ -108,14 +115,15 @@ def env(monkeypatch):
             raise RuntimeError("bad lookup")
         return e.bench
 
-    async def ensure_summary(db, region_id, station_id, type_id, now, pacer):
+    async def ensure_summary(db, region_id, station_id, type_id, now, pacer, tally=None):
         e.calls += 1
         e.seen.add(type_id)
         e.per_item[type_id] += 1
         e.pacers.append(pacer)
         e.inflight += 1
         try:
-            if region_id == e.fail_now_region:
+            if region_id == e.fail_now_region and (e.fail_now_items is None
+                                                   or type_id in e.fail_now_items):
                 raise RuntimeError("fast failure")
             await e.hold.wait()
             if type_id in e.fail_always:
@@ -134,6 +142,7 @@ def env(monkeypatch):
     monkeypatch.setattr(scan_runner.market_lp, "get_price_map", get_price_map)
     monkeypatch.setattr(scan_runner.scan_fetch, "ensure_summary", ensure_summary)
     monkeypatch.setattr(scan_runner, "_now", lambda: NOW)
+    monkeypatch.setattr(scan_fetch, "_failed", {})      # no failure memory from other tests
     # No limits from an earlier loop; start() rebuilds them on this one.
     scan_runner._jobs.clear()
     scan_runner._slots = scan_runner._pacer = None
@@ -225,13 +234,42 @@ def test_item_that_keeps_failing_is_unavailable(env):
     assert env.calls == 2 * 5 + 2 * 5
 
 
-def test_twenty_failures_in_a_row_stop_the_scan(env):
-    env.ids = list(range(3000, 3040))
+def test_a_scan_with_nothing_scanned_keeps_the_last_result(env):
+    """Every item unavailable: nothing is saved over the last good result,
+    and the job says why. (Replaces the old rule, which saved a page of
+    "unavailable" rows as an incomplete result.)"""
+    async def go():
+        scan_runner.reset()
+        first = scan_runner.start(91, "category", 10, S)
+        await wait(first)
+        async with env.factory() as db:
+            before = await scan_results.load(db, 91, "category", 10)
+        env.ids = list(range(3000, 3040))
+        env.fail_always = set(env.ids)
+        second = scan_runner.start(91, "category", 10, S)
+        await wait(second)
+        async with env.factory() as db:
+            after = await scan_results.load(db, 91, "category", 10)
+        return second, before, after
+    job, before, after = _run(go())
+    assert (job.state, job.message) == ("failed", scan_runner.OUTAGE)
+    assert job.message == "EVE's market data is unavailable right now. Your last result is kept."
+    assert before["status"] == "complete" and len(before["rows"]) == 3
+    assert after == before
+
+
+def test_a_scan_with_nothing_scanned_and_no_earlier_result_saves_nothing(env):
     env.fail_always = set(env.ids)
     job, result = _run(_scan_and_load(env))
-    assert result["status"] == "incomplete"
-    assert all(r["status"] == "unavailable" for r in result["rows"])
-    assert env.items_attempted == 20                # ITEMS_AT_ONCE is 4: stops after 5 chunks
+    assert (job.state, job.message) == ("failed", scan_runner.OUTAGE)
+    assert result is None
+
+
+def test_an_empty_list_still_saves_an_empty_result(env):
+    """No items is not an outage: the (empty) result is saved as before."""
+    env.ids = []
+    job, result = _run(_scan_and_load(env))
+    assert job.state == "done" and result["rows"] == [] and result["status"] == "complete"
 
 
 def test_cancel_keeps_the_previous_result(env):
@@ -371,48 +409,65 @@ def test_items_without_blueprints_do_not_add_the_price_note(env):
     assert not any("price list" in n for n in result["notes"])
 
 
-# ---- failure streak ----
+# ---- the request tally (the stop rule's bookkeeping) ----
 
-def test_a_run_of_twenty_inside_one_chunk_is_not_reset_by_a_later_success(env, monkeypatch):
-    monkeypatch.setattr(scan_runner, "ITEMS_AT_ONCE", 6)     # items 19-24 share a chunk
-    env.ids = list(range(3000, 3024))
-    env.fail_always = set(env.ids[:20])                     # 21st succeeds, in the 20th's chunk
-    job, result = _run(_scan_and_load(env))
-    assert result["status"] == "incomplete"
-    assert env.items_attempted == 24                        # the chunk finished; no retry pass
-    assert env.per_item[3000] == 5
-
-
-def test_successes_then_twenty_failures_keep_the_successful_rows(env):
-    env.ids = list(range(3000, 3040))
-    env.fail_always = set(env.ids[8:])                      # 8 ok, then 32 failing
-    job, result = _run(_scan_and_load(env))
-    assert result["status"] == "incomplete"
-    assert result["item_total"] == 40 and result["item_scanned"] == 8
-    by_id = {r["type_id"]: r["status"] for r in result["rows"]}
-    assert all(by_id[i] != "unavailable" for i in env.ids[:8])
-    assert all(by_id[i] == "unavailable" for i in env.ids[8:])
-    assert env.items_attempted == 28                        # 8 ok + 20 failing, in chunks of 4
+def test_five_failed_requests_in_a_row_stop_and_a_success_resets_the_count():
+    async def go():
+        t = scan_runner._Tally()
+        for ok in (False, False, False, False, True, False, False, False, False):
+            t.after(ok)
+        before = (t.reason, t.stopped.is_set(), t.made, t.failed_in_a_row)
+        t.after(False)
+        return before, (t.reason, t.stopped.is_set(), t.made)
+    before, after = _run(go())
+    assert before == (None, False, 9, 4)
+    assert after == (scan_runner.STOPPED_REQUESTS, True, 10)
+    assert scan_runner.STOP_AFTER_FAILED_REQUESTS == 5
 
 
-def test_nineteen_failures_then_a_success_never_stop_the_scan(env):
+def test_a_stopped_tally_lets_no_request_through_and_keeps_its_first_reason():
+    async def go():
+        t = scan_runner._Tally()
+        item = scan_runner._ItemTally(t)
+        item.before()                               # nothing stopped yet: no raise
+        t.halt(scan_runner.STOPPED_BUDGET)
+        t.halt(scan_runner.STOPPED_REQUESTS)
+        with pytest.raises(scan_runner._Stopped):
+            item.before()
+        return t.reason
+    assert _run(go()) == scan_runner.STOPPED_BUDGET
+
+
+def test_an_item_that_failed_makes_no_further_request():
+    async def go():
+        t = scan_runner._Tally()
+        item, other = scan_runner._ItemTally(t), scan_runner._ItemTally(t)
+        item.after(False)
+        with pytest.raises(scan_runner._Stopped):
+            item.before()
+        other.before()                              # another item is not affected
+        return t.made, t.failed_in_a_row, item.request_failed, other.request_failed
+    assert _run(go()) == (1, 1, True, False)
+
+
+def test_a_stopped_job_starts_no_item(env):
+    async def go():
+        scan_runner.reset()
+        t = scan_runner._Tally()
+        t.halt(scan_runner.STOPPED_REQUESTS)
+        return await scan_runner._fill(None, [2001, 2002, 2003], t)
+    assert _run(go()) == {2001, 2002, 2003}
+    assert env.calls == 0
+
+
+def test_items_that_fail_for_other_reasons_never_stop_the_scan(env):
+    """Errors that are not failed requests do not count towards the stop."""
     env.ids = list(range(3000, 3030))
-    env.fail_once = set(env.ids[:19]) | set(env.ids[20:25])  # 19 fail, one ok, then more fail
+    env.fail_once = set(env.ids[:19]) | set(env.ids[20:25])
     job, result = _run(_scan_and_load(env))
     assert result["status"] == "complete"
     assert result["item_scanned"] == 30
     assert all(r["status"] != "unavailable" for r in result["rows"])
-
-
-def test_the_retry_pass_can_stop_early_too(env):
-    env.ids = list(range(3000, 3040))
-    # 19 failing, one ok, 19 failing, one ok: never 20 in a row in the main pass,
-    # but the 38 retried items fail again and are 20+ in a row.
-    ok = {env.ids[19], env.ids[39]}
-    env.fail_always = set(env.ids) - ok
-    job, result = _run(_scan_and_load(env))
-    assert result["status"] == "incomplete"
-    assert result["item_scanned"] == 2
 
 
 # ---- routes ----
@@ -462,8 +517,11 @@ def test_a_failed_child_is_retrieved_when_the_job_is_cancelled(env):
         scan_runner.reset()
         env.hold.clear()
         env.fail_now_region = next(iter(APPRAISAL_HUBS.values()))["region_id"]
+        env.fail_now_items = {2001}
         job = scan_runner.start(91, "category", 10, S)
-        await until(lambda: env.calls == 15 and env.inflight == 12)   # 3 items: 1 failed, 4 held each
+        # 2001 failed at once and its four held lookups were cancelled; the
+        # other two items' ten lookups are held.
+        await until(lambda: env.calls == 15 and env.inflight == 10)
         assert scan_runner.cancel(91) is True
         await wait(job)
         state = job.state

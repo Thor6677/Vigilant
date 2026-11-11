@@ -16,9 +16,28 @@ sell levels within the 10% stock band, for the Jita haul walk).
 
 `ensure_summary` refreshes whichever part is stale. It reuses fresh rows from
 `market_history` when the item has been viewed, and NEVER writes that table.
-Fetch errors propagate: the runner counts them. The history part is committed
-before the orders fetch starts, so a failed orders fetch does not throw away a
-good history fetch.
+Fetch errors propagate unchanged. The history part is committed before the
+orders fetch starts, so a failed orders fetch does not throw away a good
+history fetch.
+
+An outage must cost EVE's API little: ESI allows the app a limited number of
+error responses a minute, and running out blocks every user's ESI traffic.
+So, around each upstream request:
+
+  * failure memory: a (region, type) whose request failed is not requested
+    again for FAILURE_TTL (90 s, as `app.market.history`) by any caller in the
+    process; `ensure_summary` raises `RecentlyFailed` at once instead. The
+    memory is in this module, bounded (expired stamps are dropped on every
+    insert, and never more than MAX_REMEMBERED), and a success clears the pair;
+  * budget guard: inside the pacer, just before the request, an error budget
+    below ERROR_BUDGET_FLOOR (the client's tracker, from EVE's
+    X-Esi-Error-Limit-Remain, while that reading's window lasts) raises
+    `ErrorBudgetLow` and makes no request;
+  * the caller's `tally`, when given: `tally.before()` runs inside the pacer
+    just before the request and may raise to make none (a scan that has
+    stopped); `tally.after(ok)` runs once the request has answered or failed.
+    That is how the runner counts requests and tells a failed request from
+    any other error. Neither runs for a part that needs no request.
 
 Writes are SQLite upserts touching only the columns of the part just fetched,
 and `ensure_summary` is single-flight per (region, type) within the process: an
@@ -45,6 +64,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import MarketScanSummary
+from app.esi.rate_limit import rate_limit_tracker
 from app.market import history as market_history
 from app.market import orders as market_orders
 from app.market.hub_analysis import (STOCK_BAND, WINDOW_DAYS, coverage_end,
@@ -54,6 +74,54 @@ HISTORY_TTL = timedelta(hours=24)
 ORDERS_TTL = timedelta(minutes=15)
 KEEP_DAYS = 40
 MAX_LEVELS = 300
+FAILURE_TTL = market_history.FAILURE_TTL     # no new request for a failed pair this long
+MAX_REMEMBERED = 5000                         # failure stamps kept at most
+ERROR_BUDGET_FLOOR = 30                       # make no request with fewer errors left
+
+
+class RecentlyFailed(Exception):
+    """The pair's request failed less than FAILURE_TTL ago: no request was made."""
+
+
+class ErrorBudgetLow(Exception):
+    """EVE's error budget for the app is below ERROR_BUDGET_FLOOR: no request was made."""
+
+
+# {(region_id, type_id): when its last request failed}, oldest first.
+_failed: dict[tuple[int, int], datetime] = {}
+
+
+def _utc(dt: datetime) -> datetime:
+    return dt.astimezone(timezone.utc) if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def recently_failed(region_id: int, type_id: int, now: datetime) -> bool:
+    """True when the pair's request failed less than FAILURE_TTL before `now`."""
+    stamp = _failed.get((region_id, type_id))
+    return stamp is not None and _utc(now) - stamp < FAILURE_TTL
+
+
+def _remember_failure(key: tuple[int, int], now: datetime) -> None:
+    """Stamp a failed request, dropping expired stamps and, past
+    MAX_REMEMBERED, the oldest."""
+    for k, stamp in list(_failed.items()):
+        if now - stamp >= FAILURE_TTL:
+            del _failed[k]
+    _failed.pop(key, None)          # re-inserted last: the dict stays oldest first
+    _failed[key] = now
+    while len(_failed) > MAX_REMEMBERED:
+        del _failed[next(iter(_failed))]
+
+
+def error_budget_low() -> bool:
+    """True when the client's tracker says EVE's error budget for the app is
+    below ERROR_BUDGET_FLOOR. A reading counts only until its window resets
+    (`reset_in_seconds` after it was taken); none at all is not low."""
+    legacy = rate_limit_tracker.legacy
+    if legacy is None or legacy.remaining >= ERROR_BUDGET_FLOOR:
+        return False
+    age = (datetime.now(timezone.utc) - _utc(legacy.last_updated)).total_seconds()
+    return age < legacy.reset_in_seconds
 
 
 class Pacer:
@@ -172,11 +240,38 @@ def figures(row: MarketScanSummary | None, station_id: int, now: datetime) -> di
     return fig
 
 
+async def _request(fetch, region_id: int, type_id: int, now: datetime, pacer: Pacer,
+                   tally) -> list:
+    """One upstream request for the pair, with the failure memory, the pacer,
+    the budget guard and the caller's tally (see the module docstring)."""
+    key = (region_id, type_id)
+    if recently_failed(region_id, type_id, now):
+        raise RecentlyFailed(f"{region_id}/{type_id} failed under {FAILURE_TTL} ago")
+    async with pacer:
+        if tally is not None:
+            tally.before()
+        if error_budget_low():
+            raise ErrorBudgetLow()
+        try:
+            raw = await fetch(region_id, type_id)
+        except Exception:
+            _remember_failure(key, now)
+            if tally is not None:
+                tally.after(False)
+            raise
+    _failed.pop(key, None)
+    if tally is not None:
+        tally.after(True)
+    return raw
+
+
 async def ensure_summary(db: AsyncSession, region_id: int, station_id: int, type_id: int,
-                         now: datetime, pacer: Pacer) -> int:
+                         now: datetime, pacer: Pacer, tally=None) -> int:
     """Refresh the stale parts of one summary; returns how many upstream
-    requests it made (0–2). Raises whatever the fetch raises. `db` must be the
-    caller's own session: concurrent callers each need their own."""
+    requests it made (0–2). Raises whatever the fetch raises; `RecentlyFailed`
+    or `ErrorBudgetLow` when a part needs a request it will not make; and
+    whatever `tally.before()` raises. `db` must be the caller's own session:
+    concurrent callers each need their own."""
     now = now.astimezone(timezone.utc) if now.tzinfo else now.replace(tzinfo=timezone.utc)
     async with _single_flight((region_id, type_id)):
         # Re-read after the lock: a concurrent caller may just have written it.
@@ -194,15 +289,15 @@ async def ensure_summary(db: AsyncSession, region_id: int, station_id: int, type
                 days = [[r.date.isoformat(), r.volume or 0, r.average, r.highest]
                         for r in stored][-KEEP_DAYS:]
             else:
-                async with pacer:
-                    raw = await market_history._fetch_history_esi(region_id, type_id)
+                raw = await _request(market_history._fetch_history_esi, region_id, type_id,
+                                     now, pacer, tally)
                 requests += 1
                 days, fetched = compact_days(raw), now
             await _upsert(db, region_id, type_id,
                           {"days_json": json.dumps(days), "history_fetched_at": fetched})
         if need_orders:
-            async with pacer:
-                raw = await market_orders._fetch_orders_esi(region_id, type_id)
+            raw = await _request(market_orders._fetch_orders_esi, region_id, type_id,
+                                 now, pacer, tally)
             requests += 1
             levels, truncated = ladder_from_orders(raw, station_id)
             await _upsert(db, region_id, type_id,
