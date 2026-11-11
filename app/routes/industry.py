@@ -34,6 +34,7 @@ from app.industry.manufacturing import (
     _calc_material, _calc_time, _format_time,
 )
 from app.industry import build_finder
+from app.market.hub_view import fmt_cost_input
 from app.industry.invention import (
     DECRYPTORS, attempt_cost, cheapest_source, invented_bpc,
     invention_overhead_per_unit, invention_probability,
@@ -114,6 +115,16 @@ async def industry_search(request: Request, q: str = Query(""), db: AsyncSession
             f'</div>'
         )
     return HTMLResponse("\n".join(html_parts))
+
+
+def _hub_query(cost_per_unit: float | None) -> str:
+    """Query string that opens a market item page's hub comparison with this
+    per-unit build cost. The comparison reads costs to 0.01 ISK, so the cost
+    is written the way it echoes it (up to 2 decimals, trailing zeros
+    trimmed). Empty when there is no cost, or it rounds to nothing."""
+    if cost_per_unit is None or round(cost_per_unit, 2) <= 0:
+        return ""
+    return f"?cost_mode=build&cost={fmt_cost_input(cost_per_unit)}"
 
 
 @router.get("/industry/calculate", response_class=HTMLResponse)
@@ -219,7 +230,21 @@ async def industry_calculate(
     total_time_parallel = max_component_time + main_time_secs  # parallel components, then main
     total_time_sequential = sum(component_times) + main_time_secs  # all sequential
 
+    # Link to the hub comparison with this build's per-unit material cost. An
+    # unpriced material counts as zero above, which would understate the cost,
+    # so the link is offered only when every material has a price.
+    hub_link = None
+    bp_info = await sde.get_blueprint_info(db, type_id)
+    if (bp_info and bp_info["product_type_id"] and total_cost > 0
+            and all(r["unit_price"] > 0 for r in rows)):
+        units = runs * (bp_info["product_quantity"] or 1)
+        query = _hub_query(total_cost / units)
+        if query:
+            hub_link = (f"/market/type/{bp_info['product_type_id']}"
+                        f"{query}&qty={units}")
+
     return templates.TemplateResponse(request, "partials/calc_results.html", {"bp_name": bp_name,
+        "hub_link": hub_link,
         "rows": rows,
         "runs": runs,
         "me": me,
@@ -685,6 +710,7 @@ async def build_finder_results(
         "inv_str": _fmt_isk(r["invention_overhead"]) if r["invention_overhead"] is not None else None,
         "skill_missing": r["skill_missing"],
         "inv_source": r["invention_source"],
+        "hub_query": _hub_query(r["cost_per_unit"]) if r["priced"] else "",
     } for r in ranked]
 
     return templates.TemplateResponse(request, "partials/build_finder_results.html", {

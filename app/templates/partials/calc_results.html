@@ -129,6 +129,13 @@
             </span>
         </div>
 
+        {% if hub_link|default('') %}
+        <div class="b-table-row" style="align-items:baseline;">
+            <span style="flex:1;font-size:11px;color:var(--muted);">Where to sell</span>
+            <a href="{{ hub_link }}" class="b-link m-tap" style="flex:none;font-size:11px;">Compare hubs <span aria-hidden="true">→</span></a>
+        </div>
+        {% endif %}
+
         {% if total_saved_cost > 0 %}
         <div class="b-table-row mfg-total" style="border-top:1px solid var(--border);">
             <span style="flex:3;font-size:10px;color:var(--success);">Material savings from bonuses</span>

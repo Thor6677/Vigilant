@@ -558,6 +558,12 @@ def test_item_page_loads_the_section_and_passes_only_known_keys(app_db):
     assert (f'hx-get="/market/type/{TYPE_ID}/hubs?qty=10&amp;cost_mode=typed&amp;cost=300m"'
             in body)
     assert app_db == []
+    # A build-cost entry link, with a key the section does not know.
+    body = client.get(
+        f"/market/type/{TYPE_ID}?cost_mode=build&cost=250000000&qty=20&junk=1").text
+    assert (f'hx-get="/market/type/{TYPE_ID}/hubs?qty=20&amp;cost_mode=build'
+            f'&amp;cost=250000000"') in body
+    assert "junk" not in body.split('id="mk-hubs"')[1].split(">")[0]
 
 
 # ── the partial on its own ──────────────────────────────────────────────
@@ -961,3 +967,140 @@ def test_quantity_used_shows_in_the_table_and_every_card(app_db):
     results = _element(body, "hc-results")
     # Junk quantity reads as 1: the table header plus each of the four loaded cards.
     assert results.count("Days to sell 1<") == 5
+
+
+# ── entry links ─────────────────────────────────────────────────────────
+
+def _build_finder_html(*rows):
+    from app.routes import industry as industry_mod
+    return render_page(industry_mod, "partials/build_finder_results.html",
+                       "/industry/build-finder/results", rows=list(rows),
+                       total_n=len(rows), shown=len(rows), capped=False, me=10,
+                       compute_ms=1.0, invention_active=False, tables_empty=False,
+                       selected_character_id=0, encryption=4, science=4,
+                       decryptor="none")
+
+
+def _finder_row(**over):
+    row = {"product_type_id": TYPE_ID, "product_name": "Sample Hull", "cost_str": "268.00M",
+           "sell_str": "331.00M", "margin_isk_str": "63.00M", "margin_pct_str": "23.5%",
+           "margin_positive": True, "priced": True, "inv_str": None, "skill_missing": False,
+           "inv_source": None, "hub_query": "?cost_mode=build&cost=268000000"}
+    row.update(over)
+    return row
+
+
+def test_build_finder_rows_link_with_their_build_cost():
+    unpriced = _finder_row(product_type_id=TYPE_ID + 1, priced=False, hub_query="")
+    html = _build_finder_html(_finder_row(), unpriced)
+    assert (f'href="/market/type/{TYPE_ID}?cost_mode=build&amp;cost=268000000"'
+            in html)
+    assert f'href="/market/type/{TYPE_ID + 1}"' in html
+    # Both the desktop name link and the phone "Open market page" link.
+    assert html.count(f'?cost_mode=build&amp;cost=268000000"') == 2
+
+
+def test_build_finder_row_without_hub_query_key_keeps_the_plain_link():
+    row = _finder_row()
+    del row["hub_query"]
+    assert f'href="/market/type/{TYPE_ID}"' in _build_finder_html(row)
+
+
+@pytest.mark.parametrize("cost,param", [
+    (268_000_000.0, "268000000"), (4.35, "4.35"), (0.4, "0.4"), (1234.5678, "1234.57")])
+def test_hub_query_formats_the_cost_the_endpoint_echoes(cost, param):
+    from app.routes import industry as industry_mod
+    assert industry_mod._hub_query(cost) == f"?cost_mode=build&cost={param}"
+
+
+@pytest.mark.parametrize("cost", [None, 0, 0.004, -1.0])
+def test_hub_query_is_empty_without_a_usable_cost(cost):
+    from app.routes import industry as industry_mod
+    assert industry_mod._hub_query(cost) == ""
+
+
+def test_a_cheap_build_cost_survives_from_build_finder_to_the_hub_request(app_db):
+    """4.35 ISK each: Build Finder link -> item page -> hub request URL."""
+    from html import unescape
+    from app.routes import industry as industry_mod
+    html = _build_finder_html(_finder_row(hub_query=industry_mod._hub_query(4.35)))
+    link = unescape(re.search(r'href="(/market/type/[^"]*)"', html).group(1))
+    assert link == f"/market/type/{TYPE_ID}?cost_mode=build&cost=4.35"
+    body = _authed_client().get(link).text
+    assert (f'hx-get="/market/type/{TYPE_ID}/hubs?cost_mode=build&amp;cost=4.35"'
+            in body)
+    # ... and the hub endpoint reads it back as that cost, from the build.
+    part = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?cost_mode=build&cost=4.35").text
+    assert 'value="4.35"' in part
+    assert "from your build" in part
+
+
+def _calc(monkeypatch, *, runs, product_qty, prices, product_id=TYPE_ID, info=True):
+    """industry_calculate's HTML for an invented blueprint: material A x10 and
+    material B x3 per run. Nothing is bought; SDE and prices are stubbed."""
+    from app.routes import industry as industry_mod
+    from tests._mobile import request
+
+    async def materials(db, bp):
+        return [{"type_id": 501, "name": "Sample Ore", "quantity": 10},
+                {"type_id": 502, "name": "Sample Dust", "quantity": 3}]
+
+    async def name(db, tid):
+        return "Sample Hull Blueprint"
+
+    async def none(db, *a):
+        return None
+
+    async def bp_info(db, bp):
+        if not info:
+            return None
+        return {"blueprint_type_id": bp, "product_type_id": product_id,
+                "manufacturing_time": 600, "product_quantity": product_qty}
+
+    async def price_map(db, ids):
+        return prices
+
+    for attr, fn in (("get_blueprint_materials", materials), ("type_id_to_name", name),
+                     ("find_blueprint_for_product", none), ("get_blueprint_time", none),
+                     ("get_blueprint_info", bp_info)):
+        monkeypatch.setattr(industry_mod.sde, attr, fn)
+    monkeypatch.setattr(industry_mod, "_get_price_map", price_map)
+    resp = _run(industry_mod.industry_calculate(
+        request("/industry/calculate"), type_id=9001, me=0, te=0, runs=runs,
+        structure="npc_station", rig="none", security="highsec", db=None))
+    return resp.body.decode()
+
+
+def test_calculator_links_with_per_unit_cost_and_total_quantity(monkeypatch):
+    # 3 runs: 30 Ore at 100 + 9 Dust at 2.5 = 3022.5 ISK; 3 x 5 = 15 units.
+    html = _calc(monkeypatch, runs=3, product_qty=5, prices={501: 100.0, 502: 2.5})
+    assert (f'href="/market/type/{TYPE_ID}?cost_mode=build&amp;cost=201.5&amp;qty=15"'
+            in html)
+    assert "Compare hubs" in html
+    # The link row sits directly after the total-cost row.
+    assert html.index("Total Material Cost (Buy All)") < html.index("Compare hubs")
+
+
+def test_calculator_single_run_single_unit(monkeypatch):
+    html = _calc(monkeypatch, runs=1, product_qty=1, prices={501: 100.0, 502: 2.5})
+    assert f'?cost_mode=build&amp;cost=1007.5&amp;qty=1"' in html
+
+
+def test_calculator_has_no_link_when_a_material_is_unpriced(monkeypatch):
+    html = _calc(monkeypatch, runs=3, product_qty=5, prices={501: 100.0})
+    assert "Compare hubs" not in html
+    assert "cost_mode=build" not in html
+
+
+def test_calculator_has_no_link_without_a_product(monkeypatch):
+    html = _calc(monkeypatch, runs=3, product_qty=5, prices={501: 100.0, 502: 2.5},
+                 info=False)
+    assert "Compare hubs" not in html
+    html = _calc(monkeypatch, runs=3, product_qty=5, prices={501: 100.0, 502: 2.5},
+                 product_id=None)
+    assert "Compare hubs" not in html
+
+
+def test_calc_results_tolerates_a_missing_hub_link():
+    from tests.test_mobile_r3_manufacturing import _render_calc
+    assert "Compare hubs" not in _render_calc()
