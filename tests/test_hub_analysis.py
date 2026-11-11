@@ -77,6 +77,25 @@ def test_trend_boundaries(d7, d30, expected):
     assert ha.trend(d7, d30) == expected
 
 
+def test_seven_day_window_includes_day_minus_7_but_not_minus_8():
+    days = [
+        {"date": TODAY - timedelta(days=7), "volume": 70, "average": 100.0},   # in the 7-day window
+        {"date": TODAY - timedelta(days=8), "volume": 700, "average": 100.0},  # in 30-day only
+    ]
+    fig = _fig(days, [])
+    assert fig["demand_7"] == pytest.approx(10.0)    # 70 / 7
+    assert fig["demand_30"] == pytest.approx(770 / 30)
+
+
+def test_no_average_anywhere_means_no_reference_and_no_outliers():
+    days = [{"date": TODAY - timedelta(days=i), "volume": 10, "average": None}
+            for i in range(1, 11)]
+    fig = _fig(days, [_sell(1.0, 5), _sell(100.0, 5)])
+    assert fig["reference"] is None
+    assert fig["lowest_sell"] == 1.0
+    assert fig["outliers"] == 0
+
+
 # ── orders ──────────────────────────────────────────────────────────────
 
 def test_sell_orders_under_half_the_reference_are_dropped_and_counted():
@@ -119,6 +138,11 @@ def test_stock_counts_units_within_ten_percent_of_the_lowest_sell():
     assert fig["nothing_listed"] is False
 
 
+def test_stock_band_excludes_an_order_just_above_ten_percent():
+    fig = _fig(_days([10] * 30), [_sell(100.0, 5), _sell(110.5, 7)])
+    assert fig["stock"] == 5
+
+
 def test_nothing_listed():
     fig = _fig(_days([10] * 30), [_buy(90.0, 5)])
     assert fig["lowest_sell"] is None
@@ -129,3 +153,194 @@ def test_nothing_listed():
 
 def test_days_of_stock_absent_when_demand_is_zero():
     assert _fig([], [_sell(100.0, 5)])["days_of_stock"] is None
+
+
+# ── list and wait ───────────────────────────────────────────────────────
+
+def _base_fig(**over):
+    fig = {"demand_30": 10.0, "demand_7": 10.0, "trade_days": 30, "trend": "flat",
+           "reference": 100.0, "lowest_sell": 100.0, "highest_buy": 90.0,
+           "outliers": 0, "stock": 12, "days_of_stock": 1.2, "nothing_listed": False}
+    fig.update(over)
+    return fig
+
+
+def test_list_and_wait_profit_margin_and_days():
+    lw = ha.list_and_wait(_base_fig(), qty=8, cost=80.0, sales_tax=0.05, broker_fee=0.01)
+    assert lw["price"] == 100.0
+    assert lw["profit_each"] == pytest.approx(14.0)      # 100 * 0.94 - 80
+    assert lw["margin"] == pytest.approx(0.175)
+    assert lw["days_best"] == pytest.approx(0.8)         # 8 / 10
+    assert lw["days_typical"] == pytest.approx(2.0)      # (12 + 8) / 10
+    assert lw["batch_profit"] == pytest.approx(112.0)
+
+
+def test_list_and_wait_uses_the_reference_price_when_nothing_is_listed():
+    fig = _base_fig(lowest_sell=None, stock=0, days_of_stock=None, nothing_listed=True)
+    lw = ha.list_and_wait(fig, qty=5, cost=None, sales_tax=0.05, broker_fee=0.01)
+    assert lw["price"] == 100.0
+    assert lw["days_typical"] == pytest.approx(0.5)
+
+
+def test_list_and_wait_without_a_cost_has_no_profit():
+    lw = ha.list_and_wait(_base_fig(), qty=8, cost=None, sales_tax=0.05, broker_fee=0.01)
+    assert lw["profit_each"] is None and lw["margin"] is None and lw["batch_profit"] is None
+    assert lw["days_typical"] == pytest.approx(2.0)
+
+
+def test_list_and_wait_with_zero_demand_has_no_days():
+    lw = ha.list_and_wait(_base_fig(demand_30=0.0), qty=8, cost=80.0,
+                          sales_tax=0.05, broker_fee=0.01)
+    assert lw["days_best"] is None and lw["days_typical"] is None
+
+
+def test_list_and_wait_with_no_price_at_all():
+    fig = _base_fig(lowest_sell=None, reference=None, nothing_listed=True)
+    lw = ha.list_and_wait(fig, qty=8, cost=80.0, sales_tax=0.05, broker_fee=0.01)
+    assert lw["price"] is None and lw["profit_each"] is None
+
+
+# ── sell now ────────────────────────────────────────────────────────────
+
+_BUYS = [_buy(95.0, 5), _buy(90.0, 3), _buy(80.0, 10)]
+
+
+def test_sell_now_walks_buy_orders_from_the_top():
+    now = ha.sell_now(_BUYS, qty=10, cost=80.0, sales_tax=0.05)
+    assert now["fillable"] == 10
+    assert now["avg_price"] == pytest.approx(90.5)        # (475 + 270 + 160) / 10
+    assert now["profit_each"] == pytest.approx(5.975)     # 90.5 * 0.95 - 80
+    assert now["batch_profit"] == pytest.approx(59.75)
+
+
+def test_sell_now_batch_larger_than_the_buy_side():
+    now = ha.sell_now(_BUYS, qty=30, cost=None, sales_tax=0.05)
+    assert now["fillable"] == 18
+    assert now["profit_each"] is None
+
+
+def test_sell_now_with_no_buyers():
+    now = ha.sell_now([], qty=10, cost=80.0, sales_tax=0.05)
+    assert now == {"fillable": 0, "avg_price": None, "profit_each": None, "batch_profit": None}
+
+
+# ── tags ────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("typical, expected", [
+    (5.0, "fast"), (5.01, "steady"), (14.0, "steady"), (14.01, "slow"),
+])
+def test_speed_tag_boundaries(typical, expected):
+    assert ha.tags(_base_fig(), typical)[0] == expected
+
+
+@pytest.mark.parametrize("over", [{"trade_days": 14}, {"demand_30": 0.99}])
+def test_thin_market_replaces_the_speed_tag(over):
+    assert ha.tags(_base_fig(**over), 1.0)[0] == "thin"
+
+
+@pytest.mark.parametrize("over, expected", [
+    ({"days_of_stock": 2.99}, "under"),
+    ({"days_of_stock": 3.0}, None),
+    ({"days_of_stock": 30.0}, None),
+    ({"days_of_stock": 30.01}, "saturated"),
+    ({"nothing_listed": True, "lowest_sell": None, "days_of_stock": None}, "under"),
+    ({"nothing_listed": True, "lowest_sell": None, "days_of_stock": None,
+      "demand_30": 0.0}, None),
+])
+def test_supply_tag_boundaries(over, expected):
+    assert ha.tags(_base_fig(**over), 1.0)[1] == expected
+
+
+# ── worked example ──────────────────────────────────────────────────────
+
+def _worked():
+    days = _days([5] * 30, average=330e6)
+    orders = [
+        _sell(331e6, 8), _sell(335e6, 6),      # counted, inside the 10% band
+        _sell(400e6, 20),                      # counted, outside the band
+        _sell(100e6, 1),                       # outlier (< half of 330M)
+        _buy(284e6, 4), _buy(280e6, 2),
+        _buy(270e6, 10, min_volume=20),        # batch of 10 cannot fill it
+    ]
+    return ha.analyse_hub(days, orders, STATION, qty=10, cost=268e6,
+                          sales_tax=0.0337, broker_fee=0.015, today=TODAY)
+
+
+def test_worked_example_figures():
+    r = _worked()
+    assert r["demand_30"] == pytest.approx(5.0)
+    assert r["lowest_sell"] == 331e6
+    assert r["outliers"] == 1
+    assert r["stock"] == 14
+    assert r["days_of_stock"] == pytest.approx(2.8)
+    assert r["list"]["profit_each"] == pytest.approx(46_880_300, rel=1e-6)
+    assert r["list"]["days_best"] == pytest.approx(2.0)
+    assert r["list"]["days_typical"] == pytest.approx(4.8)
+    assert r["now"]["fillable"] == 6
+    assert r["now"]["avg_price"] == pytest.approx(282_666_666.67, rel=1e-6)
+    assert r["now"]["profit_each"] == pytest.approx(5_140_800, rel=1e-4)
+    assert (r["speed"], r["supply"]) == ("fast", "under")
+    assert "buys" not in r
+
+
+def test_worked_example_verdict():
+    v = _worked()["verdict"]
+    assert v.startswith("Sells about 5 a day with only 14 listed.")
+    assert "Your 10 would take roughly 2 – 5 days." in v
+    assert v.endswith("Buy orders can only take 6.")
+
+
+def test_verdict_for_a_thin_market():
+    days = _days([1] * 11 + [None] * 19)
+    r = ha.analyse_hub(days, [_sell(100.0, 3)], STATION, qty=10, cost=None,
+                       sales_tax=0.05, broker_fee=0.01, today=TODAY)
+    assert r["speed"] == "thin"
+    assert r["verdict"].startswith(
+        "Traded on 11 of the last 30 days. Treat these figures as rough.")
+    assert r["verdict"].endswith("No buy orders can take your batch.")
+
+
+def test_verdict_with_no_sales_at_all():
+    r = ha.analyse_hub([], [], STATION, qty=10, cost=None,
+                       sales_tax=0.05, broker_fee=0.01, today=TODAY)
+    assert r["verdict"].startswith("No sales here in the last 30 days.")
+
+
+def test_verdict_flags_a_loss_on_selling_now():
+    r = ha.analyse_hub(_days([10] * 30), [_sell(100.0, 50), _buy(70.0, 100)], STATION,
+                       qty=10, cost=80.0, sales_tax=0.05, broker_fee=0.01, today=TODAY)
+    assert r["verdict"].endswith("Selling to buy orders loses money against your cost.")
+
+
+# ── best picks ──────────────────────────────────────────────────────────
+
+def _res(speed, typical, profit):
+    return {"speed": speed, "list": {"days_typical": typical, "profit_each": profit}}
+
+
+ORDER = ("jita", "amarr", "rens")
+
+
+def test_best_picks_fastest_skips_thin_hubs():
+    picks = ha.best_picks({"jita": _res("steady", 8.0, 25.0),
+                           "amarr": _res("fast", 4.0, 43.0),
+                           "rens": _res("thin", 1.0, 56.0)}, ORDER)
+    assert picks == {"fastest": "amarr", "fastest_thin": False, "margin": "rens"}
+
+
+def test_best_picks_when_every_hub_is_thin():
+    picks = ha.best_picks({"jita": _res("thin", 8.0, None),
+                           "amarr": _res("thin", 4.0, None)}, ORDER)
+    assert picks == {"fastest": "amarr", "fastest_thin": True, "margin": None}
+
+
+def test_best_picks_skips_unavailable_hubs_and_breaks_ties_by_order():
+    picks = ha.best_picks({"jita": _res("fast", 2.0, 10.0),
+                           "amarr": _res("fast", 2.0, 10.0),
+                           "rens": None}, ORDER)
+    assert picks == {"fastest": "jita", "fastest_thin": False, "margin": "jita"}
+
+
+def test_best_picks_with_nothing_usable():
+    assert ha.best_picks({"jita": None}, ORDER) == {
+        "fastest": None, "fastest_thin": False, "margin": None}
