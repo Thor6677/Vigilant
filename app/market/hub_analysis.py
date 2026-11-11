@@ -62,7 +62,9 @@ def market_figures(days: list[dict], orders: list[dict], station_id: int,
     averages = [d["average"] for d in in_30 if d.get("average")]
     reference = median(averages) if averages else None
 
-    hub = [o for o in orders if o.get("location_id") == station_id]
+    # An order with no units left is not on the book, whichever side it is on.
+    hub = [o for o in orders
+           if o.get("location_id") == station_id and (o.get("volume_remain") or 0) > 0]
     sells = [o for o in hub if not o.get("is_buy_order")]
     if reference is not None:
         floor = reference * OUTLIER_FLOOR
@@ -181,8 +183,15 @@ def _d(x: float) -> str:
 
 
 def _days_phrase(best: float, typical: float) -> str:
+    """The whole phrase, hedge word included: 'under a day', 'roughly 2 – 5 days'."""
     lo, hi = _d(best), _d(typical)
-    return f"{lo} days" if lo == hi else f"{lo} – {hi} days"
+    if lo == "under 1" and hi == "under 1":
+        return "under a day"
+    if lo == "under 1":
+        return "up to 1 day" if hi == "1" else f"up to {hi} days"
+    if lo == hi:
+        return "roughly 1 day" if lo == "1" else f"roughly {lo} days"
+    return f"roughly {lo} – {hi} days"
 
 
 def verdict(result: dict, qty: int, has_cost: bool) -> str:
@@ -203,12 +212,16 @@ def verdict(result: dict, qty: int, has_cost: bool) -> str:
     else:
         only = "only " if result["supply"] == "under" else ""
         first = (f"Sells about {_n(demand)} a day with {only}{stock} listed. "
-                 f"Your {qty} would take roughly "
+                 f"Your {qty} would take "
                  f"{_days_phrase(lw['days_best'], lw['days_typical'])}.")
 
+    loses = has_cost and now["profit_each"] is not None and now["profit_each"] < 0
     if now["fillable"] == 0:
         second = "No buy orders can take your batch."
-    elif has_cost and now["profit_each"] is not None and now["profit_each"] < 0:
+    elif loses and now["fillable"] < qty:
+        second = (f"Buy orders can only take {now['fillable']}, "
+                  "at a loss against your cost.")
+    elif loses:
         second = "Selling to buy orders loses money against your cost."
     elif now["fillable"] < qty:
         second = f"Buy orders can only take {now['fillable']}."
@@ -242,6 +255,8 @@ def best_picks(results: dict[str, dict | None], order: tuple[str, ...]) -> dict:
     fastest = min(pool, key=lambda kr: kr[1]["list"]["days_typical"])[0] if pool else None
 
     priced = [(k, r) for k, r in usable if r["list"]["profit_each"] is not None]
+    # "margin" is chosen by list-and-wait profit per unit in ISK: the same ordering
+    # as percentage margin, since the cost is the same at every hub.
     margin = max(priced, key=lambda kr: kr[1]["list"]["profit_each"])[0] if priced else None
 
     return {"fastest": fastest,

@@ -344,3 +344,89 @@ def test_best_picks_skips_unavailable_hubs_and_breaks_ties_by_order():
 def test_best_picks_with_nothing_usable():
     assert ha.best_picks({"jita": None}, ORDER) == {
         "fastest": None, "fastest_thin": False, "margin": None}
+
+
+# ── review fixes ────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("best, typical, expected", [
+    (0.5, 0.9, "under a day"),
+    (0.5, 1.0, "up to 1 day"),
+    (0.5, 3.0, "up to 3 days"),
+    (1.0, 1.2, "roughly 1 day"),
+    (3.0, 3.2, "roughly 3 days"),
+    (2.0, 4.8, "roughly 2 \u2013 5 days"),
+])
+def test_days_phrase(best, typical, expected):
+    assert ha._days_phrase(best, typical) == expected
+
+
+def test_verdict_for_one_unit_reads_naturally():
+    r = ha.analyse_hub(_days([10] * 30), [_sell(100.0, 1)], STATION, qty=1,
+                       cost=None, sales_tax=0.05, broker_fee=0.01, today=TODAY)
+    assert "Your 1 would take under a day." in r["verdict"]
+
+
+def test_sell_order_with_no_units_left_is_ignored():
+    fig = _fig(_days([10] * 30), [_sell(50.0, 0)])
+    assert fig["nothing_listed"] is True
+    assert fig["lowest_sell"] is None
+    assert fig["stock"] == 0
+
+
+def test_orders_with_missing_or_negative_volume_are_ignored():
+    neg = _sell(60.0, -5)
+    missing = {"is_buy_order": False, "price": 70.0, "location_id": STATION,
+               "min_volume": 1}
+    fig = _fig(_days([10] * 30), [neg, missing, _sell(100.0, 5)])
+    assert fig["lowest_sell"] == 100.0
+    assert fig["stock"] == 5
+
+
+def test_buy_order_with_no_units_left_is_ignored():
+    fig = _fig(_days([10] * 30), [_sell(100.0, 5), _buy(95.0, 0), _buy(90.0, 5)])
+    assert fig["highest_buy"] == 90.0
+    assert [o["price"] for o in fig["buys"]] == [90.0]
+
+
+def test_verdict_says_both_when_a_partial_fill_also_loses_money():
+    r = ha.analyse_hub(_days([10] * 30), [_sell(100.0, 50), _buy(70.0, 4)], STATION,
+                       qty=10, cost=80.0, sales_tax=0.05, broker_fee=0.01, today=TODAY)
+    assert r["verdict"].endswith("Buy orders can only take 4, at a loss against your cost.")
+
+
+# ── edge cases of existing behaviour ────────────────────────────────────
+
+def test_sell_now_partial_fill_profit_is_for_the_fillable_units_only():
+    now = ha.sell_now(_BUYS, qty=30, cost=80.0, sales_tax=0.05)
+    assert now["fillable"] == 18
+    assert now["batch_profit"] == pytest.approx(now["profit_each"] * 18)
+
+
+@pytest.mark.parametrize("over", [{"trade_days": 15}, {"demand_30": 1.0}])
+def test_thin_boundaries_pass_from_the_other_side(over):
+    assert ha.tags(_base_fig(**over), 1.0)[0] != "thin"
+
+
+def test_no_days_estimate_is_thin():
+    assert ha.tags(_base_fig(), None)[0] == "thin"
+
+
+def test_verdict_when_nothing_is_listed():
+    r = ha.analyse_hub(_days([10] * 30), [_buy(90.0, 5)], STATION, qty=10, cost=None,
+                       sales_tax=0.05, broker_fee=0.01, today=TODAY)
+    assert r["verdict"].startswith("Sells about 10 a day and nothing is listed.")
+
+
+def test_verdict_when_saturated():
+    r = ha.analyse_hub(_days([1] * 30), [_sell(100.0, 41)], STATION, qty=10, cost=None,
+                       sales_tax=0.05, broker_fee=0.01, today=TODAY)
+    assert r["supply"] == "saturated"
+    assert r["verdict"].startswith(
+        "41 listed against about 1 a day: 41 days of stock ahead of you.")
+
+
+def test_best_picks_margin_with_all_negative_profits_takes_the_least_negative():
+    picks = ha.best_picks({"jita": _res("fast", 2.0, -30.0),
+                           "amarr": _res("fast", 3.0, -5.0),
+                           "rens": _res("fast", 4.0, -12.0)}, ORDER)
+    assert picks["margin"] == "amarr"
