@@ -120,6 +120,14 @@ def cancel(user_id: int) -> bool:
     return True
 
 
+def forget(user_id: int) -> None:
+    """Drop the user's entry, cancelling a queued or running job first (an
+    account being removed). A job cancelled before its save saves nothing."""
+    job = _jobs.pop(user_id, None)
+    if job is not None and job.state in ACTIVE and job.task is not None:
+        job.task.cancel()
+
+
 async def _wait_all(coros) -> list[asyncio.Task]:
     """Run coroutines together and return the finished tasks. Every child is
     finished, and its exception retrieved, before this returns or propagates:

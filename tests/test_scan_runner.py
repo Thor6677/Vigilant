@@ -494,6 +494,57 @@ def test_cancel_on_a_finished_job_returns_false(env):
     assert _run(go()) == ("done", False, False)
 
 
+def test_forget_cancels_a_running_job_and_drops_it(env):
+    """Account removal: the job stops, saves nothing, and its entry goes; the
+    other user's job runs on."""
+    async def go():
+        scan_runner.reset()
+        env.hold.clear()
+        mine = scan_runner.start(91, "category", 10, S)
+        theirs = scan_runner.start(92, "category", 10, S)
+        await until(lambda: env.inflight > 0 and mine.state == "running")
+        scan_runner.forget(91)
+        gone = scan_runner.get(91)
+        await wait(mine)
+        env.hold.set()
+        await wait(theirs)
+        async with env.factory() as db:
+            saved = await scan_results.load(db, 91, "category", 10)
+            other = await scan_results.load(db, 92, "category", 10)
+        return gone, mine.state, saved, scan_runner.get(92), other
+    gone, state, saved, kept, other = _run(go())
+    assert gone is None and state == "cancelled" and saved is None
+    assert kept is not None and kept.state == "done" and other is not None
+
+
+def test_forget_cancels_a_queued_job(env):
+    async def go():
+        scan_runner.reset()
+        env.hold.clear()
+        a = scan_runner.start(91, "category", 10, S)
+        b = scan_runner.start(92, "category", 10, S)
+        c = scan_runner.start(93, "category", 10, S)
+        await until(lambda: c.state == "queued" and a.state == "running")
+        scan_runner.forget(93)
+        await wait(c)
+        env.hold.set()
+        await wait(a)
+        await wait(b)
+        return c.state, scan_runner.get(93)
+    assert _run(go()) == ("cancelled", None)
+
+
+def test_forget_drops_a_finished_job_and_ignores_an_unknown_user(env):
+    async def go():
+        scan_runner.reset()
+        job = scan_runner.start(91, "category", 10, S)
+        await wait(job)
+        scan_runner.forget(91)
+        scan_runner.forget(12345)
+        return job.state, scan_runner.get(91)
+    assert _run(go()) == ("done", None)
+
+
 def test_two_jobs_share_one_pacer(env):
     async def go():
         scan_runner.reset()

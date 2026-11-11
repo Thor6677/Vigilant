@@ -24,9 +24,13 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.db.models  # noqa: F401 — populate Base.metadata before the sweep
-from app.db.models import Base, User, get_db
+from app.db.models import (
+    Base, MarketScanResult, MarketWatchlist, MarketWatchlistItem, User, get_db,
+)
 from app.db.user_ids import _user_reference_columns
-from app.routes.admin import NULLABLE_FKS, USER_OWNED_TABLES, USER_REFS_HANDLED_ELSEWHERE
+from app.routes.admin import (
+    NULLABLE_FKS, USER_OWNED_CHILD_TABLES, USER_OWNED_TABLES, USER_REFS_HANDLED_ELSEWHERE,
+)
 
 
 # ── Static sweep ─────────────────────────────────────────────────────────────
@@ -60,6 +64,26 @@ def test_every_user_reference_column_is_handled_exactly_once():
         f"not find: {stale} — this entry is stale or misspelled; fix or remove "
         f"it from USER_OWNED_TABLES / NULLABLE_FKS / USER_REFS_HANDLED_ELSEWHERE"
     )
+
+
+def test_every_child_of_a_user_owned_table_is_handled():
+    """A table with no user_id of its own, owned through a foreign key into a
+    USER_OWNED_TABLES table (watchlist items through their watchlist), would
+    be orphaned when the parents go. Each must be in USER_OWNED_CHILD_TABLES,
+    and each entry there must be a real foreign key into an owned table."""
+    owned = set(USER_OWNED_TABLES)
+    real = set()
+    for table in Base.metadata.tables.values():
+        if "user_id" in table.columns:
+            continue
+        for col in table.columns:
+            for fk in col.foreign_keys:
+                if fk.column.table.name in owned:
+                    real.add((table.name, col.name, fk.column.table.name))
+    assert real == set(USER_OWNED_CHILD_TABLES), (
+        f"handled: {set(USER_OWNED_CHILD_TABLES)}, found: {real}")
+    for _child, _key, parent in USER_OWNED_CHILD_TABLES:
+        assert "id" in Base.metadata.tables[parent].columns
 
 
 def test_every_nullable_fk_column_is_actually_nullable():
@@ -259,4 +283,76 @@ def test_remove_user_preserves_singleton_attribution_for_a_different_user(remove
                 "SELECT updated_by FROM update_notify_settings WHERE id = 1"))).scalar()
             assert notify_by == CONTROL_ID, notify_by
     import asyncio
+    asyncio.run(_check())
+
+
+def test_remove_user_deletes_hub_scan_rows_and_forgets_their_scan(remove_user_client):
+    """Watchlists, their items (no user_id of their own) and saved scan
+    results go with the account; the control user's stay. The removed user's
+    scan job is cancelled and dropped from the in-memory registry."""
+    from datetime import datetime
+
+    from app.market import scan_runner, scan_results
+
+    stamp = datetime(2026, 11, 1)
+
+    async def _seed():
+        ids = {}
+        async with remove_user_client.SessionLocal() as db:
+            for uid in (TARGET_ID, CONTROL_ID):
+                wl = MarketWatchlist(user_id=uid, name="Sample List", created_at=stamp)
+                db.add(wl)
+                await db.flush()
+                ids[uid] = wl.id
+                db.add_all([MarketWatchlistItem(watchlist_id=wl.id, type_id=t, added_at=stamp)
+                            for t in (2001, 2002)])
+                for kind, ref in (("watchlist", wl.id), ("category", 10)):
+                    db.add(MarketScanResult(user_id=uid, list_kind=kind, list_ref=ref,
+                                            label="Sample", status="complete",
+                                            scanned_at=stamp, opened_at=stamp))
+            await db.commit()
+        return ids
+
+    import asyncio
+    ids = asyncio.run(_seed())
+
+    class _Task:
+        cancelled = False
+
+        def cancel(self):
+            self.cancelled = True
+
+    settings = scan_results.Settings(5e8, 20, 3.37, 1.5)
+    jobs = {}
+    for uid in (TARGET_ID, CONTROL_ID):
+        job = scan_runner.Job(uid, "watchlist", ids[uid], settings, state="running")
+        job.task = _Task()
+        scan_runner._jobs[uid] = jobs[uid] = job
+    try:
+        r = remove_user_client.post(f"/admin/action/remove-user/{TARGET_ID}")
+        assert r.status_code == 200
+        assert scan_runner.get(TARGET_ID) is None and jobs[TARGET_ID].task.cancelled
+        assert scan_runner.get(CONTROL_ID) is jobs[CONTROL_ID]
+        assert not jobs[CONTROL_ID].task.cancelled
+    finally:
+        scan_runner._jobs.pop(TARGET_ID, None)
+        scan_runner._jobs.pop(CONTROL_ID, None)
+
+    async def _check():
+        async with remove_user_client.SessionLocal() as db:
+            def rows(sql, **params):
+                return db.execute(text(sql), params)
+            for uid, expect in ((TARGET_ID, 0), (CONTROL_ID, 1)):
+                lists = (await rows("SELECT COUNT(*) FROM market_watchlist WHERE user_id = :u",
+                                    u=uid)).scalar()
+                results = (await rows("SELECT COUNT(*) FROM market_scan_result WHERE user_id = :u",
+                                      u=uid)).scalar()
+                items = (await rows("SELECT COUNT(*) FROM market_watchlist_item "
+                                    "WHERE watchlist_id = :w", w=ids[uid])).scalar()
+                assert (lists, results, items) == (expect, 2 * expect, 2 * expect), uid
+            # No item is left pointing at a list that is gone.
+            orphans = (await rows(
+                "SELECT COUNT(*) FROM market_watchlist_item WHERE watchlist_id NOT IN "
+                "(SELECT id FROM market_watchlist)")).scalar()
+            assert orphans == 0
     asyncio.run(_check())
