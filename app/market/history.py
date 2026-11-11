@@ -10,6 +10,14 @@ stale/absent stamp triggers exactly one refetch.
 The public entry point is `get_history(region_id, type_id, db)`. Each caller
 passes its own request-scoped session; the service never fans out across a
 shared session, so there are no asyncio.gather write hazards to worry about.
+
+Failed fetches are remembered in memory per (region, type) for `FAILURE_TTL`
+(90 s): within that window a stale/absent stamp does not trigger another ESI
+call — stored rows (possibly none) are served and the meta stamp is left as
+it was. A success clears the stamp; `clear_failure` clears it early and
+`mark_failed` sets it without a fetch (the hub comparison uses both: its
+retry button, and skipping further fetches once ESI has failed mid-request).
+The stamps are per process and lost on restart, which only costs one retry.
 """
 from __future__ import annotations
 
@@ -30,10 +38,32 @@ DEFAULT_REGION_ID = 10000002
 # means at most one wasted refetch per type per day.
 HISTORY_TTL = timedelta(hours=24)
 
+# After a failed fetch, no new attempt for this long (see module docstring).
+FAILURE_TTL = timedelta(seconds=90)
+
+# {(region_id, type_id): when the last fetch failed}
+_failed: dict[tuple[int, int], datetime] = {}
+
 
 def _now() -> datetime:
     """Clock seam — monkeypatched in tests to exercise TTL expiry."""
     return datetime.now(timezone.utc)
+
+
+def recently_failed(region_id: int, type_id: int) -> bool:
+    """True when a fetch for this key failed less than FAILURE_TTL ago."""
+    stamp = _failed.get((region_id, type_id))
+    return stamp is not None and (_now() - stamp) < FAILURE_TTL
+
+
+def mark_failed(region_id: int, type_id: int) -> None:
+    """Record a failure for this key without attempting a fetch."""
+    _failed[(region_id, type_id)] = _now()
+
+
+def clear_failure(region_id: int, type_id: int) -> None:
+    """Forget a remembered failure, so the next `get_history` may fetch."""
+    _failed.pop((region_id, type_id), None)
 
 
 def _aware(dt: datetime | None) -> datetime | None:
@@ -83,7 +113,9 @@ async def _read_rows(db: AsyncSession, region_id: int, type_id: int) -> list[Mar
     return list(result.scalars().all())
 
 
-async def _meta_fresh(db: AsyncSession, region_id: int, type_id: int) -> bool:
+async def is_fresh(db: AsyncSession, region_id: int, type_id: int) -> bool:
+    """True when stored history is younger than HISTORY_TTL, i.e.
+    `get_history` would answer from the database without the network."""
     row = (await db.execute(
         select(MarketHistoryMeta).where(
             MarketHistoryMeta.region_id == region_id,
@@ -165,20 +197,25 @@ async def get_history(
     Fresh meta (< 24h) → rows are read straight from the DB, no network.
     Stale/missing meta → one ESI fetch, upsert, re-read. If the fetch raises
     (ESI down), we fall back to whatever rows are already stored
-    (stale-on-error) rather than surfacing the error to the page.
+    (stale-on-error) rather than surfacing the error to the page, and remember
+    the failure: for FAILURE_TTL the stored rows are served without a fetch.
 
     Rows are ordered by date ascending.
     """
-    if await _meta_fresh(db, region_id, type_id):
+    if await is_fresh(db, region_id, type_id):
+        return await _read_rows(db, region_id, type_id)
+    if recently_failed(region_id, type_id):
         return await _read_rows(db, region_id, type_id)
 
     try:
         raw = await _fetch_history_esi(region_id, type_id)
     except Exception:
         # Stale-on-error: never fail the page over an ESI hiccup — serve what
-        # we have (possibly empty) and leave the meta stamp stale so the next
-        # view retries.
+        # we have (possibly empty) and leave the meta stamp stale so a view
+        # after FAILURE_TTL retries.
+        _failed[(region_id, type_id)] = _now()
         return await _read_rows(db, region_id, type_id)
 
+    _failed.pop((region_id, type_id), None)
     await _upsert(db, region_id, type_id, raw)
     return await _read_rows(db, region_id, type_id)

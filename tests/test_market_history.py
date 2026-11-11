@@ -16,6 +16,7 @@ import os
 import tempfile
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -25,6 +26,16 @@ from app.db.models import Base, MarketHistory, MarketHistoryMeta
 
 REGION = history.DEFAULT_REGION_ID
 TYPE_ID = 34  # Tritanium
+
+
+@pytest.fixture(autouse=True)
+def _clear_failures():
+    """Remembered fetch failures live in a module-level dict; clear them
+    before and after every test so one test's failure cannot suppress
+    another test's fetch."""
+    history._failed.clear()
+    yield
+    history._failed.clear()
 
 
 def _run(coro):
@@ -240,6 +251,138 @@ def test_fetch_error_returns_existing_rows(monkeypatch):
         async with SessionLocal() as db:
             rows = await history.get_history(REGION, TYPE_ID, db)
         assert len(rows) == 3
+
+    _run(scenario())
+
+
+# ── remembered failures ────────────────────────────────────────────────────
+
+def test_history_failure_is_remembered_for_failure_ttl(monkeypatch):
+    engine, SessionLocal = _temp_engine()
+    state = {"n": 0, "fail": True}
+
+    async def fake_fetch(region_id, type_id):
+        state["n"] += 1
+        if state["fail"]:
+            raise RuntimeError("ESI down")
+        return _sample_rows()
+
+    monkeypatch.setattr(history, "_fetch_history_esi", fake_fetch)
+    t0 = datetime(2026, 6, 3, 12, 0, 0, tzinfo=timezone.utc)
+    clock = {"t": t0}
+    monkeypatch.setattr(history, "_now", lambda: clock["t"])
+
+    async def scenario():
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        async with SessionLocal() as db:
+            assert await history.get_history(REGION, TYPE_ID, db) == []
+        assert state["n"] == 1
+
+        # Within FAILURE_TTL: no second upstream attempt.
+        clock["t"] = t0 + history.FAILURE_TTL - timedelta(seconds=1)
+        async with SessionLocal() as db:
+            assert await history.get_history(REGION, TYPE_ID, db) == []
+        assert state["n"] == 1
+
+        # Past it: tried again; a success clears the stamp.
+        state["fail"] = False
+        clock["t"] = t0 + history.FAILURE_TTL + timedelta(seconds=1)
+        async with SessionLocal() as db:
+            assert len(await history.get_history(REGION, TYPE_ID, db)) == 3
+        assert state["n"] == 2
+        assert not history.recently_failed(REGION, TYPE_ID)
+
+    _run(scenario())
+
+
+def test_history_recent_failure_serves_stored_rows_and_keeps_the_meta_stamp(monkeypatch):
+    engine, SessionLocal = _temp_engine()
+    state = {"n": 0, "fail": False}
+
+    async def fake_fetch(region_id, type_id):
+        state["n"] += 1
+        if state["fail"]:
+            raise RuntimeError("ESI down")
+        return _sample_rows()
+
+    monkeypatch.setattr(history, "_fetch_history_esi", fake_fetch)
+    t0 = datetime(2026, 6, 3, 12, 0, 0, tzinfo=timezone.utc)
+    clock = {"t": t0}
+    monkeypatch.setattr(history, "_now", lambda: clock["t"])
+
+    async def scenario():
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        async with SessionLocal() as db:
+            await history.get_history(REGION, TYPE_ID, db)
+        state["fail"] = True
+        clock["t"] = t0 + history.HISTORY_TTL + timedelta(hours=1)
+        async with SessionLocal() as db:
+            assert len(await history.get_history(REGION, TYPE_ID, db)) == 3
+        assert state["n"] == 2
+        clock["t"] += timedelta(seconds=30)
+        async with SessionLocal() as db:
+            assert len(await history.get_history(REGION, TYPE_ID, db)) == 3
+            assert await history.fetched_at(db, REGION, TYPE_ID) == t0
+        assert state["n"] == 2
+
+    _run(scenario())
+
+
+def test_history_clear_failure_allows_an_immediate_retry(monkeypatch):
+    engine, SessionLocal = _temp_engine()
+    state = {"n": 0}
+
+    async def fake_fetch(region_id, type_id):
+        state["n"] += 1
+        raise RuntimeError("ESI down")
+
+    monkeypatch.setattr(history, "_fetch_history_esi", fake_fetch)
+
+    async def scenario():
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with SessionLocal() as db:
+            await history.get_history(REGION, TYPE_ID, db)
+            await history.get_history(REGION, TYPE_ID, db)
+            assert state["n"] == 1
+            assert history.recently_failed(REGION, TYPE_ID)
+            history.clear_failure(REGION, TYPE_ID)
+            assert not history.recently_failed(REGION, TYPE_ID)
+            await history.get_history(REGION, TYPE_ID, db)
+            assert state["n"] == 2
+
+    _run(scenario())
+
+
+def test_history_mark_failed_skips_the_fetch_but_not_fresh_rows(monkeypatch):
+    engine, SessionLocal = _temp_engine()
+    state = {"n": 0}
+
+    async def fake_fetch(region_id, type_id):
+        state["n"] += 1
+        return _sample_rows()
+
+    monkeypatch.setattr(history, "_fetch_history_esi", fake_fetch)
+
+    async def scenario():
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with SessionLocal() as db:
+            # Never fetched and marked failed: no fetch, nothing stored.
+            history.mark_failed(REGION, 35)
+            assert not await history.is_fresh(db, REGION, 35)
+            assert await history.get_history(REGION, 35, db) == []
+            assert state["n"] == 0
+            # Fresh rows are served whatever the stamp says.
+            await history.get_history(REGION, TYPE_ID, db)
+            assert await history.is_fresh(db, REGION, TYPE_ID)
+            history.mark_failed(REGION, TYPE_ID)
+            assert len(await history.get_history(REGION, TYPE_ID, db)) == 3
+            assert state["n"] == 1
 
     _run(scenario())
 

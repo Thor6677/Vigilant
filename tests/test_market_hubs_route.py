@@ -100,8 +100,7 @@ def app_db(factory, monkeypatch):
             yield session
 
     main.app.dependency_overrides[get_db] = override_get_db
-    orders._cache.clear()
-    orders._locks.clear()
+    _clear_market_state()
     calls = []
 
     async def fake_orders(region_id, type_id):
@@ -132,8 +131,16 @@ def app_db(factory, monkeypatch):
     monkeypatch.setattr(market_hubs, "_today", lambda: TODAY)
     yield calls
     main.app.dependency_overrides.pop(get_db, None)
+    _clear_market_state()
+
+
+def _clear_market_state():
+    """Module-level order cache and remembered fetch failures (orders and
+    history) — cleared before and after each test so none leak."""
     orders._cache.clear()
     orders._locks.clear()
+    orders._failed.clear()
+    history._failed.clear()
 
 
 def test_hubs_401_when_unauthenticated():

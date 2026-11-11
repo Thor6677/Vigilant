@@ -134,13 +134,16 @@ def test_security_is_highsec_from_0_45():
 
 @pytest.fixture
 def clean_order_cache():
-    """Empty the module-level order cache before AND after, so a failing
-    assertion cannot leak cached books into later tests."""
+    """Empty the module-level order cache and remembered failures before AND
+    after, so a failing assertion cannot leak cached books (or a failure
+    stamp that suppresses a fetch) into later tests."""
     orders._cache.clear()
     orders._locks.clear()
+    orders._failed.clear()
     yield
     orders._cache.clear()
     orders._locks.clear()
+    orders._failed.clear()
 
 
 def test_orders_fetched_at_is_none_until_a_fetch_succeeds(monkeypatch, clean_order_cache):
@@ -155,6 +158,9 @@ def test_orders_fetched_at_is_none_until_a_fetch_succeeds(monkeypatch, clean_ord
         return []
 
     monkeypatch.setattr(orders, "_fetch_orders_esi", ok)
+    # The failure is remembered for FAILURE_TTL; clearing it models that time
+    # passing (or the retry button).
+    orders.clear_failure(REGION, PRODUCT)
     _run(orders.get_orders(REGION, PRODUCT))
     assert orders.fetched_at(REGION, PRODUCT) is not None
 
