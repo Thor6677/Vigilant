@@ -18,6 +18,13 @@
    into #hs-result when it ends. All behaviour is in the script at the foot of
    this page; the fragments carry none (and no inline handlers: CSP).
 
+   The Watchlist kind has a picker in the form (partials/hub_scan_wl_pick.html)
+   and the manager below the form (partials/hub_scan_watchlist.html), which
+   edits the picked list. Picking a list reloads the manager; every manager
+   reply brings the picker again out of band, and the script then copies the
+   manager's data-current into ref, so the form, the picker and the manager
+   always name the same list (0 once the last one is deleted).
+
    The category picker reuses Build Finder's tree fragments
    (/industry/build-finder/tree and /tree/search); their .bft-* rules and
    the small part of its selection script this page needs are copied here,
@@ -112,6 +119,24 @@
     .hs-grid span { display:block; font-size:9px; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted); }
     .hs-alt { margin-top:0.6rem; padding-top:0.5rem; border-top:1px dashed var(--border); color:var(--muted); font-size:11px; }
 
+    /* Watchlist manager (partials/hub_scan_watchlist.html) and the result's
+       "add all" line. A 300-item list scrolls inside its own box. */
+    .hs-wl-box { border-top:1px solid var(--border); padding:0.9rem; }
+    .hs-wl-bar { display:flex; flex-wrap:wrap; gap:0.6rem 1rem; align-items:flex-end; margin-bottom:0.6rem; }
+    .hs-wl-grow { flex:0 1 18rem; }
+    .hs-wl-in { width:100%; }
+    .hs-wl-count { align-self:center; }
+    .hs-wl-msg { font-size:11px; color:var(--text); min-height:1.2em; margin:0 0 0.5rem; }
+    .hs-wl-head { display:flex; flex-wrap:wrap; gap:0.25rem 0.75rem; align-items:baseline; margin:0.25rem 0 0.6rem; }
+    .hs-wl-found { margin-bottom:0.6rem; }
+    .hs-wl-list { list-style:none; margin:0; padding:0; border-top:1px solid var(--border); }
+    .hs-wl-items { max-height:24rem; overflow-y:auto; }
+    .hs-wl-li { display:flex; justify-content:space-between; align-items:center; gap:0.5rem; padding:0.3rem 0; border-bottom:1px solid var(--border); font-size:12px; }
+    .hs-wl-name { min-width:0; overflow-wrap:anywhere; }
+    .hs-wl-btn { flex:none; padding:2px 10px; font-size:10px; }
+    .hs-addall { display:flex; flex-wrap:wrap; gap:0.6rem 1rem; align-items:flex-end; margin-top:0.75rem; font-size:12px; color:var(--muted); }
+    .hs-addall .b-input { max-width:100%; }
+
     @media (max-width: 640px) {
         .hs-controls { padding:0.75rem; gap:0.6rem; }
         .hs-pick, .hs-fld-kind { flex:1 1 100%; }
@@ -121,6 +146,10 @@
         .hs-seg label { flex:1 1 auto; justify-content:center; min-height:44px; padding:0 0.5rem; letter-spacing:0.04em; }
         .hs-chk { min-height:44px; flex:1 1 100%; }
         .hs-bar { flex-basis:100%; max-width:none; }
+        .hs-wl-box { padding:0.75rem; }
+        .hs-wl-grow, .hs-addall .hs-fl { flex:1 1 100%; }
+        .hs-wl-box .b-input, .hs-addall .b-input { width:100%; min-height:44px; font-size:16px; }
+        .hs-wl-li { min-height:44px; }
     }
 </style>
 
@@ -167,13 +196,7 @@
         </div>
         <div class="hs-fld hs-pick" id="hs-pick-watchlist"{% if kind != 'watchlist' %} hidden{% endif %}>
             <label class="hs-lbl" for="hs-watchlist">Watchlist</label>
-            {% if watchlists %}
-            <select id="hs-watchlist" class="b-input">
-                {% for w in watchlists %}<option value="{{ w['id'] }}"{% if kind == 'watchlist' and ref == w['id'] %} selected{% endif %}>{{ w['name'] }}</option>{% endfor %}
-            </select>
-            {% else %}
-            <div class="hs-hint">You have no watchlists yet.</div>
-            {% endif %}
+            {% with wl_lists=watchlists, wl_pick=(ref if kind == 'watchlist' else 0), wl_oob=False %}{% include "partials/hub_scan_wl_pick.html" %}{% endwith %}
         </div>
 
         <div class="hs-row">
@@ -202,6 +225,12 @@
             <span id="hs-start-msg" class="hs-mut" role="status"></span>
         </div>
     </form>
+    {# The watchlist manager (partials/hub_scan_watchlist.html): outside the
+       form, so its fields never travel with a scan and a POST from it never
+       carries the form. Shown with the Watchlist kind. #}
+    <div id="hs-wl-box" class="hs-wl-box"{% if kind != 'watchlist' %} hidden{% endif %}>
+        {% with m=manager, oob=False %}{% include "partials/hub_scan_watchlist.html" %}{% endwith %}
+    </div>
 </div>
 
 <div class="hs">
@@ -232,6 +261,13 @@
             var el = document.getElementById('hs-pick-' + k);
             if (el) el.hidden = k !== kind;
         });
+        var box = document.getElementById('hs-wl-box');
+        if (box) box.hidden = kind !== 'watchlist';
+    }
+    function loadManager(id) {
+        if (!window.htmx) return;
+        htmx.ajax('GET', '/market/watchlists?id=' + encodeURIComponent(id),
+                  {target: '#hs-watchlists', swap: 'outerHTML'});
     }
 
     /* Enter in a field must not submit the form. */
@@ -287,7 +323,10 @@
         });
     }
 
-    /* (b) The list kind and the watchlist picker. */
+    /* (b) The list kind and the watchlist picker. Picking a list reloads the
+       manager for it; the status line follows when the manager arrives (e).
+       The picker is replaced out of band by every manager reply, so it is
+       found by id each time, never kept. */
     form.addEventListener('change', function (e) {
         var t = e.target;
         if (t.name === 'kind') {
@@ -298,7 +337,7 @@
             showStatus(k, ref.value);
         } else if (t.id === 'hs-watchlist') {
             ref.value = t.value;
-            showStatus('watchlist', ref.value);
+            loadManager(t.value);
         }
     });
 
@@ -325,9 +364,43 @@
         if (off) off.disabled = e.target.checked;
     }, true);
 
+    /* (e) The watchlist manager. After it is swapped in (a reply to any of its
+       buttons, or a reload for the picked list) the form scans the list it
+       shows: data-current goes into ref and the status line is asked for
+       again, which also brings the new item count and that list's result. */
+    document.body.addEventListener('htmx:afterSwap', function (e) {
+        var box = e.target;
+        if (!box || box.id !== 'hs-watchlists' || kindValue() !== 'watchlist') return;
+        ref.value = box.getAttribute('data-current') || '0';
+        showStatus('watchlist', ref.value);
+    });
+    /* No form around the manager's fields, so Enter submits nothing; in the
+       name fields it presses Create or Rename. */
+    var ENTER_PRESSES = {'hs-wl-new': 'hs-wl-create', 'hs-wl-rename': 'hs-wl-rename-btn'};
+    document.addEventListener('keydown', function (e) {
+        var id = e.target && ENTER_PRESSES[e.target.id];
+        if (e.key !== 'Enter' || e.isComposing || !id) return;
+        e.preventDefault();
+        var btn = document.getElementById(id);
+        if (btn) btn.click();
+    });
+
+    /* (f) "Add all to watchlist" under a result: the list is in the path, so
+       it is set from the select just before the request goes. */
+    document.body.addEventListener('htmx:configRequest', function (e) {
+        var el = e.detail && e.detail.elt;
+        if (!el || !el.classList || !el.classList.contains('hs-add-all')) return;
+        var pick = document.getElementById('hs-add-wid');
+        if (pick && pick.value) {
+            e.detail.path = '/market/watchlists/' + encodeURIComponent(pick.value) + '/add-result';
+        }
+    });
+
     /* Failed requests the site's error pill must not handle: a start button
        (the pill would replace its label) says so beside Scan, and a result
-       that failed to load says so in #hs-result. */
+       that failed to load says so in #hs-result. The manager's controls say
+       so in its message line (the search in its matches box), and "add all"
+       beside its button. */
     function startButton(evt) {
         var el = evt.detail && evt.detail.elt;
         return el && el.classList && el.classList.contains('hs-start');
@@ -336,8 +409,28 @@
         var line = document.getElementById('hs-start-msg');
         if (line) line.textContent = text;
     }
+    function text(id, value) {
+        var el = document.getElementById(id);
+        if (el) el.textContent = value;
+    }
+    function managerRequest(evt) {
+        var el = evt.detail && evt.detail.elt, target = evt.detail && evt.detail.target;
+        return !!((el && el.closest && el.closest('#hs-watchlists')) ||
+                  (target && target.id === 'hs-watchlists'));
+    }
+    function addAll(evt) {
+        var el = evt.detail && evt.detail.elt;
+        return el && el.classList && el.classList.contains('hs-add-all');
+    }
+    function failure(evt, what) {
+        var status = evt.detail && evt.detail.xhr ? evt.detail.xhr.status : 0;
+        return status === 404 ? 'That list no longer exists. Refresh the page.' : what;
+    }
     document.body.addEventListener('htmx:beforeRequest', function (e) {
         if (startButton(e)) say('');
+        if (addAll(e)) text('hs-add-msg', '');
+        var el = e.detail && e.detail.elt;
+        if (managerRequest(e) && !(el && el.id === 'hs-wl-q')) text('hs-wl-msg', '');
     });
     ['htmx:responseError', 'htmx:sendError', 'htmx:timeout'].forEach(function (name) {
         document.body.addEventListener(name, function (e) {
@@ -350,6 +443,20 @@
                 note.className = 'hs-note';
                 note.textContent = 'Could not load the saved result; refresh to retry.';
                 box.replaceChildren(note);
+            }
+            if (addAll(e)) text('hs-add-msg', failure(e, 'Not added; try again.'));
+            if (managerRequest(e)) {
+                if (el && el.id === 'hs-wl-q') {
+                    text('hs-wl-found', 'The search failed; try again.');
+                } else {
+                    text('hs-wl-msg', failure(e, 'That did not go through; try again.'));
+                }
+                /* A reload for a newly picked list failed: the status line
+                   still follows the picker, which ref already holds. */
+                var target = e.detail && e.detail.target;
+                if (el && !el.closest('#hs-watchlists') && target && target.id === 'hs-watchlists') {
+                    showStatus('watchlist', ref.value);
+                }
             }
         });
     });

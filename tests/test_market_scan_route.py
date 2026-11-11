@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.db.models import Base, MarketWatchlist, User, get_db
 from app.db.sde_models import SDEMarketGroup, SDEStation, SDESystem, SDEType
 from app.esi.market import APPRAISAL_HUBS
-from app.market import hub_prefs, hub_view, scan_results, scan_runner
+from app.market import hub_prefs, hub_view, scan_results, scan_runner, watchlists
 from app.market.scan_results import Settings
 from tests._mobile import source
 from tests.conftest import ensure_user
@@ -296,7 +296,9 @@ def test_page_has_no_inline_event_handlers_and_scripts_carry_the_nonce(app_db):
     scripts = re.findall(r"<script\b[^>]*>", page)
     assert scripts and all('nonce="{{ request.state.csp_nonce }}"' in s for s in scripts)
     assert page.index("{% block content %}") < page.index("<script") < page.index("{% endblock %}", page.index("<script"))
-    for partial in ("partials/hub_scan_result.html", "partials/hub_scan_status.html"):
+    for partial in ("partials/hub_scan_result.html", "partials/hub_scan_status.html",
+                    "partials/hub_scan_watchlist.html", "partials/hub_scan_wl_pick.html",
+                    "partials/hub_scan_wl_found.html"):
         assert "<script" not in source(partial)
 
 
@@ -637,3 +639,476 @@ def test_rendered_markup_has_no_fixed_inline_widths(app_db, factory):
         for style in re.findall(r'style="([^"]*)"', html):
             for px in re.findall(r"width:\s*(\d+)px", style):
                 assert int(px) <= 280, style
+
+
+# ── watchlists ─────────────────────────────────────────────────────────────
+
+async def _first_watchlist_id(factory, user_id):
+    async with factory() as db:
+        return (await watchlists.all_for(db, user_id))[0].id
+
+
+async def _watchlist_ids(factory, user_id):
+    async with factory() as db:
+        return {w.name: w.id for w in await watchlists.all_for(db, user_id)}
+
+
+async def _item_ids(factory, wid):
+    async with factory() as db:
+        return sorted(await watchlists.item_ids(db, wid))
+
+
+async def _add_types(factory, *types):
+    """(type_id, name, market_group_id) rows; a group outside GROUP_ID's
+    subtree, so category 10 still counts one item."""
+    async with factory() as db:
+        db.add_all([SDEType(type_id=t, type_name=n, published=True, market_group_id=g,
+                            group_id=1) for t, n, g in types])
+        await db.commit()
+
+
+async def _load_result(factory, user_id, kind, ref):
+    async with factory() as db:
+        return await scan_results.load(db, user_id, kind, ref)
+
+
+def _current(html):
+    return int(re.search(r'data-current="(\d+)"', _tag(html, 'id="hs-watchlists"')).group(1))
+
+
+def test_watchlist_lifecycle_through_the_routes(app_db, factory):
+    c = _authed_client(USER_ID)
+    html = c.post("/market/watchlists", data={"name": "  Frigates  "}).text
+    assert "Frigates" in html and "List created." in html
+    wid = _run(_first_watchlist_id(factory, USER_ID))
+    assert _current(html) == wid
+    assert "Added." in c.post(f"/market/watchlists/{wid}/items", data={"type_id": "2001"}).text
+    assert "Sample Hull" in c.get(f"/market/watchlists?id={wid}").text
+    assert c.get(f"/market/hub-scan/count?kind=watchlist&ref={wid}").text == "1 item."
+    html = c.post(f"/market/watchlists/{wid}/rename", data={"name": "Hulls"}).text
+    assert "Renamed." in html and 'value="Hulls"' in _tag(html, 'id="hs-wl-rename"')
+    html = c.post(f"/market/watchlists/{wid}/items/2001/delete").text
+    assert "Removed." in html and "No items yet." in html
+    assert c.get(f"/market/hub-scan/count?kind=watchlist&ref={wid}").text == "0 items."
+    html = c.post(f"/market/watchlists/{wid}/delete").text
+    assert "List deleted." in html and _current(html) == 0
+    assert "no longer exists" in c.get(f"/market/hub-scan/count?kind=watchlist&ref={wid}").text
+
+
+def test_manager_without_an_id_shows_the_first_list(app_db, factory):
+    c = _authed_client()
+    assert _current(c.get("/market/watchlists").text) == 0
+    _run(_add_watchlist(factory, USER_ID, "Beta List"))
+    alpha = _run(_add_watchlist(factory, USER_ID, "Alpha List"))
+    for query in ("", "?id=", "?id=0"):
+        assert _current(c.get(f"/market/watchlists{query}").text) == alpha
+
+
+def test_manager_reply_brings_the_picker_out_of_band(app_db, factory):
+    c = _authed_client()
+    first = c.post("/market/watchlists", data={"name": "Alpha List"}).text
+    html = c.post("/market/watchlists", data={"name": "Beta List"}).text
+    ids = _run(_watchlist_ids(factory, USER_ID))
+    pick = html[html.index('<div id="hs-wl-pick"'):]
+    assert 'hx-swap-oob="true"' in _tag(pick, 'id="hs-wl-pick"')
+    assert "selected" in _tag(pick, f'<option value="{ids["Beta List"]}"')
+    assert "selected" not in _tag(pick, f'<option value="{ids["Alpha List"]}"')
+    # After the manager in the reply, never inside it.
+    assert html.index('id="hs-wl-pick"') > html.index('id="hs-watchlists"')
+    assert 'id="hs-wl-pick"' in first
+    # The last list deleted: the picker says there are none.
+    for wid in ids.values():
+        html = c.post(f"/market/watchlists/{wid}/delete").text
+    assert "You have no watchlists yet." in html and _current(html) == 0
+
+
+def test_duplicate_name_shows_the_message_and_keeps_the_current_list(app_db, factory):
+    c = _authed_client()
+    c.post("/market/watchlists", data={"name": "Same"})
+    c.post("/market/watchlists", data={"name": "Zulu"})
+    ids = _run(_watchlist_ids(factory, USER_ID))
+    html = c.post("/market/watchlists", data={"name": "same", "current": str(ids["Zulu"])}).text
+    assert "already have a list" in html and _current(html) == ids["Zulu"]
+    assert "Give the list a name." in c.post("/market/watchlists", data={"name": "  "}).text
+    html = c.post(f"/market/watchlists/{ids['Zulu']}/rename", data={"name": "SAME"}).text
+    assert "already have a list" in html and _current(html) == ids["Zulu"]
+    assert set(_run(_watchlist_ids(factory, USER_ID))) == {"Same", "Zulu"}
+
+
+def test_list_limit_is_the_modules(app_db, factory, monkeypatch):
+    monkeypatch.setattr(watchlists, "MAX_LISTS", 1)
+    c = _authed_client()
+    c.post("/market/watchlists", data={"name": "Only"})
+    assert "up to 1 watchlists" in c.post("/market/watchlists", data={"name": "More"}).text
+    assert set(_run(_watchlist_ids(factory, USER_ID))) == {"Only"}
+
+
+def test_add_item_messages(app_db, factory, monkeypatch):
+    _run(_add_types(factory, (2002, "Spare Hull", 11)))
+    c = _authed_client()
+    c.post("/market/watchlists", data={"name": "Hulls"})
+    wid = _run(_first_watchlist_id(factory, USER_ID))
+    add = f"/market/watchlists/{wid}/items"
+    assert "Added." in c.post(add, data={"type_id": "2001"}).text
+    assert "Already on the list." in c.post(add, data={"type_id": "2001"}).text
+    for junk in ("424242", "abc", "", "-1", "99999999999999999999"):
+        r = c.post(add, data={"type_id": junk})
+        assert r.status_code == 200 and "That is not a market item." in r.text, junk
+    monkeypatch.setattr(watchlists, "MAX_ITEMS", 1)
+    assert "The list is full (1 items)." in c.post(add, data={"type_id": "2002"}).text
+    assert _run(_item_ids(factory, wid)) == [TYPE_ID]
+
+
+def test_other_users_watchlist_is_404_everywhere(app_db, factory):
+    _authed_client(USER_ID).post("/market/watchlists", data={"name": "Mine"})
+    wid = _run(_first_watchlist_id(factory, USER_ID))
+    _authed_client(USER_ID).post(f"/market/watchlists/{wid}/items", data={"type_id": "2001"})
+    _run(save_result(factory, USER_ID, ROWS, kind="watchlist", ref=wid, label="Mine"))
+    other = _authed_client(OTHER_USER_ID)
+    other.post("/market/watchlists", data={"name": "Theirs"})
+    for path, data in ((f"/market/watchlists/{wid}/rename", {"name": "x"}),
+                       (f"/market/watchlists/{wid}/delete", {}),
+                       (f"/market/watchlists/{wid}/items", {"type_id": "2001"}),
+                       (f"/market/watchlists/{wid}/items/2001/delete", {}),
+                       (f"/market/watchlists/{wid}/add-result", {"kind": "category", "ref": "10"}),
+                       ("/market/watchlists/add-item", {"watchlist_id": str(wid), "type_id": "2001"})):
+        assert other.post(path, data=data).status_code == 404, path
+    for path in (f"/market/watchlists?id={wid}", f"/market/watchlists/search?wid={wid}&q=Sample"):
+        assert other.get(path).status_code == 404, path
+    # Nothing of the owner's changed.
+    assert _run(_watchlist_ids(factory, USER_ID)) == {"Mine": wid}
+    assert _run(_item_ids(factory, wid)) == [TYPE_ID]
+    assert _run(_load_result(factory, USER_ID, "watchlist", wid)) is not None
+
+
+def test_junk_and_out_of_range_ids_are_404_not_500(app_db, factory):
+    c = _authed_client()
+    c.post("/market/watchlists", data={"name": "Mine"})
+    wid = _run(_first_watchlist_id(factory, USER_ID))
+    for bad in ("abc", "0", "-1", "1.5", "99999999999999999999", str(2 ** 31)):
+        for path, data in ((f"/market/watchlists/{bad}/rename", {"name": "x"}),
+                           (f"/market/watchlists/{bad}/delete", {}),
+                           (f"/market/watchlists/{bad}/items", {"type_id": "2001"}),
+                           (f"/market/watchlists/{bad}/items/2001/delete", {}),
+                           (f"/market/watchlists/{wid}/items/{bad}/delete", {}),
+                           (f"/market/watchlists/{bad}/add-result", {"kind": "category", "ref": "10"}),
+                           ("/market/watchlists/add-item", {"watchlist_id": bad, "type_id": "2001"})):
+            assert c.post(path, data=data).status_code == 404, (path, data)
+        assert c.get(f"/market/watchlists/search?wid={bad}&q=Sample").status_code == 404
+        if bad != "0":
+            assert c.get(f"/market/watchlists?id={bad}").status_code == 404, bad
+    # The page's own list parameters stay out of SQLite's range too.
+    huge = "99999999999999999999"
+    assert c.get(f"/market/hub-scan/count?kind=watchlist&ref={huge}").text == "Pick a list to scan."
+    assert c.get(f"/market/hub-scan/result?kind=category&ref={huge}").text == ""
+    assert c.get(f"/market/hub-scan?kind=watchlist&ref={huge}").status_code == 200
+    r = c.post(f"/market/watchlists/{wid}/add-result", data={"kind": "category", "ref": huge})
+    assert r.status_code == 200 and r.text == "There is no saved result to add."
+
+
+def test_watchlist_routes_need_a_session(app_db, factory):
+    import app.main as main
+    _authed_client().post("/market/watchlists", data={"name": "Mine"})
+    wid = _run(_first_watchlist_id(factory, USER_ID))
+    anon = TestClient(main.app, base_url="https://testserver")
+    for path in ("/market/watchlists", f"/market/watchlists?id={wid}",
+                 f"/market/watchlists/search?wid={wid}&q=Sample"):
+        assert anon.get(path).status_code == 401, path
+    posting = _anon_client()
+    for path, data in (("/market/watchlists", {"name": "Sneaky"}),
+                       (f"/market/watchlists/{wid}/rename", {"name": "x"}),
+                       (f"/market/watchlists/{wid}/delete", {}),
+                       (f"/market/watchlists/{wid}/items", {"type_id": "2001"}),
+                       (f"/market/watchlists/{wid}/items/2001/delete", {}),
+                       (f"/market/watchlists/{wid}/add-result", {"kind": "category", "ref": "10"}),
+                       ("/market/watchlists/add-item", {"watchlist_id": str(wid), "type_id": "2001"})):
+        assert posting.post(path, data=data).status_code == 401, path
+    assert _run(_watchlist_ids(factory, USER_ID)) == {"Mine": wid}
+
+
+def test_watchlist_posts_without_csrf_are_refused(app_db, factory):
+    c = _authed_client()
+    c.headers.pop("X-CSRF-Token")
+    assert c.post("/market/watchlists", data={"name": "Mine"}).status_code == 403
+    assert _run(_watchlist_ids(factory, USER_ID)) == {}
+
+
+def test_add_all_from_a_result(app_db, factory, monkeypatch):
+    _run(_add_types(factory, (2002, "Losing Hull", 11)))
+    _run(save_result(factory, USER_ID, ROWS))
+    c = _authed_client()
+    c.post("/market/watchlists", data={"name": "From scan"})
+    wid = _run(_first_watchlist_id(factory, USER_ID))
+    add = f"/market/watchlists/{wid}/add-result"
+    # Both priced rows (the losing one too); the row with no sales is not added.
+    assert c.post(add, data={"kind": "category", "ref": "10"}).text == "Added 2."
+    assert _run(_item_ids(factory, wid)) == [TYPE_ID, 2002]
+    assert c.post(add, data={"kind": "category", "ref": "10"}).text.startswith("Nothing new to add")
+    c.post("/market/watchlists", data={"name": "Small"})
+    small = _run(_watchlist_ids(factory, USER_ID))["Small"]
+    monkeypatch.setattr(watchlists, "MAX_ITEMS", 1)
+    text = c.post(f"/market/watchlists/{small}/add-result",
+                  data={"kind": "category", "ref": "10"}).text
+    assert text == "Added 1; 1 did not fit (1 items per list)."
+    # Only the user's own saved result is read.
+    _run(save_result(factory, OTHER_USER_ID, ROWS, ref=11))
+    assert c.post(add, data={"kind": "category", "ref": "11"}).text == \
+        "There is no saved result to add."
+
+
+def test_result_offers_add_all_outside_the_filters(app_db, factory):
+    _run(save_result(factory, USER_ID, ROWS))
+    c = _authed_client()
+    assert "hs-add-all" not in _result(c)                   # no lists yet
+    first = _run(_add_watchlist(factory, USER_ID, "Alpha List"))
+    second = _run(_add_watchlist(factory, USER_ID, "Beta List"))
+    html = _result(c)
+    button = _tag(html, 'class="b-btn hs-add-all"')
+    for attr in (f'hx-post="/market/watchlists/{first}/add-result"', 'hx-target="#hs-add-msg"',
+                 'hx-swap="innerHTML"', 'data-htmx-no-error="1"'):
+        assert attr in button
+    assert '"kind": "category"' in button and '"ref": 10' in button
+    assert "Add all 2 items to watchlist" in html
+    assert f'<option value="{second}">Beta List</option>' in html
+    assert 'name=' not in _tag(html, 'id="hs-add-wid"')
+    filters = html[html.index('<form id="hs-filters"'):html.index("</form>")]
+    assert "hs-add-all" not in filters and "hs-add-wid" not in filters
+    # Nothing priced: nothing to add.
+    _run(save_result(factory, USER_ID, [ROWS[2]]))
+    assert "hs-add-all" not in _result(c)
+
+
+def test_page_script_sets_the_add_all_path_from_the_select():
+    page = source("market_hub_scan.html")
+    i = page.index("htmx:configRequest")
+    block = page[i:page.index("});", i)]
+    assert "hs-add-all" in block and "hs-add-wid" in block and "e.detail.path" in block
+
+
+def test_delete_cancels_only_a_matching_scan(app_db, factory, monkeypatch):
+    cancelled = []
+    monkeypatch.setattr(scan_runner, "cancel", lambda user_id: cancelled.append(user_id) or True)
+    c = _authed_client()
+    c.post("/market/watchlists", data={"name": "Alpha List"})
+    c.post("/market/watchlists", data={"name": "Beta List"})
+    c.post("/market/watchlists", data={"name": "Gamma List"})
+    ids = _run(_watchlist_ids(factory, USER_ID))
+    c.post("/market/hub-scan/start", data={"kind": "watchlist", "ref": str(ids["Alpha List"])})
+    c.post(f"/market/watchlists/{ids['Beta List']}/delete")
+    assert cancelled == []                                     # another list's scan runs on
+    c.post(f"/market/watchlists/{ids['Alpha List']}/delete")
+    assert cancelled == [USER_ID]
+    # A category scan whose ref happens to equal a list id is not that list.
+    scan_runner._jobs[USER_ID].state = "done"
+    c.post("/market/hub-scan/start", data={"kind": "category", "ref": str(ids["Gamma List"])})
+    c.post(f"/market/watchlists/{ids['Gamma List']}/delete")
+    assert cancelled == [USER_ID]
+    # A finished scan of the list is not cancelled either.
+    c.post("/market/watchlists", data={"name": "Delta List"})
+    delta = _run(_watchlist_ids(factory, USER_ID))["Delta List"]
+    scan_runner._jobs[USER_ID].state = "done"
+    c.post("/market/hub-scan/start", data={"kind": "watchlist", "ref": str(delta)})
+    scan_runner._jobs[USER_ID].state = "done"
+    c.post(f"/market/watchlists/{delta}/delete")
+    assert cancelled == [USER_ID]
+
+
+def test_delete_removes_items_and_saved_result(app_db, factory):
+    c = _authed_client()
+    c.post("/market/watchlists", data={"name": "Doomed"})
+    wid = _run(_first_watchlist_id(factory, USER_ID))
+    c.post(f"/market/watchlists/{wid}/items", data={"type_id": "2001"})
+    _run(save_result(factory, USER_ID, ROWS, kind="watchlist", ref=wid, label="Doomed"))
+    _run(save_result(factory, USER_ID, ROWS))
+    c.post(f"/market/watchlists/{wid}/delete")
+    assert _run(_item_ids(factory, wid)) == []
+    assert _run(_load_result(factory, USER_ID, "watchlist", wid)) is None
+    assert _run(_load_result(factory, USER_ID, "category", GROUP_ID)) is not None
+
+
+def test_search_offers_market_items_and_escapes_wildcards(app_db, factory):
+    _run(_add_types(factory, (2002, "Sample Rig", 11), (2003, "Sample Relic", None)))
+    c = _authed_client()
+    c.post("/market/watchlists", data={"name": "Mine"})
+    wid = _run(_first_watchlist_id(factory, USER_ID))
+    html = c.get(f"/market/watchlists/search?wid={wid}&q=sample").text
+    assert "Sample Hull" in html and "Sample Rig" in html and "Sample Relic" not in html
+    add = _tag(html, 'aria-label="Add Sample Hull"')
+    for attr in (f'hx-post="/market/watchlists/{wid}/items"', 'hx-target="#hs-watchlists"',
+                 'hx-swap="outerHTML"', 'hx-include="#hs-wl-q"', 'data-htmx-no-error="1"'):
+        assert attr in add
+    assert '"type_id": 2001' in add
+    for q in ("%%", "__", "%_%"):
+        found = c.get(f"/market/watchlists/search?wid={wid}&q={q}").text
+        assert "<button" not in found and "No market item matches" in found, q
+    assert "at least 2 letters" in c.get(f"/market/watchlists/search?wid={wid}&q=s").text
+    assert c.get(f"/market/watchlists/search?wid={wid}&q=").text.strip() == ""
+    assert c.get(f"/market/watchlists/search?wid={wid}&q={'x' * 5000}").status_code == 200
+    # Adding from the search keeps it open, now marking the item as on the list.
+    html = c.post(f"/market/watchlists/{wid}/items", data={"type_id": "2001", "q": "sample"}).text
+    assert 'value="sample"' in _tag(html, 'id="hs-wl-q"')
+    found = html[html.index('id="hs-wl-found"'):]
+    assert "Sample Rig" in found and 'aria-label="Add Sample Hull"' not in found
+    assert "on the list" in found
+
+
+def test_manager_markup(app_db, factory):
+    c = _authed_client()
+    c.post("/market/watchlists", data={"name": "Mine"})
+    wid = _run(_first_watchlist_id(factory, USER_ID))
+    c.post(f"/market/watchlists/{wid}/items", data={"type_id": "2001"})
+    html = c.get(f"/market/watchlists?id={wid}").text
+    assert "<form" not in html                            # nothing to submit natively
+    root = _tag(html, 'id="hs-watchlists"')
+    assert 'data-htmx-no-error="1"' in root
+    for tag in re.findall(r"<(?:button|input)\b[^>]*hx-(?:get|post)=[^>]*>", html):
+        assert 'data-htmx-no-error="1"' in tag, tag
+        assert 'hx-target="#hs-' in tag, tag
+    for tag in re.findall(r"<button\b[^>]*>", html):
+        assert 'type="button"' in tag
+    delete = _tag(html, f'hx-post="/market/watchlists/{wid}/delete"')
+    assert 'hx-confirm="Delete Mine and its saved scan?"' in delete
+    remove = _tag(html, f'hx-post="/market/watchlists/{wid}/items/2001/delete"')
+    assert 'aria-label="Remove Sample Hull"' in remove and 'hx-include="#hs-wl-q"' in remove
+    search = _tag(html, 'id="hs-wl-q"')
+    assert f'hx-get="/market/watchlists/search?wid={wid}"' in search
+    assert 'hx-target="#hs-wl-found"' in search
+    assert "1 of 300 items" in html and "1 of 20 lists" in html
+    assert 'role="status"' in _tag(html, 'id="hs-wl-msg"')
+    assert not re.search(r"<[^>]*\son[a-z]+\s*=", html)
+    # Every field has a bound label.
+    for tag in re.findall(r'<input\b[^>]*type="text"[^>]*>', html):
+        field = re.search(r'\bid="([^"]+)"', tag).group(1)
+        assert f'for="{field}"' in html, field
+
+
+def test_page_in_watchlist_mode_shows_the_manager_for_the_picked_list(app_db, factory):
+    alpha = _run(_add_watchlist(factory, USER_ID, "Alpha List"))
+    beta = _run(_add_watchlist(factory, USER_ID, "Beta List"))
+    c = _authed_client()
+    html = c.get(f"/market/hub-scan?kind=watchlist&ref={beta}").text
+    assert "hidden" not in _tag(html, 'id="hs-wl-box"')
+    assert _current(html) == beta and 'value="Beta List"' in _tag(html, 'id="hs-wl-rename"')
+    assert "selected" in _tag(html, f'<option value="{beta}"')
+    # Drawn into the page: no out-of-band copy of the picker, one picker only.
+    assert html.count('id="hs-wl-pick"') == 1 and "hx-swap-oob" not in html
+    # The manager is outside the scan form.
+    start = html.index('<form id="hs-form"')
+    form = html[start:html.index("</form>", start)]
+    assert 'id="hs-watchlists"' not in form and 'id="hs-wl-pick"' in form
+    # A list that is not the user's (or none): the first one, as the picker shows.
+    for ref in ("", "0", "424242"):
+        html = c.get(f"/market/hub-scan?kind=watchlist&ref={ref}").text
+        assert 'value="%d"' % alpha in _tag(html, 'id="hs-ref"'), ref
+        assert _current(html) == alpha
+    # Another kind: the manager is there but hidden.
+    html = c.get("/market/hub-scan?kind=category&ref=10").text
+    assert "hidden" in _tag(html, 'id="hs-wl-box"')
+
+
+def test_page_script_keeps_ref_in_step_with_the_manager():
+    page = source("market_hub_scan.html")
+    i = page.index("document.body.addEventListener('htmx:afterSwap'")
+    block = page[i:page.index("});", i)]
+    for needle in ("hs-watchlists", "data-current", "ref.value", "showStatus('watchlist'"):
+        assert needle in block, needle
+    assert "loadManager(t.value)" in page and "'/market/watchlists?id='" in page
+
+
+def test_watchlist_names_are_escaped_everywhere(app_db, factory):
+    nasty = ("<script>alert(1)</script>", '"><img src=x>')
+    for name in nasty:
+        _run(_add_watchlist(factory, USER_ID, name))
+    _run(_add_types(factory, (2002, '<b>Bold</b> "Hull"', 11)))
+    ids = _run(_watchlist_ids(factory, USER_ID))
+    c = _authed_client()
+    _run(save_result(factory, USER_ID, ROWS))
+    pages = {}
+    for name, wid in ids.items():
+        c.post(f"/market/watchlists/{wid}/items", data={"type_id": "2002"})
+        pages[f"manager {wid}"] = c.get(f"/market/watchlists?id={wid}").text
+        pages[f"page {wid}"] = c.get(f"/market/hub-scan?kind=watchlist&ref={wid}").text
+    pages["search"] = c.get(f"/market/watchlists/search?wid={wid}&q=bold").text
+    pages["result"] = _result(c)
+    pages["item page"] = c.get(f"/market/type/{TYPE_ID}").text
+    pages["created"] = c.post("/market/watchlists", data={"name": "<i>x</i>"}).text
+    for where, html in pages.items():
+        for raw in ("<script>alert(1)", '"><img src=x>', "<img src=x>", "<b>Bold</b>", "<i>x</i>"):
+            assert raw not in html, (where, raw)
+    for key in ("manager", "page"):
+        html = next(h for w, h in pages.items() if w.startswith(key))
+        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+    assert "&#34;&gt;&lt;img src=x&gt;" in pages["result"]                    # an <option>
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in pages["item page"]
+    assert "&lt;b&gt;Bold&lt;/b&gt;" in pages["search"]
+    assert "&lt;i&gt;x&lt;/i&gt;" in pages["created"]
+    # Attributes: the rename field, the delete confirmation, item aria-labels.
+    wid = ids['"><img src=x>']
+    html = pages[f"manager {wid}"]
+    assert 'value="&#34;&gt;&lt;img src=x&gt;"' in _tag(html, 'id="hs-wl-rename"')
+    assert 'hx-confirm="Delete &#34;&gt;&lt;img src=x&gt; and its saved scan?"' in html
+    assert 'aria-label="Remove &lt;b&gt;Bold&lt;/b&gt; &#34;Hull&#34;"' in html
+
+
+# ── the item page's control ────────────────────────────────────────────────
+
+def test_item_page_offers_a_link_when_the_user_has_no_lists(app_db):
+    html = _authed_client().get(f"/market/type/{TYPE_ID}").text
+    box = html[html.index('id="mk-wl"'):html.index('id="mk-hubs"')]
+    assert 'href="/market/hub-scan?kind=watchlist"' in box and "Create a watchlist" in box
+    assert "<select" not in box and "hx-post" not in box
+
+
+def test_item_page_control_adds_to_the_users_list(app_db, factory):
+    first = _run(_add_watchlist(factory, USER_ID, "Alpha List"))
+    second = _run(_add_watchlist(factory, USER_ID, "Beta List"))
+    _run(_add_watchlist(factory, OTHER_USER_ID, "Other List"))
+    c = _authed_client()
+    html = c.get(f"/market/type/{TYPE_ID}").text
+    assert html.index('id="mk-wl"') < html.index('id="mk-hubs"')
+    box = html[html.index('id="mk-wl"'):html.index('id="mk-hubs"')]
+    assert f'<option value="{first}">Alpha List</option>' in box
+    assert f'<option value="{second}">Beta List</option>' in box and "Other List" not in box
+    assert 'name="watchlist_id"' in _tag(box, 'id="mk-wl-pick"')
+    assert f'value="{TYPE_ID}"' in _tag(box, 'id="mk-wl-type"')
+    button = _tag(box, 'id="mk-wl-add"')
+    for attr in ('hx-post="/market/watchlists/add-item"', 'hx-include="#mk-wl-pick, #mk-wl-type"',
+                 'hx-target="#mk-wl-msg"', 'data-htmx-no-error="1"', 'type="button"'):
+        assert attr in button
+    assert 'for="mk-wl-pick"' in box and 'role="status"' in _tag(box, 'id="mk-wl-msg"')
+    add = "/market/watchlists/add-item"
+    assert c.post(add, data={"watchlist_id": str(second), "type_id": str(TYPE_ID)}).text == "Added."
+    assert c.post(add, data={"watchlist_id": str(second),
+                             "type_id": str(TYPE_ID)}).text == "Already on that list."
+    assert c.post(add, data={"watchlist_id": str(second),
+                             "type_id": "424242"}).text == "That is not a market item."
+    assert _run(_item_ids(factory, second)) == [TYPE_ID] and _run(_item_ids(factory, first)) == []
+
+
+def test_item_page_has_no_control_for_a_non_market_type(app_db, factory):
+    _run(_add_types(factory, (2003, "Sample Relic", None)))
+    _run(_add_watchlist(factory, USER_ID, "Alpha List"))
+    html = _authed_client().get("/market/type/2003").text
+    assert 'id="mk-wl"' not in html and 'id="mk-hubs"' in html
+
+
+def test_item_page_control_fits_a_phone():
+    css = source("market_type.html")
+    phone = _phone_block(css)
+    assert re.search(r"\.mk-wl-link\s*\{[^}]*min-height:44px", phone)
+    assert re.search(r"\.mk-wl\s*\{[^}]*flex-wrap:wrap", css)
+    # The select and button take site.css's phone floor (44px, 16px text).
+    page = source("market_type.html")
+    script = page[page.index("Hub Scan's \"Add to watchlist\" (#mk-wl-add)"):]
+    script = script[:script.index("</script>")]
+    assert "el.id !== 'mk-wl-add'" in script and "getElementById('mk-wl-msg')" in script
+    assert "Not added; try again." in script
+
+
+def test_manager_and_add_all_fit_a_phone():
+    phone = _phone_block(source("market_hub_scan.html"))
+    rule = re.search(r"\.hs-wl-box \.b-input, \.hs-addall \.b-input\s*\{([^}]*)\}", phone)
+    assert rule, "phone rule for the manager's inputs"
+    body = rule.group(1).replace(" ", "")
+    assert "min-height:44px" in body and "font-size:16px" in body and "width:100%" in body
+    assert re.search(r"\.hs-wl-li\s*\{[^}]*min-height:44px", phone)

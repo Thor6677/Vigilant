@@ -148,11 +148,15 @@ async def load(db: AsyncSession, user_id: int, kind: str, ref: int,
     return result
 
 
-async def delete_for(db: AsyncSession, user_id: int, kind: str, ref: int) -> None:
+async def delete_for(db: AsyncSession, user_id: int, kind: str, ref: int, *,
+                     commit: bool = True) -> None:
+    """`commit=False` leaves the delete in the caller's transaction (deleting
+    a watchlist removes the list, its items and its result together)."""
     await db.execute(delete(MarketScanResult).where(
         MarketScanResult.user_id == user_id, MarketScanResult.list_kind == kind,
         MarketScanResult.list_ref == ref))
-    await db.commit()
+    if commit:
+        await db.commit()
 
 
 async def cleanup(db: AsyncSession, now: datetime) -> tuple[int, int]:

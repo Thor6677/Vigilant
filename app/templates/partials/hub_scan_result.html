@@ -17,6 +17,13 @@
    pinned by hx-vals. They opt out of the ISS-007 pill, which would replace
    their labels; the page script says when a start fails.
 
+   "Add all to watchlist" (under the counts, when the user has a list and the
+   result has priced rows) is outside #hs-filters too, whose change would
+   reload the result when the list is picked. Its select has no name; the
+   page script puts the picked list in the button's path on
+   htmx:configRequest. The button sends this result's list by hx-vals and
+   the reply, one line of text, goes into #hs-add-msg.
+
    Desktop: one table in its own sideways scroller (m-hide on phones).
    Phones: one card per row (m-only). Dict keys by subscript throughout. #}
 {% set c = view['counts'] %}
@@ -138,4 +145,17 @@
     {%- if c['no_cost'] %} · {{ c['no_cost'] }} skipped: no cost{% endif %}
     {%- if c['unavailable'] %} · {{ c['unavailable'] }} unavailable ({{ start_button('retry these', 'hs-linkbtn') }}){% endif %}
 </div>
+{% if watchlists and view['type_ids'] %}
+<div class="hs-addall">
+    {% set n = view['type_ids']|length %}
+    <label class="hs-fl" for="hs-add-wid"><span>Add all {{ n }} item{{ '' if n == 1 else 's' }} to watchlist</span>
+        <select class="b-input" id="hs-add-wid">
+            {% for w in watchlists %}<option value="{{ w['id'] }}">{{ w['name'] }}</option>{% endfor %}
+        </select></label>
+    <button type="button" class="b-btn hs-add-all"
+            hx-post="/market/watchlists/{{ watchlists[0]['id'] }}/add-result" hx-vals='{{ list_vals }}'
+            hx-target="#hs-add-msg" hx-swap="innerHTML" data-htmx-no-error="1">Add</button>
+    <span id="hs-add-msg" role="status"></span>
+</div>
+{% endif %}
 <p class="hs-foot">{{ footnote }}</p>

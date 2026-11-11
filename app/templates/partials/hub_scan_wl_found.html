@@ -1,0 +1,26 @@
+{# Watchlist manager: the item search's matches, swapped into #hs-wl-found
+   (innerHTML) by the search box, and drawn inside the manager when a reply
+   keeps the search. Context: found [(type_id, name)], found_q, found_wid,
+   on_list (type ids already on the list), search_min.
+
+   Each Add posts the type id (hx-vals holds only that integer) and the
+   search text (hx-include), so the reply redraws the manager with this
+   search still open. It opts out of base.html's error pill, which would
+   replace its label; the page script says what failed in #hs-wl-msg.
+   Names are autoescaped, in text and in the aria-label. #}
+{% if found %}
+<ul class="hs-wl-list">
+    {% for type_id, name in found %}
+    <li class="hs-wl-li"><span class="hs-wl-name">{{ name }}</span>
+        {%- if type_id in on_list %}<span class="hs-mut">on the list</span>
+        {%- else %}<button type="button" class="b-btn is-ghost hs-wl-btn"
+                hx-post="/market/watchlists/{{ found_wid }}/items" hx-vals='{"type_id": {{ type_id }}}'
+                hx-include="#hs-wl-q" hx-target="#hs-watchlists" hx-swap="outerHTML"
+                data-htmx-no-error="1" aria-label="Add {{ name }}">Add</button>{% endif %}</li>
+    {% endfor %}
+</ul>
+{% elif found_q|length >= search_min %}
+<div class="hs-hint">No market item matches “{{ found_q }}”.</div>
+{% elif found_q %}
+<div class="hs-hint">Type at least {{ search_min }} letters.</div>
+{% endif %}

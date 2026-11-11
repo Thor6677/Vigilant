@@ -7,10 +7,30 @@
   POST /market/hub-scan/cancel     stop the user's scan
   GET  /market/hub-scan/result     the saved result for a list, filtered and sorted
 
+Watchlists (app.market.watchlists holds the rules and limits):
+
+  GET  /market/watchlists                          the manager (?id= picks the list)
+  POST /market/watchlists                          create
+  POST /market/watchlists/{wid}/rename
+  POST /market/watchlists/{wid}/delete             with its items and saved result
+  POST /market/watchlists/{wid}/items              add one item (type_id)
+  POST /market/watchlists/{wid}/items/{type_id}/delete
+  POST /market/watchlists/{wid}/add-result         add a saved result's items (kind, ref)
+  GET  /market/watchlists/search                   type search for the manager (wid, q)
+  POST /market/watchlists/add-item                 the item page's control (watchlist_id, type_id)
+
 Maths is in app.market.scan_rules, jobs in scan_runner, strings in scan_view.
-Every route needs a logged-in user and only ever reads that user's rows: the
-job registry is keyed by user, results are loaded by (user, list), and a
-watchlist is only counted when it is the user's.
+Every route needs a logged-in user (401 without one) and only ever reads that
+user's rows: the job registry is keyed by user, results are loaded by (user,
+list), and a watchlist is only counted or changed when it is the user's.
+Every watchlist route answers 404 for a list id that is not the user's, or
+that is not an id at all; ids are bounded (watchlists.parse_id) so none can
+overflow SQLite.
+
+The manager (partials/hub_scan_watchlist.html) is drawn into the page on
+load and replaced by every manager route's reply, which also carries the
+page's list picker (partials/hub_scan_wl_pick.html) as an out-of-band swap so
+the picker always shows the lists as they now are.
 
 While the user's job is queued or running, the status line is that job's,
 whatever list the page has picked since: one job per user, and a second
@@ -41,12 +61,11 @@ PICK_A_LIST = "Pick a list to scan."
 
 
 def _kind_ref(kind: str, ref) -> tuple[str, int]:
-    try:
-        number = int(ref)
-    except (TypeError, ValueError):
-        number = 0
+    """A known kind and a list reference in 0..MAX_ID (0: none). Anything
+    else is 0, so an over-long number can't overflow a SQLite bind."""
+    number = watchlists.parse_id(ref) or 0
     kind = kind if kind in scan_lists.KINDS else "category"
-    return kind, 0 if kind == "blueprints" else max(number, 0)
+    return kind, 0 if kind == "blueprints" else number
 
 
 def _has_list(kind: str, ref: int) -> bool:
@@ -79,6 +98,55 @@ async def _watchlists(db: AsyncSession, user_id: int) -> list[dict]:
     return [{"id": w.id, "name": w.name} for w in await watchlists.all_for(db, user_id)]
 
 
+NOT_MARKET = "That is not a market item."
+
+
+async def _manager_ctx(db: AsyncSession, lists: list[dict], selected: int,
+                       message: str = "", q: str = "") -> dict:
+    """The manager's context (`m` in partials/hub_scan_watchlist.html): the
+    user's lists and the one being edited, `selected` when it is theirs, else
+    the first. `q` keeps the item search and its matches across a reply."""
+    current = next((w for w in lists if w["id"] == selected), lists[0] if lists else None)
+    entries = await watchlists.items(db, current["id"]) if current else []
+    q = watchlists.clean_query(q) if current else ""
+    return {
+        "lists": lists, "current": current, "items": entries, "message": message,
+        "q": q, "found": await watchlists.search_types(db, q) if q else [],
+        "on_list": {t for t, _name in entries},
+        "max_items": watchlists.MAX_ITEMS, "max_lists": watchlists.MAX_LISTS,
+        "max_name": watchlists.MAX_NAME, "search_min": watchlists.SEARCH_MIN,
+        "search_max": watchlists.SEARCH_MAX,
+    }
+
+
+async def _manager(request: Request, db: AsyncSession, user_id: int, selected: int = 0,
+                   message: str = "", q: str = "") -> HTMLResponse:
+    """The manager fragment, with the page's list picker out of band."""
+    m = await _manager_ctx(db, await _watchlists(db, user_id), selected, message, q)
+    return templates.TemplateResponse(request, "partials/hub_scan_watchlist.html",
+                                      {"m": m, "oob": True})
+
+
+def _no_list() -> HTMLResponse:
+    return HTMLResponse("", status_code=404)
+
+
+async def _own_list(db: AsyncSession, user_id: int, raw) -> int | None:
+    """The id in `raw` when it names one of the user's lists, else None."""
+    wid = watchlists.parse_id(raw)
+    if wid is None or await watchlists.get(db, user_id, wid) is None:
+        return None
+    return wid
+
+
+def _cancel_scan_of(user_id: int, wid: int) -> None:
+    """Cancel the user's scan only if it is a queued or running scan of this list."""
+    job = scan_runner.get(user_id)
+    if (job is not None and job.state in scan_runner.ACTIVE
+            and (job.kind, job.ref) == ("watchlist", wid)):
+        scan_runner.cancel(user_id)
+
+
 @router.get("/market/hub-scan", response_class=HTMLResponse)
 async def hub_scan_page(request: Request, kind: str = "category", ref: str = "0",
                         db: AsyncSession = Depends(get_db)):
@@ -92,8 +160,12 @@ async def hub_scan_page(request: Request, kind: str = "category", ref: str = "0"
     job = scan_runner.get(user_id)
     if job is not None and job.state in scan_runner.ACTIVE:
         kind, number = job.kind, job.ref        # the page shows the running scan's list
-    elif kind == "watchlist" and not number and lists:
-        number = lists[0]["id"]                 # what the picker shows first
+    elif kind == "watchlist" and number not in {w["id"] for w in lists}:
+        # None picked, or one that is gone: what the picker shows first.
+        number = lists[0]["id"] if lists else 0
+    # The manager edits the list the picker shows (the first when the page
+    # opens on another kind).
+    manager = await _manager_ctx(db, lists, number if kind == "watchlist" else 0)
     return templates.TemplateResponse(request, "market_hub_scan.html", {
         "kind": kind, "ref": number,
         "category_path": await _category_path(db, number) if kind == "category" else "",
@@ -103,6 +175,7 @@ async def hub_scan_page(request: Request, kind: str = "category", ref: str = "0"
         "broker_fee_pct": scan_view.fmt_pct(prefs.broker_fee_pct),
         "origin_name": origin_name,
         "watchlists": lists,
+        "manager": manager,
         **_status_ctx(job, kind, number),
     })
 
@@ -216,3 +289,180 @@ async def hub_scan_result(request: Request, kind: str = "category", ref: str = "
         "scan_cap": scan_lists.CAP,
         "watchlists": await _watchlists(db, user_id),
     })
+
+
+# ── watchlists ─────────────────────────────────────────────────────────────
+
+@router.get("/market/watchlists", response_class=HTMLResponse)
+async def watchlist_manager(request: Request, wl_id: str = Query("", alias="id"),
+                            db: AsyncSession = Depends(get_db)):
+    """No id (or 0): the first list. An id that is not one of the user's: 404."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("", status_code=401)
+    selected = 0
+    if wl_id.strip() not in ("", "0"):
+        selected = await _own_list(db, user_id, wl_id)
+        if selected is None:
+            return _no_list()
+    return await _manager(request, db, user_id, selected)
+
+
+@router.post("/market/watchlists", response_class=HTMLResponse)
+async def watchlist_create(request: Request, name: str = Form(""), current: str = Form(""),
+                           db: AsyncSession = Depends(get_db)):
+    """`current` is the list the manager was showing: a refused name leaves
+    the manager on it."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("", status_code=401)
+    try:
+        wid = await watchlists.create(db, user_id, name)
+    except watchlists.WatchlistError as exc:
+        return await _manager(request, db, user_id, watchlists.parse_id(current) or 0, str(exc))
+    return await _manager(request, db, user_id, wid, "List created.")
+
+
+@router.post("/market/watchlists/{wid}/rename", response_class=HTMLResponse)
+async def watchlist_rename(request: Request, wid: str, name: str = Form(""),
+                           db: AsyncSession = Depends(get_db)):
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("", status_code=401)
+    number = watchlists.parse_id(wid)
+    if number is None:
+        return _no_list()
+    try:
+        renamed = await watchlists.rename(db, user_id, number, name)
+    except watchlists.WatchlistError as exc:
+        return await _manager(request, db, user_id, number, str(exc))
+    if renamed is None:
+        return _no_list()
+    return await _manager(request, db, user_id, number, "Renamed.")
+
+
+@router.post("/market/watchlists/{wid}/delete", response_class=HTMLResponse)
+async def watchlist_delete(request: Request, wid: str, db: AsyncSession = Depends(get_db)):
+    """A queued or running scan of this list is cancelled first, so it
+    cannot save a result for a list that is gone."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("", status_code=401)
+    number = await _own_list(db, user_id, wid)
+    if number is None:
+        return _no_list()
+    _cancel_scan_of(user_id, number)
+    if not await watchlists.remove(db, user_id, number):
+        return _no_list()
+    return await _manager(request, db, user_id, 0, "List deleted.")
+
+
+@router.post("/market/watchlists/{wid}/items", response_class=HTMLResponse)
+async def watchlist_add_item(request: Request, wid: str, type_id: str = Form(""),
+                             q: str = Form(""), db: AsyncSession = Depends(get_db)):
+    """Add one item. `q` is the search the button came from, kept in the reply."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("", status_code=401)
+    number = await _own_list(db, user_id, wid)
+    if number is None:
+        return _no_list()
+    type_number = watchlists.parse_id(type_id)
+    if not await watchlists.is_market_type(db, type_number):
+        return await _manager(request, db, user_id, number, NOT_MARKET, q)
+    outcome = await watchlists.add_items(db, user_id, number, [type_number])
+    if outcome is None:
+        return _no_list()
+    added, full = outcome
+    message = ("Added." if added else
+               f"The list is full ({watchlists.MAX_ITEMS} items)." if full else
+               "Already on the list.")
+    return await _manager(request, db, user_id, number, message, q)
+
+
+@router.post("/market/watchlists/{wid}/items/{type_id}/delete", response_class=HTMLResponse)
+async def watchlist_remove_item(request: Request, wid: str, type_id: str, q: str = Form(""),
+                                db: AsyncSession = Depends(get_db)):
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("", status_code=401)
+    number, type_number = watchlists.parse_id(wid), watchlists.parse_id(type_id)
+    if number is None or type_number is None:
+        return _no_list()
+    if not await watchlists.remove_item(db, user_id, number, type_number):
+        return _no_list()
+    return await _manager(request, db, user_id, number, "Removed.", q)
+
+
+@router.post("/market/watchlists/{wid}/add-result", response_class=HTMLResponse)
+async def watchlist_add_result(request: Request, wid: str, kind: str = Form(""),
+                               ref: str = Form(""), db: AsyncSession = Depends(get_db)):
+    """Add every priced row of the user's own saved result for (kind, ref),
+    up to the list's limit. Replies with one line of plain text."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("", status_code=401)
+    number = await _own_list(db, user_id, wid)
+    if number is None:
+        return _no_list()
+    kind, list_ref = _kind_ref(kind, ref)
+    result = (await scan_results.load(db, user_id, kind, list_ref)
+              if _has_list(kind, list_ref) else None)
+    if result is None:
+        return HTMLResponse("There is no saved result to add.")
+    ids = [r["type_id"] for r in result["rows"] if r.get("status") == "ok"]
+    outcome = await watchlists.add_items(db, user_id, number, ids)
+    if outcome is None:
+        return _no_list()
+    added, full = outcome
+    if full:
+        return HTMLResponse(f"Added {added}; {full} did not fit "
+                            f"({watchlists.MAX_ITEMS} items per list).")
+    if not added:
+        return HTMLResponse("Nothing new to add: they are on the list already.")
+    return HTMLResponse(f"Added {added}.")
+
+
+@router.get("/market/watchlists/search", response_class=HTMLResponse)
+async def watchlist_search(request: Request, wid: str = "", q: str = "",
+                           db: AsyncSession = Depends(get_db)):
+    """Up to 15 market types for the manager's search box, each with an Add
+    button for list `wid` (or a note that it is on the list already)."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("", status_code=401)
+    number = await _own_list(db, user_id, wid)
+    if number is None:
+        return _no_list()
+    q = watchlists.clean_query(q)
+    found = await watchlists.search_types(db, q)
+    return templates.TemplateResponse(request, "partials/hub_scan_wl_found.html", {
+        "found": found, "found_q": q, "found_wid": number,
+        "on_list": set(await watchlists.item_ids(db, number)) if found else set(),
+        "search_min": watchlists.SEARCH_MIN,
+    })
+
+
+@router.post("/market/watchlists/add-item", response_class=HTMLResponse)
+async def watchlist_add_from_item_page(request: Request, watchlist_id: str = Form(""),
+                                       type_id: str = Form(""),
+                                       db: AsyncSession = Depends(get_db)):
+    """The item page's "Add to watchlist". Replies with one line of plain text."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("", status_code=401)
+    number = await _own_list(db, user_id, watchlist_id)
+    if number is None:
+        return _no_list()
+    type_number = watchlists.parse_id(type_id)
+    if not await watchlists.is_market_type(db, type_number):
+        return HTMLResponse(NOT_MARKET)
+    outcome = await watchlists.add_items(db, user_id, number, [type_number])
+    if outcome is None:
+        return _no_list()
+    added, full = outcome
+    if added:
+        return HTMLResponse("Added.")
+    if full:
+        return HTMLResponse(f"That list is full ({watchlists.MAX_ITEMS} items).")
+    return HTMLResponse("Already on that list.")
