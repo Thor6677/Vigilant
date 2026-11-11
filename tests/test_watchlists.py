@@ -153,6 +153,34 @@ def test_add_items_validates_dedupes_and_fills_to_the_limit(factory, monkeypatch
                                                      (2001, "Sample Hull")]
 
 
+def test_add_items_keeps_the_batch_when_one_item_was_added_meanwhile(factory, monkeypatch):
+    wid = _call(factory, watchlists.create, USER_ID, "Race")
+    real_item_ids = watchlists.item_ids
+
+    async def stale(db, watchlist_id):
+        # What add_items saw before a second request added 2001.
+        seen = await real_item_ids(db, watchlist_id)
+        async with factory() as other:
+            other.add(MarketWatchlistItem(watchlist_id=wid, type_id=2001, added_at=SCANNED))
+            await other.commit()
+        return seen
+
+    monkeypatch.setattr(watchlists, "item_ids", stale)
+    # No exception; the conflicting item is skipped, the other one still lands,
+    # and the count reports only what this call inserted.
+    assert _call(factory, watchlists.add_items, USER_ID, wid, [2001, 2002]) == (1, 0)
+    monkeypatch.setattr(watchlists, "item_ids", real_item_ids)
+    assert sorted(t for t, _ in _call(factory, watchlists.items, wid)) == [2001, 2002]
+    assert _count(factory, MarketWatchlistItem, MarketWatchlistItem.watchlist_id == wid) == 2
+
+
+def test_list_ids_are_never_reused(factory):
+    first = _call(factory, watchlists.create, USER_ID, "Gone")
+    assert _call(factory, watchlists.remove, USER_ID, first) is True
+    second = _call(factory, watchlists.create, USER_ID, "Next")
+    assert second > first
+
+
 def test_is_market_type(factory):
     assert _call(factory, watchlists.is_market_type, 2001) is True
     for t in (2003, 2004, 999, None, 0, 2 ** 40):

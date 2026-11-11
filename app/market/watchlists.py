@@ -16,6 +16,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from sqlalchemy import case, delete, func, select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -191,16 +192,19 @@ async def add_items(db: AsyncSession, user_id: int, watchlist_id: int,
     have = set(await item_ids(db, wl.id))
     new = [t for t in wanted if t in valid and t not in have]
     room = max(MAX_ITEMS - len(have), 0)
-    now = _now()
-    for t in new[:room]:
-        db.add(MarketWatchlistItem(watchlist_id=wl.id, type_id=t, added_at=now))
-    try:
-        await db.commit()
-    except IntegrityError:
-        # The same item added twice at once: the second insert lost the race.
-        await db.rollback()
-        return 0, 0
-    return len(new[:room]), len(new[room:])
+    chosen = new[:room]
+    added = 0
+    if chosen:
+        now = _now()
+        # One statement, so an item another request added meanwhile is skipped
+        # on its own and never costs the rest of the batch.
+        result = await db.execute(
+            sqlite_insert(MarketWatchlistItem).values(
+                [{"watchlist_id": wl.id, "type_id": t, "added_at": now} for t in chosen]
+            ).on_conflict_do_nothing(index_elements=["watchlist_id", "type_id"]))
+        added = result.rowcount
+    await db.commit()
+    return added, len(new[room:])
 
 
 async def remove_item(db: AsyncSession, user_id: int, watchlist_id: int, type_id: int) -> bool:

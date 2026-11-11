@@ -1267,7 +1267,9 @@ class MarketWatchlist(Base):
     """A user's named list of items for Hub Scan. Only app/market/watchlists.py
     reads or writes this and its items."""
     __tablename__ = "market_watchlist"
-    __table_args__ = (UniqueConstraint("user_id", "name", name="uq_market_watchlist_name"),)
+    # A deleted list's id is never reused: a saved scan result is keyed by it.
+    __table_args__ = (UniqueConstraint("user_id", "name", name="uq_market_watchlist_name"),
+                      {"sqlite_autoincrement": True})
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)

@@ -42,6 +42,9 @@
         hx-target="#hs-status-box" hx-swap="innerHTML" hx-sync="#hs-status-box:replace"
         data-htmx-no-error="1">Cancel</button>
 {%- endmacro %}
+{# Screen readers: the box is not a live region (the poll would read the
+   progress out every 2 s). Only the outcome messages below carry role="status",
+   so a result is announced once; the bar's aria-valuetext holds the progress. #}
 {# Nothing visible (idle, a saved result showing, nothing to report): no margin. #}
 {% set blank = not active and not interrupted and not count_text
                and not (same_list and job.state in ('failed', 'cancelled')) %}
@@ -60,9 +63,9 @@
     <span>{% if job.total %}{{ progress }}{% else %}Reading the list…{% endif %}</span>
     {{ cancel_button() }}
   {% else %}
-    {% if interrupted %}<span class="hs-neg">The scan was interrupted. Scan again.</span>
-    {% elif same_list and job.state == 'failed' %}<span class="hs-neg">{{ job.message }}</span>
-    {% elif same_list and job.state == 'cancelled' %}<span>Scan cancelled.</span>{% endif %}
+    {% if interrupted %}<span class="hs-neg" role="status">The scan was interrupted. Scan again.</span>
+    {% elif same_list and job.state == 'failed' %}<span class="hs-neg" role="status">{{ job.message }}</span>
+    {% elif same_list and job.state == 'cancelled' %}<span role="status">Scan cancelled.</span>{% endif %}
     {% if count_text %}<span id="hs-count">{{ count_text }}</span>{% endif %}
     <div hidden class="hs-loader" hx-get="/market/hub-scan/result?kind={{ kind }}&amp;ref={{ ref }}"
          hx-trigger="load" hx-target="#hs-result" hx-swap="innerHTML"

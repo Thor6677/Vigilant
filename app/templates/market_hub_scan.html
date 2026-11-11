@@ -258,7 +258,7 @@
 {# A start's notes ("Budget used: 100B.") arrive here out of band, outside
    the status box, so the first poll does not wipe them. #}
 <div id="hs-start-note" class="hs-note hs-start-note" role="status"></div>
-<div id="hs-status-box" aria-live="polite">
+<div id="hs-status-box">
 {% include "partials/hub_scan_status.html" %}
 </div>
 <div id="hs-result"></div>
@@ -499,6 +499,7 @@
         line.className = 'hs-status';
         var span = document.createElement('span');
         span.className = 'hs-neg';
+        span.setAttribute('role', 'status');
         span.textContent = message;
         line.appendChild(span);
         if (link) {

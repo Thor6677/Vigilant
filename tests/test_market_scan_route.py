@@ -399,6 +399,21 @@ def test_active_status_polls_every_2s_and_opts_out_of_the_error_pill(app_db):
     assert "/market/hub-scan/result" not in html                 # loads when it ends
 
 
+def test_polled_status_is_not_announced_but_outcomes_are(app_db):
+    c = _authed_client()
+    c.post("/market/hub-scan/start", data={"kind": "category", "ref": "10"})
+    html = c.get("/market/hub-scan/status?kind=category&ref=10").text
+    assert "aria-live" not in html and 'role="status"' not in html
+    assert "aria-valuetext=" in html
+    job = scan_runner._jobs[USER_ID]
+    job.state, job.message = "failed", "The scan failed. Scan again."
+    assert 'role="status">The scan failed' in c.get(
+        "/market/hub-scan/status?kind=category&ref=10").text
+    job.state = "cancelled"
+    assert 'role="status">Scan cancelled.' in c.get(
+        "/market/hub-scan/status?kind=category&ref=10").text
+
+
 def test_active_status_belongs_to_the_running_job(app_db):
     """Picking another list mid-scan still shows (and polls) the running one."""
     c = _authed_client()
@@ -452,7 +467,7 @@ def test_page_wraps_the_status_line_in_a_stable_box(app_db, factory):
                       "hs-status-src", "hs-wl-src", "hs-wl-box", "hs-watchlists"):
             assert html.count(f'id="{el_id}"') == 1, (url, el_id)
         box = _tag(html, 'id="hs-status-box"')
-        assert 'aria-live="polite"' in box
+        assert "aria-live" not in box
         # No htmx attribute on the box: hx-sync and hx-target are inherited.
         assert "hx-" not in box and "hx-" not in _tag(html, 'id="hs-result"')
         assert "hs-status-box" in _ancestor_ids(html, "hs-status")
