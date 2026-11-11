@@ -332,6 +332,7 @@ async def hub_scan_status(request: Request, kind: str = "category", ref: str = "
 @router.get("/market/hub-scan/result", response_class=HTMLResponse)
 async def hub_scan_result(request: Request, kind: str = "category", ref: str = "0",
                           hub: str = "", source: str = "", losers: str = "", under: str = "",
+                          nocopy: str = "",
                           sort: str = scan_view.DEFAULT_SORT,
                           direction: str = Query("", alias="dir"),
                           db: AsyncSession = Depends(get_db)):
@@ -344,7 +345,7 @@ async def hub_scan_result(request: Request, kind: str = "category", ref: str = "
     result = await scan_results.load(db, user_id, kind, number)
     if result is None:
         return HTMLResponse("")
-    filters = scan_view.parse_filters(hub, source, losers, under)
+    filters = scan_view.parse_filters(hub, source, losers, under, nocopy)
     return templates.TemplateResponse(request, "partials/hub_scan_result.html", {
         "result": result, "filters": filters, "kind": kind, "ref": number,
         "scanned": scan_view.scanned_text(result["scanned_at"]),

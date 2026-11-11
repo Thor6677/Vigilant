@@ -101,6 +101,7 @@
     <input type="hidden" id="hs-losers-off" name="losers" value="show"{% if filters['hide_losers'] %} disabled{% endif %}>
     <label class="hs-chk"><input type="checkbox" class="b-check" id="hs-losers"{% if filters['hide_losers'] %} checked{% endif %}> Hide items with no profit per day</label>
     <label class="hs-chk"><input type="checkbox" class="b-check" id="hs-f-under" name="under" value="1"{% if filters['under_only'] %} checked{% endif %}> Under-supplied only</label>
+    {% if view['has_copy_only'] %}<label class="hs-chk"><input type="checkbox" class="b-check" id="hs-f-nocopy" name="nocopy" value="1"{% if filters['hide_copy_only'] %} checked{% endif %}> Hide copy-only blueprints (<span class="hs-copy" aria-hidden="true">*</span>)</label>{% endif %}
 </form>
 {# With a hub chosen the rows are that hub's (scan_view.build): one line says
    so, for the table and the cards alike, even when nothing is left to show. #}

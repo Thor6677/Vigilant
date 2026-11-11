@@ -28,11 +28,14 @@ def names(out):
 
 
 def test_default_filters_hide_items_with_no_profit_per_day_only():
-    assert F == {"hub": "", "source": "", "hide_losers": True, "under_only": False}
-    assert v.parse_filters("moon", "x", "show", "1") == {
-        "hub": "", "source": "", "hide_losers": False, "under_only": True}
-    assert v.parse_filters("amarr", "build", "hide", "0") == {
-        "hub": "amarr", "source": "build", "hide_losers": True, "under_only": False}
+    assert F == {"hub": "", "source": "", "hide_losers": True, "under_only": False,
+                 "hide_copy_only": False}
+    assert v.parse_filters("moon", "x", "show", "1", "1") == {
+        "hub": "", "source": "", "hide_losers": False, "under_only": True,
+        "hide_copy_only": True}
+    assert v.parse_filters("amarr", "build", "hide", "0", "yes") == {
+        "hub": "amarr", "source": "build", "hide_losers": True, "under_only": False,
+        "hide_copy_only": False}
 
 
 def test_counts_and_filters():
@@ -483,3 +486,34 @@ def test_notes_view_keeps_plain_lines_and_old_results_as_they_were():
     assert got[1] == "cap note" and len(got) == 2
     assert got[0]["summary"].startswith("None of your characters'")
     assert v.build(result([]) | {"notes": ["x"]}, F, "profit_day", "")["notes"] == ["x"]
+
+
+def test_hide_copy_only_keeps_out_rows_built_from_a_copy():
+    rows = [row(),
+            row(type_id=2, name="Copy Build", source="build", cost_basis="benchmark",
+                copy_only=True, profit_per_day=900.0),
+            # Hauled in: what the copy cost plays no part, so it stays.
+            row(type_id=3, name="Copy Haul", copy_only=True, profit_per_day=10.0)]
+    shown = v.build(result(rows), F, "profit_day", "")
+    assert names(shown) == ["Copy Build", "Sample Hull", "Copy Haul"]
+    assert shown["has_copy_only"] is True
+    out = v.build(result(rows), v.parse_filters("", "", "", "", "1"), "profit_day", "")
+    assert names(out) == ["Sample Hull", "Copy Haul"]
+    assert out["counts"]["filtered"] == 1 and out["counts"]["hidden"] == 0
+    assert out["has_copy_only"] is True
+    none = v.build(result([row()]), F, "profit_day", "")
+    assert none["has_copy_only"] is False
+
+
+def test_hide_copy_only_uses_the_chosen_hubs_source():
+    # Best overall is a haul to Rens; at Amarr the best source is the build.
+    by_hub = {"rens": row(), "amarr": row(hub="amarr", source="build",
+                                          cost_basis="benchmark", copy_only=True)}
+    for figures in by_hub.values():
+        for key in ("type_id", "name", "status"):
+            figures.pop(key)
+    rows = [row(copy_only=True, by_hub=by_hub)]
+    f = v.parse_filters("amarr", "", "", "", "1")
+    assert names(v.build(result(rows), f, "profit_day", "")) == []
+    f = v.parse_filters("rens", "", "", "", "1")
+    assert names(v.build(result(rows), f, "profit_day", "")) == ["Sample Hull"]

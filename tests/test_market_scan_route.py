@@ -876,6 +876,26 @@ def test_result_filters_by_hub_source_and_supply(app_db, factory):
     assert 'href="/market/type/2004?qty=7#mk-hubs"' in _result(c)
 
 
+def test_result_can_hide_copy_only_blueprints(app_db, factory):
+    rows = [_ok("Sample Hull", TYPE_ID),
+            _ok("Copy Hull", 2004, source="build", cost_basis="benchmark", copy_only=True,
+                profit_per_day=90.0)]
+    _run(save_result(factory, USER_ID, rows))
+    c = _authed_client()
+    shown = _result(c)                                   # shown unless asked
+    assert "Copy Hull" in shown and "Showing 2 of 2" in shown
+    assert "checked" not in _tag(shown, 'name="nocopy"')
+    hidden = _result(c, "kind=category&ref=10&nocopy=1")
+    assert "Sample Hull" in hidden and "Copy Hull" not in hidden
+    assert "Showing 1 of 2" in hidden
+    assert "checked" in _tag(hidden, 'name="nocopy"')    # the box stays to untick
+
+
+def test_result_offers_no_copy_only_box_without_such_rows(app_db, factory):
+    _run(save_result(factory, USER_ID, [_ok("Sample Hull", TYPE_ID)]))
+    assert 'name="nocopy"' not in _result(_authed_client())
+
+
 def test_result_sorts_by_the_sort_parameter(app_db, factory):
     rows = [_ok("Zeta Hull", 2005, profit_per_day=5.0),
             _ok("Alpha Hull", 2006, profit_per_day=9.0, margin=0.1)]

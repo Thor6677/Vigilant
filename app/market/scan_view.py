@@ -116,13 +116,21 @@ def notes_view(notes) -> list:
     return out
 
 
-def parse_filters(hub: str, source: str, losers: str, under: str) -> dict:
+def parse_filters(hub: str, source: str, losers: str, under: str, nocopy: str = "") -> dict:
     """Unknown values mean "no filter". Items with no profit per day are
-    hidden unless `losers` is "show"."""
+    hidden unless `losers` is "show". `nocopy` "1" hides rows built from a
+    copy-only blueprint (shown by default)."""
     return {"hub": hub if hub in HUB_NAMES else "",
             "source": source if source in SOURCE_NAMES else "",
             "hide_losers": losers != "show",
-            "under_only": under == "1"}
+            "under_only": under == "1",
+            "hide_copy_only": nocopy == "1"}
+
+
+def _from_copy(row: dict) -> bool:
+    """Built from a blueprint that comes only as a copy: the row the table
+    marks with `*`, whose cost leaves out what the copy cost."""
+    return bool(row.get("copy_only")) and row["source"] == "build"
 
 
 def _loser(row: dict) -> bool:
@@ -138,6 +146,8 @@ def _passes(row: dict, f: dict) -> bool:
     if f["source"] and row["source"] != f["source"]:
         return False
     if f["under_only"] and row["supply"] != "under":
+        return False
+    if f.get("hide_copy_only") and _from_copy(row):
         return False
     return True
 
@@ -213,7 +223,7 @@ def display_row(row: dict, routes: dict, show_route: bool) -> dict:
         "other_text": other_text, "other_card": other_card,
         "cost": hub_view.fmt_isk(row["cost"]),
         "cost_basis": "benchmark" if row["cost_basis"] == "benchmark" else "Jita sell orders",
-        "copy_only": bool(row.get("copy_only")) and row["source"] == "build",
+        "copy_only": _from_copy(row),
         "price": hub_view.fmt_isk(row["price"]),
         "price_flag": PRICE_FLAGS.get(row["price_flag"], ""),
         "price_flag_title": PRICE_FLAG_TITLES.get(row["price_flag"], ""),
@@ -278,7 +288,7 @@ def build(result: dict, filters: dict, sort: str, direction: str) -> dict:
     no_cost + unavailable. `hidden` counts the priced rows that the "hide"
     box alone keeps out (they pass every other filter); `not_sold` the priced
     items with no figures at the chosen hub; `filtered` the rest that the
-    source or under-supplied filters keep out (and, for a result saved
+    source, under-supplied or copy-only filters keep out (and, for a result saved
     before per-hub figures were kept, the hub filter), whether or not they
     make money. `ok` is every priced row, whatever the filters."""
     rows = result["rows"]
@@ -312,6 +322,10 @@ def build(result: dict, filters: dict, sort: str, direction: str) -> dict:
         # The rows are for the chosen hub, not each item's best: say so.
         "hub_column": "Hub" if hub and not old_shape else "Best hub",
         "hub_line": hub_line,
+        # The "hide copy-only blueprints" box is offered only when it can do
+        # something: a row here is built from one, or the box is ticked.
+        "has_copy_only": (bool(filters.get("hide_copy_only"))
+                          or any(_from_copy(r) for r in for_hub)),
         "counts": {
             "shown": len(shown), "total": len(rows), "ok": len(ok),
             "hidden": len(candidates) - len(shown),
