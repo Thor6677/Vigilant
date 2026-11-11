@@ -33,6 +33,13 @@ every hub is inside its window: at most five attempts per 90 seconds.
 The retry button sends `retry=1`, which forgets this type's remembered
 failures at all five hubs first; ordinary input changes never send it.
 
+History age: each hub is analysed over the 30 days ending on the last day its
+stored history covers (`hub_analysis.coverage_end`), so a day the game has not
+published yet is not counted as a day without sales. A hub whose history is
+2–3 days behind yesterday (a refresh that keeps failing) is shown with a
+"history to <date>" note; further behind, it is shown as unavailable rather
+than analysed from old rows. The age line names the oldest coverage shown.
+
 Cost label: an entry link (Build Finder, manufacturing calculator) sends
 `cost_mode=build` with the cost of the user's own build. The first load
 echoes that cost into a hidden `build_cost`, which every later request sends
@@ -43,7 +50,7 @@ from __future__ import annotations
 
 import asyncio
 import math
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse
@@ -55,7 +62,7 @@ from app.esi.market import APPRAISAL_HUBS
 from app.market import history as market_history
 from app.market import hub_cost, hub_prefs, hub_route, hub_view
 from app.market import orders as market_orders
-from app.market.hub_analysis import analyse_hub, best_picks
+from app.market.hub_analysis import analyse_hub, best_picks, coverage_end, history_state
 from app.routes.market import _is_market_type
 from app.sde import lookup as sde
 
@@ -120,7 +127,10 @@ def _is_build_cost(cost_mode: str, unit_cost: float, build_cost: str | None) -> 
     return reference is not None and abs(round(reference, 2) - unit_cost) < 0.005
 
 
-def _age_str(type_id: int, latest_day: date | None) -> str:
+def _age_str(type_id: int, oldest_cover: date | None) -> str:
+    """'Orders 4 min old · history to 2026-11-09': the OLDEST order book and
+    the oldest history coverage among the hubs shown, so neither overstates
+    how current the figures are."""
     stamps = [market_orders.fetched_at(APPRAISAL_HUBS[k]["region_id"], type_id)
               for k in HUB_ORDER]
     stamps = [s for s in stamps if s is not None]
@@ -128,8 +138,8 @@ def _age_str(type_id: int, latest_day: date | None) -> str:
     if stamps:
         minutes = int((market_orders._now() - min(stamps)).total_seconds() // 60)
         parts.append(f"Orders {minutes} min old" if minutes >= 1 else "Orders just fetched")
-    if latest_day is not None:
-        parts.append(f"history to {latest_day.isoformat()}")
+    if oldest_cover is not None:
+        parts.append(f"history to {oldest_cover.isoformat()}")
     return " · ".join(parts)
 
 
@@ -189,8 +199,10 @@ async def market_type_hubs(
         *(market_orders.get_orders(h["region_id"], type_id) for h in hubs))
 
     today = _today()
+    yesterday = today - timedelta(days=1)
     results: dict[str, dict | None] = {}
-    latest_day = None
+    behind: dict[str, date] = {}      # hubs whose history is behind: last day covered
+    oldest_cover = None
     history_down = False
     for key, hub, raw_orders in zip(HUB_ORDER, hubs, order_lists):
         region = hub["region_id"]
@@ -202,18 +214,25 @@ async def market_type_hubs(
                                                 fetch=not history_down)
         if not failing_before and market_history.recently_failed(region, type_id):
             history_down = True  # this request's fetch for this hub just failed
-        history_ok = await market_history.fetched_at(db, region, type_id) is not None
+        fetched = await market_history.fetched_at(db, region, type_id)
         orders_ok = market_orders.fetched_at(region, type_id) is not None
-        if not (history_ok and orders_ok):
+        if fetched is None or not orders_ok:
             results[key] = None
             continue
         days = [{"date": r.date, "volume": r.volume, "average": r.average} for r in rows]
-        if days:
-            newest = max(d["date"] for d in days)
-            latest_day = newest if latest_day is None else max(latest_day, newest)
+        # The window ends on the last day the stored history covers; never
+        # past yesterday, since today is not over.
+        covered_to = min(coverage_end((d["date"] for d in days), fetched.date()), yesterday)
+        state = history_state(covered_to, today)
+        if state == "stale":
+            results[key] = None   # too far behind to analyse as if current
+            continue
+        if state == "behind":
+            behind[key] = covered_to
+        oldest_cover = covered_to if oldest_cover is None else min(oldest_cover, covered_to)
         results[key] = analyse_hub(
             days, raw_orders, hub["station_id"], quantity, unit_cost,
-            tax_pct / 100, broker_pct / 100, today)
+            tax_pct / 100, broker_pct / 100, covered_to + timedelta(days=1))
 
     routes: dict[str, dict | None] = {}
     if origin_id is not None:
@@ -238,11 +257,12 @@ async def market_type_hubs(
         "origin_name": origin_name,
         "sales_tax_pct": tax_pct,
         "broker_fee_pct": broker_pct,
-        "age_str": _age_str(type_id, latest_day),
+        "age_str": _age_str(type_id, oldest_cover),
         "show_route": origin_id is not None,
         "picks": hub_view.pick_boxes(picks, results, HUB_NAMES),
         "rows": [hub_view.hub_row(k, HUB_NAMES[k], results[k], routes.get(k), quantity,
-                                  origin_set=origin_id is not None)
+                                  origin_set=origin_id is not None,
+                                  history_to=behind.get(k))
                  for k in HUB_ORDER],
     })
 

@@ -10,14 +10,30 @@ Inputs are plain data:
 
 Two limits the page states in its footnote: demand is regional, and traded
 volume includes sales to buy orders, so list-and-wait estimates lean optimistic.
+
+The demand window ends on the last day the stored history covers (see
+`coverage_end`), not yesterday by the clock: history is cached for a day and
+the game publishes a day's row the next day, so the newest day or two are
+often not stored yet, and counting them as zero sales would understate demand
+and show a false falling trend.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import date, timedelta
 from statistics import median
 
 WINDOW_DAYS = 30
 SHORT_WINDOW_DAYS = 7
+
+# How far the stored history may lag behind yesterday (in days; see
+# `history_lag`). 0–1 is normal. From HISTORY_BEHIND_DAYS the hub is shown
+# with a "history to <date>" note; beyond STALE_HISTORY_MAX_DAYS it is shown
+# as unavailable rather than analysed from old rows.
+HISTORY_BEHIND_DAYS = 2
+STALE_HISTORY_MAX_DAYS = 3
+# A fetch always includes every day up to this many days before it.
+FETCH_COVERS_TO_DAYS = 2
 
 OUTLIER_FLOOR = 0.5     # sell orders under this share of the reference price are ignored
 STOCK_BAND = 1.10       # "competing stock" = listed within 10% of the lowest sell
@@ -44,16 +60,46 @@ def trend(demand_7: float, demand_30: float) -> str:
     return "flat"
 
 
+def coverage_end(row_dates: Iterable[date], fetched_on: date) -> date:
+    """The last day the stored history can be trusted to cover: the later of
+    its newest row and two days before the fetch (`fetched_on`, the UTC date
+    of the meta stamp). A fetch always includes everything up to two days
+    before it, so days in between with no row had no trades; a later row
+    proves later coverage."""
+    newest = max(row_dates, default=date.min)
+    return max(newest, fetched_on - timedelta(days=FETCH_COVERS_TO_DAYS))
+
+
+def history_lag(covered_to: date, today: date) -> int:
+    """Days between the last covered day and yesterday (0 = up to date)."""
+    return ((today - timedelta(days=1)) - covered_to).days
+
+
+def history_state(covered_to: date, today: date) -> str:
+    """'current' (lag 0–1), 'behind' (2–3: analysed, with a note) or
+    'stale' (more: the hub is shown as unavailable)."""
+    lag = history_lag(covered_to, today)
+    if lag > STALE_HISTORY_MAX_DAYS:
+        return "stale"
+    if lag >= HISTORY_BEHIND_DAYS:
+        return "behind"
+    return "current"
+
+
 def market_figures(days: list[dict], orders: list[dict], station_id: int,
-                   qty: int, today: date) -> dict:
+                   qty: int, window_end_exclusive: date) -> dict:
     """Demand, reference price and the counted order book for one hub.
 
-    The window is the WINDOW_DAYS calendar days ending yesterday. ESI omits
-    days with no trades, so volumes are divided by the calendar length, not
-    by the number of rows. Each d["date"] must be a datetime.date."""
-    start_30 = today - timedelta(days=WINDOW_DAYS)
-    start_7 = today - timedelta(days=SHORT_WINDOW_DAYS)
-    in_30 = [d for d in days if start_30 <= d["date"] < today]
+    The window is the WINDOW_DAYS calendar days before `window_end_exclusive`
+    (that day itself excluded); the endpoint passes the day after the last
+    day the history covers (`coverage_end`). ESI omits days with no trades,
+    so volumes are divided by the calendar length, not by the number of
+    rows: a day in the window with no row counts as zero. Each d["date"] must
+    be a datetime.date."""
+    end = window_end_exclusive
+    start_30 = end - timedelta(days=WINDOW_DAYS)
+    start_7 = end - timedelta(days=SHORT_WINDOW_DAYS)
+    in_30 = [d for d in days if start_30 <= d["date"] < end]
     in_7 = [d for d in in_30 if d["date"] >= start_7]
 
     demand_30 = sum(d.get("volume") or 0 for d in in_30) / WINDOW_DAYS
@@ -232,9 +278,10 @@ def verdict(result: dict, qty: int, has_cost: bool) -> str:
 
 def analyse_hub(days: list[dict], orders: list[dict], station_id: int, qty: int,
                 cost: float | None, sales_tax: float, broker_fee: float,
-                today: date) -> dict:
-    """Everything the page shows for one hub. See the module docstring."""
-    fig = market_figures(days, orders, station_id, qty, today)
+                window_end_exclusive: date) -> dict:
+    """Everything the page shows for one hub. See the module docstring;
+    `window_end_exclusive` is as in `market_figures`."""
+    fig = market_figures(days, orders, station_id, qty, window_end_exclusive)
     buys = fig.pop("buys")
     lw = list_and_wait(fig, qty, cost, sales_tax, broker_fee)
     now = sell_now(buys, qty, cost, sales_tax)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+from datetime import date
 
 SPEED_LABELS = {"fast": "Fast", "steady": "Steady", "slow": "Slow", "thin": "Thin market"}
 SUPPLY_LABELS = {"under": "Under-supplied", "saturated": "Saturated"}
@@ -115,9 +116,11 @@ def cost_note(cost: float | None, source: str | None, me: int) -> str:
 
 
 def hub_row(key: str, name: str, result: dict | None, route: dict | None, qty: int,
-            origin_set: bool = False) -> dict:
+            origin_set: bool = False, history_to: date | None = None) -> dict:
     """`route` is None both when no starting system is set and when one is set
-    but the hub cannot be reached from it; `origin_set` tells them apart."""
+    but the hub cannot be reached from it; `origin_set` tells them apart.
+    `history_to` is the last day this hub's history covers, given only when
+    that is far enough behind to mention (see hub_analysis.history_state)."""
     if result is None:
         return {"key": key, "name": name, "unavailable": True}
     lw, now = result["list"], result["now"]
@@ -131,6 +134,7 @@ def hub_row(key: str, name: str, result: dict | None, route: dict | None, qty: i
         "verdict": result["verdict"],
         "outlier_note": (f"{outliers} outlier{'s' if outliers != 1 else ''} ignored"
                          if outliers else ""),
+        "history_note": f"history to {history_to.isoformat()}" if history_to else "",
         "lowest_sell": ("Nothing listed" if result["nothing_listed"]
                         else fmt_isk(result["lowest_sell"])),
         "highest_buy": fmt_isk(result["highest_buy"]),

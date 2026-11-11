@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.market.history as history
 import app.market.orders as orders
-from app.db.models import Base, MarketHistoryMeta, User, get_db
+from app.db.models import Base, MarketHistory, MarketHistoryMeta, User, get_db
 from app.db.sde_models import SDEStation, SDESystem, SDEType
 from app.esi.market import APPRAISAL_HUBS
 from app.market import hub_prefs
@@ -28,6 +28,10 @@ PREFS_USER_ID = 93      # has saved fees: 8% sales tax, 2% broker fee
 TYPE_ID = 2001
 NOT_MARKET = 2999
 TODAY = date(2026, 11, 10)
+# history.py's clock, pinned to the same day as the endpoint's: the coverage
+# rule reads the meta stamp's date, so a real clock would make every figure
+# depend on the day the tests run.
+NOW = datetime(2026, 11, 10, 12, 0, tzinfo=timezone.utc)
 JITA = APPRAISAL_HUBS["jita"]
 AMARR = APPRAISAL_HUBS["amarr"]
 HEK = APPRAISAL_HUBS["hek"]
@@ -132,6 +136,7 @@ def app_db(factory, monkeypatch):
     monkeypatch.setattr(history, "_fetch_history_esi", fake_history)
     monkeypatch.setattr(market_hubs.hub_cost, "benchmark", fake_benchmark)
     monkeypatch.setattr(market_hubs, "_today", lambda: TODAY)
+    monkeypatch.setattr(history, "_now", lambda: NOW)
     yield calls
     main.app.dependency_overrides.pop(get_db, None)
     _clear_market_state()
@@ -479,14 +484,20 @@ def test_a_skipped_hub_still_shows_its_stale_stored_history(app_db, factory, mon
     client.get(f"/market/type/{TYPE_ID}/hubs?qty=10")        # all five histories stored
 
     async def age(region_ids):
-        two_days_ago = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=2)
+        two_days_ago = NOW.replace(tzinfo=None) - timedelta(days=2)
         async with factory() as db:
+            # What a fetch two days ago would have stored: rows only up to
+            # three days ago (the game publishes a day's row the next day).
+            await db.execute(delete(MarketHistory)
+                             .where(MarketHistory.region_id.in_(region_ids))
+                             .where(MarketHistory.date > TODAY - timedelta(days=3)))
             await db.execute(update(MarketHistoryMeta)
                              .where(MarketHistoryMeta.region_id.in_(region_ids))
                              .values(fetched_at=two_days_ago))
             await db.commit()
 
-    # Jita and Dodixie are stale (rows kept, stamp two days old).
+    # Jita and Dodixie are mildly stale: stamp two days old, history to
+    # 2026-11-07, two days short of yesterday.
     _run(age([JITA["region_id"], DODIXIE["region_id"]]))
 
     async def history_down(region_id, type_id):
@@ -498,9 +509,141 @@ def test_a_skipped_hub_still_shows_its_stale_stored_history(app_db, factory, mon
     body = client.get(f"/market/type/{TYPE_ID}/hubs?qty=10").text
     assert app_db[before:] == [("history", JITA["region_id"])]   # Dodixie not attempted
     assert not history.recently_failed(DODIXIE["region_id"], TYPE_ID)
-    # Both still render from their stored rows; only Hek (orders) is unavailable.
+    # Both still render from their stored rows, each with a "history to"
+    # note in the table and the card; only Hek (orders) is unavailable.
     assert body.count("Unavailable") == 2
     assert body.count('<tr class="hc-s">') == 4
+    assert body.count(HISTORY_NOTE.format("2026-11-07")) == 4
+    assert re.search(r"Jita</span>.*?" + re.escape(HISTORY_NOTE.format("2026-11-07")),
+                     body, re.S)
+
+
+# ── the demand window and stale history ─────────────────────────────────
+
+HISTORY_NOTE = '<span class="hc-mut">(history to {})</span>'
+
+
+def _seed_history(factory, region_ids, last_day, fetched_at, days=40, volume=5):
+    """Store `days` daily rows ending on `last_day` and a meta stamp of
+    `fetched_at` for each region, replacing whatever was there."""
+    async def go():
+        async with factory() as db:
+            await db.execute(delete(MarketHistory).where(
+                MarketHistory.region_id.in_(region_ids), MarketHistory.type_id == TYPE_ID))
+            await db.execute(delete(MarketHistoryMeta).where(
+                MarketHistoryMeta.region_id.in_(region_ids),
+                MarketHistoryMeta.type_id == TYPE_ID))
+            for region in region_ids:
+                for i in range(days):
+                    db.add(MarketHistory(region_id=region, type_id=TYPE_ID,
+                                         date=last_day - timedelta(days=i), average=330e6,
+                                         highest=340e6, lowest=320e6, volume=volume,
+                                         order_count=3))
+                db.add(MarketHistoryMeta(region_id=region, type_id=TYPE_ID,
+                                         fetched_at=fetched_at.replace(tzinfo=None)))
+            await db.commit()
+    _run(go())
+
+
+def _spy_on_analysis(monkeypatch):
+    """Record every analyse_hub result the endpoint computes."""
+    real, seen = market_hubs.analyse_hub, []
+
+    def spy(*args, **kwargs):
+        result = real(*args, **kwargs)
+        seen.append(result)
+        return result
+
+    monkeypatch.setattr(market_hubs, "analyse_hub", spy)
+    return seen
+
+
+@pytest.mark.parametrize("last_row_ago, fetched", [
+    # Rows to two days ago, fetched today: yesterday's row is not out yet.
+    (2, NOW),
+    # Rows to three days ago, fetched yesterday afternoon and still fresh.
+    # The old window (ending yesterday) read this as 93 a day, 71 over 7
+    # days, trend down.
+    (3, datetime(2026, 11, 9, 13, 0, tzinfo=timezone.utc)),
+])
+def test_demand_window_ends_where_the_stored_history_does(app_db, monkeypatch,
+                                                          last_row_ago, fetched):
+    async def steady(region_id, type_id):
+        app_db.append(("history", region_id))
+        return [{"date": (TODAY - timedelta(days=last_row_ago + i)).isoformat(),
+                 "average": 330e6, "highest": 340e6, "lowest": 320e6, "volume": 100,
+                 "order_count": 3} for i in range(40)]
+
+    monkeypatch.setattr(history, "_fetch_history_esi", steady)
+    monkeypatch.setattr(history, "_now", lambda: fetched)
+    seen = _spy_on_analysis(monkeypatch)
+    body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?qty=10").text
+    assert len(seen) == 4                          # Hek's orders fail
+    for result in seen:
+        assert result["demand_30"] == pytest.approx(100.0)
+        assert result["demand_7"] == pytest.approx(100.0)
+        assert result["trend"] == "flat"
+    assert body.count("7d: 100<") == 4
+
+
+def test_history_far_behind_with_the_fetch_failing_is_unavailable(app_db, factory,
+                                                                  monkeypatch):
+    regions = [h["region_id"] for h in APPRAISAL_HUBS.values()]
+    _seed_history(factory, regions, TODAY - timedelta(days=62), NOW - timedelta(days=60))
+
+    async def history_down(region_id, type_id):
+        app_db.append(("history", region_id))
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(history, "_fetch_history_esi", history_down)
+    body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?qty=10").text
+    # Sixty-day-old rows are not "no sales in 30 days": all five unavailable.
+    assert body.count("Unavailable") == 10         # table and cards
+    assert body.count('class="hc-retry"') == 10
+    assert '<tr class="hc-s">' not in body
+    assert "No sales here" not in body
+    assert 'class="hc-picks"' not in body
+
+
+def test_one_hub_far_behind_is_unavailable_and_the_age_line_uses_the_oldest_shown(
+        app_db, factory, monkeypatch):
+    yesterday_pm = datetime(2026, 11, 9, 13, 0, tzinfo=timezone.utc)
+    _seed_history(factory, [JITA["region_id"], RENS["region_id"]],
+                  TODAY - timedelta(days=1), NOW)                       # current
+    _seed_history(factory, [AMARR["region_id"]],
+                  TODAY - timedelta(days=27), NOW - timedelta(days=25))  # 25 days stale
+    _seed_history(factory, [DODIXIE["region_id"]],
+                  TODAY - timedelta(days=3), yesterday_pm)              # two days behind
+
+    async def history_down(region_id, type_id):
+        app_db.append(("history", region_id))
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(history, "_fetch_history_esi", history_down)
+    body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?qty=10").text
+    assert [c for c in app_db if c[0] == "history"] == [("history", AMARR["region_id"])]
+    assert re.search(r'Amarr</span></td>\s*<td colspan="\d+" class="hc-unavail">Unavailable',
+                     body)
+    assert body.count("Unavailable") == 4          # Amarr (history) and Hek (orders)
+    assert body.count('<tr class="hc-s">') == 3    # Jita, Dodixie, Rens
+    age = re.search(r'<div class="hc-age hc-mut">([^<]*)</div>', body).group(1)
+    assert age.endswith("history to 2026-11-07")   # Dodixie's, the oldest shown
+
+
+def test_a_hub_two_days_behind_renders_with_a_history_note(app_db, factory, monkeypatch):
+    yesterday_pm = datetime(2026, 11, 9, 13, 0, tzinfo=timezone.utc)
+    _seed_history(factory, [DODIXIE["region_id"]], TODAY - timedelta(days=3), yesterday_pm)
+    body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?qty=10").text
+    assert body.count("Unavailable") == 2          # Hek's orders only
+    assert body.count('<tr class="hc-s">') == 4
+    note = HISTORY_NOTE.format("2026-11-07")
+    assert body.count(note) == 2                   # Dodixie: table and card
+    table = body[body.index('<table class="hc-table m-hide">'):body.index("</table>")]
+    dodixie = table[table.index("Dodixie</span>"):]
+    assert note in dodixie[:dodixie.index('<tr class="hc-r">')]   # its own verdict line
+    cards = body[body.index('<div class="hc-cards m-only">'):]
+    card = cards[cards.index("Dodixie</span>"):]
+    assert note in card[:card.index('<div class="hc-mkt">')]
 
 
 def test_a_stale_order_book_still_renders_with_its_age(app_db, monkeypatch):

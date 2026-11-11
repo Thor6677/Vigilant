@@ -135,7 +135,7 @@
                 {% if show_route %}<td class="hc-gl">{{ r.route or '—' }}<span class="hc-small">{{ r.route_note }}</span></td>{% endif %}
             </tr>
             <tr class="hc-s">
-                <td colspan="{{ span + 1 }}">{{ r.verdict }}{% if r.outlier_note %} <span class="hc-mut">({{ r.outlier_note }})</span>{% endif %}</td>
+                <td colspan="{{ span + 1 }}">{{ r.verdict }}{% if r.outlier_note %} <span class="hc-mut">({{ r.outlier_note }})</span>{% endif %}{% if r.history_note %} <span class="hc-mut">({{ r.history_note }})</span>{% endif %}</td>
             </tr>
             {% endif %}
         {% endfor %}
@@ -153,7 +153,7 @@
         {% else %}
         <div class="hc-card">
             <div class="hc-ch"><span class="hc-hub">{{ r.name }}</span><span class="hc-tags">{{ tags(r) }}</span></div>
-            <div class="hc-say">{{ r.verdict }}{% if r.outlier_note %} <span class="hc-mut">({{ r.outlier_note }})</span>{% endif %}</div>
+            <div class="hc-say">{{ r.verdict }}{% if r.outlier_note %} <span class="hc-mut">({{ r.outlier_note }})</span>{% endif %}{% if r.history_note %} <span class="hc-mut">({{ r.history_note }})</span>{% endif %}</div>
             <div class="hc-mkt">
                 <div><div class="hc-n">{{ r.lowest_sell }}</div><div class="hc-l">Lowest sell</div></div>
                 <div><div class="hc-n">{{ r.demand_30 }} {{ trend(r) }}</div><div class="hc-l">Sold / day</div></div>

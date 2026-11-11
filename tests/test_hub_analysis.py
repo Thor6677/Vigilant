@@ -53,6 +53,44 @@ def test_window_is_the_30_days_ending_yesterday():
     assert _fig(days, [])["demand_30"] == pytest.approx(2.0)
 
 
+def test_window_ends_the_day_before_window_end_exclusive():
+    covered_to = TODAY - timedelta(days=3)
+    days = [{"date": covered_to - timedelta(days=i), "volume": 100, "average": 100.0}
+            for i in range(40)]
+    fig = ha.market_figures(days, [], STATION, 10,
+                            window_end_exclusive=covered_to + timedelta(days=1))
+    assert fig["demand_30"] == pytest.approx(100.0)
+    assert fig["demand_7"] == pytest.approx(100.0)
+    assert fig["trend"] == "flat"
+
+
+# ── how far the stored history reaches ─────────────────────────────────
+
+def test_coverage_end_is_the_newest_row_when_it_is_newer_than_fetch_minus_two():
+    rows = [TODAY - timedelta(days=5), TODAY - timedelta(days=1), TODAY - timedelta(days=3)]
+    assert ha.coverage_end(rows, TODAY) == TODAY - timedelta(days=1)
+
+
+def test_coverage_end_without_rows_is_two_days_before_the_fetch():
+    assert ha.coverage_end([], TODAY) == TODAY - timedelta(days=2)
+
+
+def test_coverage_end_with_only_old_rows_is_two_days_before_the_fetch():
+    # An item that stopped trading: the fetch proves the quiet days are quiet.
+    assert ha.coverage_end([TODAY - timedelta(days=60)], TODAY - timedelta(days=1)) == (
+        TODAY - timedelta(days=3))
+
+
+@pytest.mark.parametrize("behind, lag, state", [
+    (1, 0, "current"), (2, 1, "current"), (3, 2, "behind"), (4, 3, "behind"),
+    (5, 4, "stale"), (60, 59, "stale"),
+])
+def test_history_lag_and_state(behind, lag, state):
+    covered_to = TODAY - timedelta(days=behind)
+    assert ha.history_lag(covered_to, TODAY) == lag
+    assert ha.history_state(covered_to, TODAY) == state
+
+
 def test_reference_price_is_the_median_daily_average():
     days = [
         {"date": TODAY - timedelta(days=1), "volume": 1, "average": 100.0},
@@ -263,7 +301,7 @@ def _worked():
         _buy(270e6, 10, min_volume=20),        # batch of 10 cannot fill it
     ]
     return ha.analyse_hub(days, orders, STATION, qty=10, cost=268e6,
-                          sales_tax=0.0337, broker_fee=0.015, today=TODAY)
+                          sales_tax=0.0337, broker_fee=0.015, window_end_exclusive=TODAY)
 
 
 def test_worked_example_figures():
@@ -293,7 +331,7 @@ def test_worked_example_verdict():
 def test_verdict_for_a_thin_market():
     days = _days([1] * 11 + [None] * 19)
     r = ha.analyse_hub(days, [_sell(100.0, 3)], STATION, qty=10, cost=None,
-                       sales_tax=0.05, broker_fee=0.01, today=TODAY)
+                       sales_tax=0.05, broker_fee=0.01, window_end_exclusive=TODAY)
     assert r["speed"] == "thin"
     assert r["verdict"].startswith(
         "Traded on 11 of the last 30 days. Treat these figures as rough.")
@@ -302,13 +340,14 @@ def test_verdict_for_a_thin_market():
 
 def test_verdict_with_no_sales_at_all():
     r = ha.analyse_hub([], [], STATION, qty=10, cost=None,
-                       sales_tax=0.05, broker_fee=0.01, today=TODAY)
+                       sales_tax=0.05, broker_fee=0.01, window_end_exclusive=TODAY)
     assert r["verdict"].startswith("No sales here in the last 30 days.")
 
 
 def test_verdict_flags_a_loss_on_selling_now():
     r = ha.analyse_hub(_days([10] * 30), [_sell(100.0, 50), _buy(70.0, 100)], STATION,
-                       qty=10, cost=80.0, sales_tax=0.05, broker_fee=0.01, today=TODAY)
+                       qty=10, cost=80.0, sales_tax=0.05, broker_fee=0.01,
+                       window_end_exclusive=TODAY)
     assert r["verdict"].endswith("Selling to buy orders loses money against your cost.")
 
 
@@ -362,7 +401,8 @@ def test_days_phrase(best, typical, expected):
 
 def test_verdict_for_one_unit_reads_naturally():
     r = ha.analyse_hub(_days([10] * 30), [_sell(100.0, 1)], STATION, qty=1,
-                       cost=None, sales_tax=0.05, broker_fee=0.01, today=TODAY)
+                       cost=None, sales_tax=0.05, broker_fee=0.01,
+                       window_end_exclusive=TODAY)
     assert "Your 1 would take under a day." in r["verdict"]
 
 
@@ -390,7 +430,8 @@ def test_buy_order_with_no_units_left_is_ignored():
 
 def test_verdict_says_both_when_a_partial_fill_also_loses_money():
     r = ha.analyse_hub(_days([10] * 30), [_sell(100.0, 50), _buy(70.0, 4)], STATION,
-                       qty=10, cost=80.0, sales_tax=0.05, broker_fee=0.01, today=TODAY)
+                       qty=10, cost=80.0, sales_tax=0.05, broker_fee=0.01,
+                       window_end_exclusive=TODAY)
     assert r["verdict"].endswith("Buy orders can only take 4, at a loss against your cost.")
 
 
@@ -413,13 +454,13 @@ def test_no_days_estimate_is_thin():
 
 def test_verdict_when_nothing_is_listed():
     r = ha.analyse_hub(_days([10] * 30), [_buy(90.0, 5)], STATION, qty=10, cost=None,
-                       sales_tax=0.05, broker_fee=0.01, today=TODAY)
+                       sales_tax=0.05, broker_fee=0.01, window_end_exclusive=TODAY)
     assert r["verdict"].startswith("Sells about 10 a day and nothing is listed.")
 
 
 def test_verdict_when_saturated():
     r = ha.analyse_hub(_days([1] * 30), [_sell(100.0, 41)], STATION, qty=10, cost=None,
-                       sales_tax=0.05, broker_fee=0.01, today=TODAY)
+                       sales_tax=0.05, broker_fee=0.01, window_end_exclusive=TODAY)
     assert r["supply"] == "saturated"
     assert r["verdict"].startswith(
         "41 listed against about 1 a day: 41 days of stock ahead of you.")

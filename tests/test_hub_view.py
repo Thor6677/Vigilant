@@ -101,6 +101,14 @@ def test_hub_row_for_missing_pieces():
     assert row["route"] == "" and row["route_note"] == ""
 
 
+def test_hub_row_history_note_only_when_history_is_behind():
+    from datetime import date
+    assert hv.hub_row("amarr", "Amarr", _result(), None, qty=10)["history_note"] == ""
+    row = hv.hub_row("amarr", "Amarr", _result(), None, qty=10,
+                     history_to=date(2026, 11, 7))
+    assert row["history_note"] == "history to 2026-11-07"
+
+
 def test_hub_row_unavailable():
     assert hv.hub_row("hek", "Hek", None, None, qty=10) == {
         "key": "hek", "name": "Hek", "unavailable": True}
