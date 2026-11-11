@@ -4,6 +4,10 @@
     compared for one item, quantity and cost.
   * `POST /market/hub-prefs`           — save fees and starting system.
 
+The item page loads the whole partial once; after that the form's own
+requests (and the retry button) ask for the same partial but swap in only its
+`#hc-results` block, so the inputs are never re-rendered under the user.
+
 All maths is in `app.market.hub_analysis`; all strings in
 `app.market.hub_view`. This module only gathers data: regional history and
 hub orders through the existing cached fetchers, at most ten upstream requests
@@ -40,7 +44,6 @@ HUB_ORDER = ("jita", "amarr", "dodixie", "hek", "rens")
 HUB_NAMES = {"jita": "Jita", "amarr": "Amarr", "dodixie": "Dodixie",
              "hek": "Hek", "rens": "Rens"}
 MAX_QTY = 1_000_000
-COST_MODES = ("benchmark", "build", "typed")
 
 
 def _today() -> date:
@@ -92,7 +95,7 @@ async def market_type_hubs(
     request: Request,
     type_id: int,
     qty: str = "1",
-    cost_mode: str = "benchmark",
+    cost_mode: str = "",
     cost: str = "",
     origin: str | None = None,
     sales_tax: str | None = None,
@@ -113,21 +116,22 @@ async def market_type_hubs(
     origin_id, origin_name, origin_error = await _resolve_origin(
         db, origin, prefs.origin_system_id)
 
+    # One cost field: a readable figure is used as given (to the 0.01 ISK the
+    # game prices in, so the echoed field value is exactly the cost used);
+    # blank or unreadable falls back to the benchmark, if there is one.
     bench, bench_me = await hub_cost.benchmark(db, type_id)
-    mode = cost_mode if cost_mode in COST_MODES else "benchmark"
-    notes = []
-    if mode == "benchmark" and bench is None:
-        mode = "typed"
-    if mode == "benchmark":
-        unit_cost = bench
-        notes.append(hub_cost.BENCHMARK_NOTE.format(me=bench_me))
+    typed_cost = hub_view.parse_isk(cost)
+    if typed_cost is not None:
+        unit_cost = round(typed_cost, 2)
+        source = "build" if cost_mode == "build" else "typed"
+    elif bench is not None:
+        unit_cost, source = bench, "benchmark"
     else:
-        unit_cost = hub_view.parse_isk(cost)
-        if unit_cost is None:
-            notes.append("No cost set — enter a cost per unit to see profit and margin."
-                         if bench is not None else
-                         "No blueprint for this item — enter a cost per unit to see "
-                         "profit and margin.")
+        unit_cost, source = None, None
+    notes = [hub_view.cost_note(unit_cost, source, bench_me)]
+    if typed_cost is None and cost.strip():
+        notes.append(hub_view.UNREADABLE_COST_BENCHMARK if bench is not None
+                     else hub_view.UNREADABLE_COST_NONE)
     if origin_error:
         notes.append(origin_error)
 
@@ -166,9 +170,11 @@ async def market_type_hubs(
     return templates.TemplateResponse(request, "partials/market_hub_comparison.html", {
         "type_id": type_id,
         "qty": quantity,
-        "cost_mode": mode,
-        "cost_value": f"{unit_cost:.0f}" if unit_cost is not None else "",
-        "has_benchmark": bench is not None,
+        # Only the first load renders the form (later responses replace just
+        # #hc-results), so these echo what an entry link carried.
+        "cost_mode": "build" if cost_mode == "build" else "",
+        "cost_value": hub_view.fmt_cost_input(unit_cost) if typed_cost is not None else "",
+        "cost_placeholder": hub_view.cost_placeholder(bench),
         "notes": notes,
         "origin_name": origin_name,
         "sales_tax_pct": tax_pct,

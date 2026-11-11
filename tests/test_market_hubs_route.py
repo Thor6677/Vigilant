@@ -5,6 +5,7 @@ import json
 import re
 import tempfile
 from datetime import date, timedelta
+from html import unescape
 
 import itsdangerous
 import pytest
@@ -296,8 +297,9 @@ def _row(name, **over):
 
 
 def _render(**over):
-    ctx = dict(type_id=TYPE_ID, qty=10, cost_mode="benchmark", cost_value="268000000",
-               has_benchmark=True, notes=["Benchmark: sample note."], origin_name="Sample System",
+    ctx = dict(type_id=TYPE_ID, qty=10, cost_mode="", cost_value="",
+               cost_placeholder="benchmark 268.0M",
+               notes=["Benchmark: sample note."], origin_name="Sample System",
                sales_tax_pct=3.37, broker_fee_pct=1.5, age_str="Orders 4 min old",
                show_route=True,
                picks=[{"k": "Fastest sale", "v": "Amarr — about 2 – 5 days", "d": "Fast."}],
@@ -325,3 +327,184 @@ def test_partial_hides_the_route_column_without_a_starting_system():
 def test_partial_has_no_inline_event_handlers():
     html = _render()
     assert "onclick=" not in html and "onchange=" not in html
+
+
+# ── inputs stay in place; results refresh on their own ─────────────────
+
+def _element(html, elem_id):
+    """The outer HTML of the <div id=elem_id>, found by counting div depth."""
+    start = html.index(f'<div id="{elem_id}"')
+    depth, pos = 0, start
+    for m in re.finditer(r"<div\b|</div>", html[start:]):
+        depth += 1 if m.group() == "<div" else -1
+        if depth == 0:
+            return html[start:start + m.end()]
+    raise AssertionError(f"unclosed #{elem_id}")
+
+
+def _tag(html, marker):
+    """The whole start tag containing `marker`."""
+    i = html.index(marker)
+    return html[html.rindex("<", 0, i):html.index(">", i) + 1]
+
+
+def _notes(html):
+    return [unescape(n) for n in re.findall(r'<div class="hc-note">([^<]*)</div>', html)]
+
+
+def test_partial_puts_everything_that_depends_on_the_inputs_in_hc_results():
+    html = _render()
+    results = _element(html, "hc-results")
+    before = html[:html.index('<div id="hc-results"')]
+    # The form, its inputs and the save status come first, outside the results.
+    assert "</form>" in before and "<form" not in results
+    assert 'id="hc-saved"' in before and 'id="hc-saved"' not in results
+    for marker in ("Orders 4 min old", "Benchmark: sample note.", 'class="hc-picks"',
+                   '<table class="hc-table m-hide">', '<div class="hc-cards m-only">',
+                   'class="hc-foot"'):
+        assert marker in results and marker not in before
+
+
+def test_form_and_retry_replace_only_the_results():
+    html = _render()
+    form = _tag(html, "<form")
+    for attr in ('hx-target="#hc-results"', 'hx-select="#hc-results"',
+                 'hx-swap="outerHTML"', 'hx-trigger="change, submit"',
+                 f'hx-get="/market/type/{TYPE_ID}/hubs"'):
+        assert attr in form
+    retry = _tag(html, 'class="hc-retry"')
+    for attr in ('hx-target="#hc-results"', 'hx-select="#hc-results"',
+                 'hx-swap="outerHTML"', 'hx-include="#hc-form"'):
+        assert attr in retry
+    # The save button sits inside the form: it must not inherit hx-select,
+    # or its "Saved." reply would be filtered down to nothing.
+    save = _tag(html, 'hx-post="/market/hub-prefs"')
+    assert 'hx-select="unset"' in save and 'hx-target="#hc-saved"' in save
+
+
+def test_item_page_first_load_swaps_the_whole_partial(app_db):
+    body = _authed_client().get(f"/market/type/{TYPE_ID}").text
+    hubs = _tag(body, 'id="mk-hubs"')
+    assert 'hx-trigger="load"' in hubs and 'hx-swap="innerHTML"' in hubs
+    assert "hx-select" not in hubs
+
+
+def test_every_input_has_an_id_and_a_bound_label():
+    html = _render()
+    inputs = re.findall(r"<input\b[^>]*>", html)
+    assert len(inputs) == 6
+    for tag in inputs:
+        found = re.search(r'\bid="([^"]+)"', tag)
+        assert found, tag
+        if 'type="hidden"' not in tag:
+            assert f'<label class="hc-fld" for="{found.group(1)}">' in html, tag
+
+
+def test_one_cost_field_with_a_benchmark_placeholder(app_db):
+    body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?qty=10").text
+    assert "<select" not in body and "readonly" not in body
+    cost = _tag(body, 'id="hc-cost"')
+    assert 'name="cost" value=""' in cost and 'placeholder="benchmark 268.0M"' in cost
+    assert _tag(body, 'id="hc-cost-mode"').count('value=""') == 1
+    assert "+46.9M" in body                        # blank cost: the benchmark is used
+    assert _notes(_element(body, "hc-results"))[0] == (
+        "Cost used: 268.0M each — benchmark (materials at EVE's average reference "
+        "price, ME 10, no job fees or invention cost).")
+
+
+def test_without_a_benchmark_the_placeholder_asks_for_a_cost(app_db, monkeypatch):
+    async def none_benchmark(db, type_id):
+        return None, 10
+    monkeypatch.setattr(market_hubs.hub_cost, "benchmark", none_benchmark)
+    body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?qty=10").text
+    assert 'placeholder="enter a cost"' in _tag(body, 'id="hc-cost"')
+    assert _notes(body)[0] == ("No blueprint for this item — enter a cost per unit "
+                               "to see profit and margin.")
+
+
+@pytest.mark.parametrize("query, note", [
+    ("cost=300m", "Cost used: 300.0M each — your figure."),
+    ("cost=300m&cost_mode=typed", "Cost used: 300.0M each — your figure."),
+    ("cost=300m&cost_mode=benchmark", "Cost used: 300.0M each — your figure."),
+    ("cost=300m&cost_mode=build", "Cost used: 300.0M each — from your build."),
+])
+def test_a_typed_cost_is_used_and_labelled(app_db, query, note):
+    body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?qty=10&{query}").text
+    assert "+14.9M" in body                        # 331M * 0.9513 - 300M
+    assert _notes(_element(body, "hc-results"))[0] == note
+
+
+def test_cost_mode_build_is_echoed_and_nothing_else(app_db):
+    client = _authed_client()
+    for mode, echoed in (("build", "build"), ("typed", ""), ("benchmark", ""), ("x", "")):
+        body = client.get(f"/market/type/{TYPE_ID}/hubs?cost=1m&cost_mode={mode}").text
+        assert f'value="{echoed}"' in _tag(body, 'id="hc-cost-mode"'), mode
+
+
+def test_unreadable_cost_falls_back_to_the_benchmark_and_says_so(app_db):
+    body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?qty=10&cost=lots").text
+    assert "+46.9M" in body
+    assert _notes(body)[:2] == [
+        "Cost used: 268.0M each — benchmark (materials at EVE's average reference "
+        "price, ME 10, no job fees or invention cost).",
+        "Could not read that cost; using the benchmark.",
+    ]
+
+
+def test_unreadable_cost_without_a_benchmark_asks_for_a_number(app_db, monkeypatch):
+    async def none_benchmark(db, type_id):
+        return None, 10
+    monkeypatch.setattr(market_hubs.hub_cost, "benchmark", none_benchmark)
+    body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?qty=10&cost=lots").text
+    assert "Could not read that cost; enter a number such as 180m." in _notes(body)
+    assert "+46.9M" not in body
+
+
+@pytest.mark.parametrize("raw, shown", [
+    ("4.35", "4.35"), ("0.4", "0.4"), ("268000000.0", "268000000"), ("180m", "180000000"),
+    ("1.256", "1.26"),
+])
+def test_cost_echo_keeps_up_to_two_decimals(app_db, raw, shown):
+    body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?cost={raw}").text
+    assert f'name="cost" value="{shown}"' in body
+
+
+def _cheap_market(monkeypatch):
+    """A 10 ISK item, so a cost's decimals show in the profit figures."""
+    async def cheap_orders(region_id, type_id):
+        station = next(h["station_id"] for h in APPRAISAL_HUBS.values()
+                       if h["region_id"] == region_id)
+        return [{"is_buy_order": False, "price": 10.0, "volume_remain": 50,
+                 "location_id": station, "min_volume": 1},
+                {"is_buy_order": True, "price": 9.0, "volume_remain": 50,
+                 "location_id": station, "min_volume": 1}]
+
+    async def cheap_history(region_id, type_id):
+        return [{"date": (TODAY - timedelta(days=i + 1)).isoformat(), "average": 10.0,
+                 "highest": 10.5, "lowest": 9.5, "volume": 40, "order_count": 9}
+                for i in range(30)]
+
+    monkeypatch.setattr(orders, "_fetch_orders_esi", cheap_orders)
+    monkeypatch.setattr(history, "_fetch_history_esi", cheap_history)
+
+
+def _figures(body):
+    return re.findall(r'class="[^"]*\bhc-(?:pos|neg)">([^<]+)<', _element(body, "hc-results"))
+
+
+def test_cost_echo_round_trips_to_the_same_figures(app_db, monkeypatch):
+    _cheap_market(monkeypatch)
+    client = _authed_client()
+    first = client.get(f"/market/type/{TYPE_ID}/hubs?qty=5&cost=4.35").text
+    echoed = re.search(r'name="cost" value="([^"]*)"', first).group(1)
+    assert echoed == "4.35"
+    again = client.get(f"/market/type/{TYPE_ID}/hubs?qty=5&cost={echoed}").text
+    assert _figures(first) and _figures(first) == _figures(again)
+    assert "+5.16" in _figures(first)              # 10 * (1 - 0.0487) - 4.35
+
+
+def test_quantity_used_shows_in_the_table_and_every_card(app_db):
+    body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?qty=lots").text
+    results = _element(body, "hc-results")
+    # Junk quantity reads as 1: the table header plus each of the four loaded cards.
+    assert results.count("Days to sell 1<") == 5

@@ -1,10 +1,16 @@
-{# htmx partial — swapped via innerHTML into #mk-hubs on market_type.html, so
-   no extends; the .hc-* rules are in that page's <style> block. Context is
-   built by app/routes/market_hubs.py from app/market/hub_view.py.
+{# htmx partial — the first load swaps all of it into #mk-hubs on
+   market_type.html (innerHTML), so no extends; the .hc-* rules are in that
+   page's <style> block. Context is built by app/routes/market_hubs.py from
+   app/market/hub_view.py.
+
+   The form is rendered only by that first load. Its own requests (change or
+   Enter) and the retry buttons fetch the same partial but swap in only
+   #hc-results (hx-select + outerHTML), so typing, focus and the save status
+   (#hc-saved, outside the results) survive a refresh. Everything that
+   depends on the inputs therefore lives inside #hc-results.
 
    Desktop: one table, a row per hub with its verdict underneath (m-hide on
-   phones). Phones: one card per hub (m-only). Changing any input re-requests
-   the section; there are no inline handlers (CSP). #}
+   phones). Phones: one card per hub (m-only). No inline handlers (CSP). #}
 {% set span = 9 if show_route else 8 %}
 {% macro tags(r) -%}
 <span class="hc-tag hc-{{ r.speed }}">{{ r.speed_label }}</span>
@@ -16,40 +22,44 @@
 {%- endmacro %}
 {% macro retry() -%}
 <button type="button" class="hc-retry" hx-get="/market/type/{{ type_id }}/hubs"
-        hx-include=".hc-inputs" hx-target="#mk-hubs" hx-swap="innerHTML">retry</button>
+        hx-include="#hc-form" hx-target="#hc-results" hx-select="#hc-results"
+        hx-swap="outerHTML">retry</button>
 {%- endmacro %}
 
 <div class="b-section hc">
     <div class="b-section-head">
         <span class="b-label">Hub comparison</span>
-        <span class="hc-mut">{{ age_str }}</span>
     </div>
 
-    <form class="hc-inputs" hx-get="/market/type/{{ type_id }}/hubs" hx-target="#mk-hubs"
-          hx-swap="innerHTML" hx-trigger="change, submit">
-        <label class="hc-fld"><span>Quantity</span>
-            <input class="b-input" type="text" inputmode="numeric" name="qty" value="{{ qty }}" style="width:6rem;"></label>
-        <label class="hc-fld"><span>Cost per unit</span>
-            <select class="b-input b-select" name="cost_mode">
-                {% if has_benchmark %}<option value="benchmark"{% if cost_mode == 'benchmark' %} selected{% endif %}>Benchmark</option>{% endif %}
-                <option value="build"{% if cost_mode == 'build' %} selected{% endif %}>My build</option>
-                <option value="typed"{% if cost_mode == 'typed' %} selected{% endif %}>Typed</option>
-            </select></label>
-        <label class="hc-fld"><span>ISK each</span>
-            <input class="b-input" type="text" inputmode="decimal" name="cost" value="{{ cost_value }}"
-                   placeholder="e.g. 180m"{% if cost_mode == 'benchmark' %} readonly{% endif %} style="width:10rem;"></label>
-        <label class="hc-fld"><span>Starting system</span>
-            <input class="b-input" type="text" name="origin" value="{{ origin_name }}" placeholder="none" style="width:9rem;"></label>
-        <label class="hc-fld"><span>Sales tax %</span>
-            <input class="b-input" type="text" inputmode="decimal" name="sales_tax" value="{{ sales_tax_pct }}" style="width:5rem;"></label>
-        <label class="hc-fld"><span>Broker fee %</span>
-            <input class="b-input" type="text" inputmode="decimal" name="broker_fee" value="{{ broker_fee_pct }}" style="width:5rem;"></label>
+    <form id="hc-form" class="hc-inputs" hx-get="/market/type/{{ type_id }}/hubs"
+          hx-trigger="change, submit" hx-target="#hc-results" hx-select="#hc-results"
+          hx-swap="outerHTML">
+        <label class="hc-fld" for="hc-qty"><span>Quantity</span>
+            <input class="b-input" id="hc-qty" type="text" inputmode="numeric" name="qty" value="{{ qty }}" style="width:6rem;"></label>
+        <label class="hc-fld" for="hc-cost"><span>Cost per unit</span>
+            <input class="b-input" id="hc-cost" type="text" inputmode="decimal" name="cost" value="{{ cost_value }}"
+                   placeholder="{{ cost_placeholder }}" style="width:10rem;"></label>
+        {# "build" only when an entry link said the cost is the user's own build;
+           it only changes how the cost-used note names the figure. #}
+        <input type="hidden" id="hc-cost-mode" name="cost_mode" value="{{ cost_mode }}">
+        <label class="hc-fld" for="hc-origin"><span>Starting system</span>
+            <input class="b-input" id="hc-origin" type="text" name="origin" value="{{ origin_name }}" placeholder="none" style="width:9rem;"></label>
+        <label class="hc-fld" for="hc-tax"><span>Sales tax %</span>
+            <input class="b-input" id="hc-tax" type="text" inputmode="decimal" name="sales_tax" value="{{ sales_tax_pct }}" style="width:5rem;"></label>
+        <label class="hc-fld" for="hc-broker"><span>Broker fee %</span>
+            <input class="b-input" id="hc-broker" type="text" inputmode="decimal" name="broker_fee" value="{{ broker_fee_pct }}" style="width:5rem;"></label>
         <span class="hc-fld">
+            {# hx-select="unset": the form's hx-select is inherited, and would
+               filter the "Saved." reply down to nothing. #}
             <button type="button" class="b-btn is-ghost" hx-post="/market/hub-prefs"
-                    hx-include="closest form" hx-target="#hc-saved" hx-swap="innerHTML">Save fees and start</button>
+                    hx-include="#hc-form" hx-target="#hc-saved" hx-select="unset"
+                    hx-swap="innerHTML">Save fees and start</button>
         </span>
         <span id="hc-saved" class="hc-mut" role="status"></span>
     </form>
+
+    <div id="hc-results">
+    <div class="hc-age hc-mut">{{ age_str }}</div>
     {% for note in notes %}<div class="hc-note">{{ note }}</div>{% endfor %}
 
     {% if picks %}
@@ -156,4 +166,5 @@
         buyers with stock priced within 10% of the lowest sell). Stock counts only that
         nearby stock. Sell-now batch profit covers only the units buy orders can take.
     </div>
+    </div>{# #hc-results #}
 </div>

@@ -35,6 +35,30 @@ def test_parse_isk(raw, expected):
     assert hv.parse_isk(raw) == expected
 
 
+@pytest.mark.parametrize("v, expected", [
+    (4.35, "4.35"), (0.4, "0.4"), (268_000_000.0, "268000000"), (1.0, "1"), (0.05, "0.05"),
+    (180e6, "180000000"),
+])
+def test_fmt_cost_input_keeps_up_to_two_decimals(v, expected):
+    assert hv.fmt_cost_input(v) == expected
+    assert hv.parse_isk(hv.fmt_cost_input(v)) == v
+
+
+def test_cost_note_names_the_source():
+    assert hv.cost_note(268e6, "benchmark", 10) == (
+        "Cost used: 268.0M each — benchmark (materials at EVE's average reference "
+        "price, ME 10, no job fees or invention cost).")
+    assert hv.cost_note(180e6, "typed", 10) == "Cost used: 180.0M each — your figure."
+    assert hv.cost_note(181.2e6, "build", 2) == "Cost used: 181.2M each — from your build."
+    assert hv.cost_note(None, None, 10) == (
+        "No blueprint for this item — enter a cost per unit to see profit and margin.")
+
+
+def test_cost_placeholder():
+    assert hv.cost_placeholder(268e6) == "benchmark 268.0M"
+    assert hv.cost_placeholder(None) == "enter a cost"
+
+
 def _result(**over):
     r = {"demand_30": 5.0, "demand_7": 6.5, "trade_days": 30, "trend": "up",
          "reference": 330e6, "lowest_sell": 331e6, "highest_buy": 284e6,

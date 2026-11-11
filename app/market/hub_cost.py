@@ -4,7 +4,8 @@ One product, costed the way Build Finder costs a row: materials at EVE's
 global average reference price (`/markets/prices/`), neutral facility. The
 blueprint is assumed researched to ME 10, or ME 2 when the product is
 invented (the base ME of an invented copy). Job install fees and invention
-overhead are NOT included — the page labels the figure with these assumptions.
+overhead are NOT included — the page labels the figure with these assumptions
+(the wording is `hub_view.cost_note`).
 """
 from __future__ import annotations
 
@@ -18,8 +19,6 @@ from app.sde import lookup as sde
 
 BENCHMARK_ME = 10
 INVENTED_ME = 2
-BENCHMARK_NOTE = ("Benchmark: materials at EVE's average reference price, "
-                  "ME {me}, no job fees or invention cost.")
 
 
 async def benchmark(db: AsyncSession, product_type_id: int) -> tuple[float | None, int]:

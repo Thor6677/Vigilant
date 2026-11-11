@@ -7,6 +7,17 @@ SPEED_LABELS = {"fast": "Fast", "steady": "Steady", "slow": "Slow", "thin": "Thi
 SUPPLY_LABELS = {"under": "Under-supplied", "saturated": "Saturated"}
 _SUFFIX = {"k": 1e3, "m": 1e6, "b": 1e9}
 
+# Where the cost per unit came from → how the first note names it.
+_COST_SOURCES = {
+    "benchmark": ("benchmark (materials at EVE's average reference price, ME {me}, "
+                  "no job fees or invention cost)"),
+    "typed": "your figure",
+    "build": "from your build",
+}
+NO_COST_NOTE = "No blueprint for this item — enter a cost per unit to see profit and margin."
+UNREADABLE_COST_BENCHMARK = "Could not read that cost; using the benchmark."
+UNREADABLE_COST_NONE = "Could not read that cost; enter a number such as 180m."
+
 
 def fmt_isk(v: float | None) -> str:
     if v is None:
@@ -82,6 +93,25 @@ def parse_isk(raw) -> float | None:
     if not math.isfinite(v) or v < 0:
         return None
     return v
+
+
+def fmt_cost_input(v: float) -> str:
+    """A cost for the input field: at most 2 decimals, trailing zeros trimmed
+    (4.35 → '4.35', 0.4 → '0.4', 268000000.0 → '268000000'). parse_isk reads
+    it back as the same value once that value is rounded to 2 decimals."""
+    return f"{v:.2f}".rstrip("0").rstrip(".")
+
+
+def cost_placeholder(benchmark: float | None) -> str:
+    """What the blank cost field shows: the benchmark it stands for, if any."""
+    return f"benchmark {fmt_isk(benchmark)}" if benchmark is not None else "enter a cost"
+
+
+def cost_note(cost: float | None, source: str | None, me: int) -> str:
+    """The first note under the inputs: which cost per unit the figures use."""
+    if cost is None or source is None:
+        return NO_COST_NOTE
+    return f"Cost used: {fmt_isk(cost)} each — {_COST_SOURCES[source].format(me=me)}."
 
 
 def hub_row(key: str, name: str, result: dict | None, route: dict | None, qty: int) -> dict:
