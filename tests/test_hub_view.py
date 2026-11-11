@@ -187,3 +187,13 @@ def test_pick_boxes_combined_mixed_sub_day_range():
     one = hv.pick_boxes({"fastest": "amarr", "fastest_thin": False, "margin": "amarr"},
                         {"amarr": _mixed(0.2, 7.6)}, NAMES)
     assert one[0]["v"] == "Amarr — up to 8 days"
+
+
+def test_pick_boxes_margin_hub_without_a_days_estimate_has_no_days_sentence():
+    results = {"amarr": _result(),
+               "rens": _result(speed="thin", supply=None, list=_mixed(None, None)["list"])}
+    boxes = hv.pick_boxes({"fastest": "amarr", "fastest_thin": False, "margin": "rens"},
+                          results, NAMES)
+    assert boxes[1]["d"] == "Thin market."
+    assert "days" not in boxes[1]["d"]
+    assert "— days" not in boxes[0]["v"] + boxes[1]["v"] + boxes[1]["d"]

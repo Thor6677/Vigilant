@@ -210,8 +210,8 @@ def verdict(result: dict, qty: int, has_cost: bool) -> str:
         first = (f"{stock} listed against about {_n(demand)} a day: "
                  f"{_n(result['days_of_stock'])} days of stock ahead of you.")
     else:
-        only = "only " if result["supply"] == "under" else ""
-        first = (f"Sells about {_n(demand)} a day with {only}{stock} listed. "
+        scarce = "only " if result["supply"] == "under" else ""
+        first = (f"Sells about {_n(demand)} a day with {scarce}{stock} listed. "
                  f"Your {qty} would take "
                  f"{_days_phrase(lw['days_best'], lw['days_typical'])}.")
 

@@ -139,6 +139,8 @@ def pick_boxes(picks: dict, results: dict[str, dict | None], names: dict[str, st
     def _when(r):
         """'under a day', 'up to 8 days', 'about 2 – 5 days'."""
         d = _days(r)
+        if d == "—":  # no sales in the window: no estimate to phrase
+            return ""
         if d == "<1":
             return "under a day"
         if d.startswith("<1 – "):
@@ -154,7 +156,7 @@ def pick_boxes(picks: dict, results: dict[str, dict | None], names: dict[str, st
     if fastest is not None and fastest == margin:
         r = results[fastest]
         boxes.append({"k": "Fastest sale and best margin",
-                      "v": f"{names[fastest]} — {_when(r)}",
+                      "v": f"{names[fastest]} — {_when(r)}" if _when(r) else names[fastest],
                       "d": f"{_profit(r)}. {_tag_text(r)}."})
         return boxes
     if fastest is not None:
@@ -163,11 +165,14 @@ def pick_boxes(picks: dict, results: dict[str, dict | None], names: dict[str, st
         if r["list"]["profit_each"] is not None:
             detail = f"{_profit(r)}. {detail}"
         boxes.append({"k": "Fastest sale",
-                      "v": f"{names[fastest]} — {_when(r)}", "d": detail})
+                      "v": f"{names[fastest]} — {_when(r)}" if _when(r) else names[fastest],
+                      "d": detail})
     if margin is not None:
         r = results[margin]
         when = _when(r)
+        detail = _tag_text(r) + "."
+        if when:
+            detail += f" {when[0].upper()}{when[1:]}."
         boxes.append({"k": "Best margin",
-                      "v": f"{names[margin]} — {_profit(r)}",
-                      "d": f"{_tag_text(r)}. {when[0].upper()}{when[1:]}."})
+                      "v": f"{names[margin]} — {_profit(r)}", "d": detail})
     return boxes
