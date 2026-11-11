@@ -12,7 +12,8 @@ The registry keeps each user's latest job after it ends, so the page can say
 user's old entry, so it is bounded by the number of users, not by scans run.
 
 A job: expand the list -> benchmark each item -> fill the five summaries per
-item -> retry the items that failed, once -> compute rows -> save.
+item -> retry the items that failed, once -> compute rows (ROWS_AT_ONCE items
+at a time, yielding to the event loop between) -> save.
 
 An outage costs EVE's API little (ESI's error budget is the whole app's):
 
@@ -102,6 +103,11 @@ def reset() -> None:
 
 def get(user_id: int) -> Job | None:
     return _jobs.get(user_id)
+
+
+def running_count() -> int:
+    """How many jobs are running now (holding a slot, not waiting for one)."""
+    return sum(1 for j in _jobs.values() if j.state == "running")
 
 
 def _on_done(job: Job, task: asyncio.Task) -> None:
@@ -317,6 +323,21 @@ async def _routes(db, settings: scan_results.Settings) -> dict:
     return await hub_route.hub_routes(db, settings.origin_system_id, systems)
 
 
+async def _compute(summaries: dict, listing, benchmarks: dict,
+                   settings: scan_results.Settings, failed: set[int]) -> list[dict]:
+    """compute_rows, ROWS_AT_ONCE items at a time, giving the event loop a
+    turn between: 300 rows at once would hold up every other request."""
+    now = _now()
+    ids = listing.type_ids
+    rows: list[dict] = []
+    for i in range(0, len(ids), ROWS_AT_ONCE):
+        if i:
+            await asyncio.sleep(0)
+        rows += scan_results.compute_rows(summaries, ids[i:i + ROWS_AT_ONCE], listing.names,
+                                          benchmarks, settings, failed, now)
+    return rows
+
+
 def _outcome(job: Job, stopped: bool) -> str:
     if job.state == "done":
         return "incomplete" if stopped else "complete"
@@ -386,8 +407,7 @@ async def _run(job: Job) -> None:
 
             async with AsyncSessionLocal() as db:
                 summaries = await scan_results.load_summaries(db, listing.type_ids)
-                rows = scan_results.compute_rows(summaries, listing.type_ids, listing.names,
-                                                 benchmarks, job.settings, failed, _now())
+                rows = await _compute(summaries, listing, benchmarks, job.settings, failed)
                 # A watchlist deleted while it was being scanned gets no
                 # result saved after the fact. (Deleting cancels a running
                 # scan of the list first; this covers a delete that lands

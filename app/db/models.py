@@ -1218,8 +1218,13 @@ class MarketHubPrefs(Base):
     sales_tax_pct = Column(Float, nullable=False, default=3.37)
     broker_fee_pct = Column(Float, nullable=False, default=1.5)
     origin_system_id = Column(Integer, nullable=True)
-    scan_budget_isk = Column(Float, nullable=False, default=500_000_000.0)
-    market_share_pct = Column(Float, nullable=False, default=20.0)
+    # Hub Scan. server_default as well, so a row inserted without them (raw
+    # SQL, or a table made by create_all) gets the same defaults as the
+    # ALTER TABLE in main.py gives existing rows.
+    scan_budget_isk = Column(Float, nullable=False, default=500_000_000.0,
+                             server_default=text("500000000"))
+    market_share_pct = Column(Float, nullable=False, default=20.0,
+                              server_default=text("20"))
     updated_at = Column(DateTime, nullable=True)
 
 

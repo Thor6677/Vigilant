@@ -15,11 +15,15 @@ QTY_LIMITS = {"budget": "of budget", "hub": "hub limit · 7 days",
               "jita": "Jita stock", "over_budget": "over budget"}
 PRICE_FLAGS = {"capped": "price capped", "none_listed": "none listed"}
 PRICE_FLAG_TITLES = {
-    "capped": "The lowest sell here is more than 1.25× the 30-day high, so the "
-              "capped figure is used. The item page shows the real lowest sell.",
+    "capped": "The lowest sell here is more than 1.25× the highest daily average of "
+              "the last 30 days, so the capped figure is used. The item page shows "
+              "the real lowest sell.",
     "none_listed": "Nothing is listed here; the 30-day typical price is used.",
 }
 COPY_ONLY_TITLE = "Blueprint comes only as a copy; its cost is not in the benchmark."
+# Marks on the best hub's figures when its data lags (scan_results.compute_rows).
+HISTORY_BEHIND_TITLE = "Sales history for this hub is a few days behind."
+STOCK_TRUNCATED_TITLE = "More than 300 price levels listed; stock may be understated."
 SORTS = {   # parameter -> row key
     "profit_day": "profit_per_day", "item": "name", "hub": "hub", "cost": "cost",
     "price": "price", "profit": "profit_each", "margin": "margin",
@@ -105,9 +109,24 @@ def fmt_margin(margin: float | None) -> str:
     return f"{'−' if pct < 0 else ''}{abs(pct):.1f}%"
 
 
-def display_row(row: dict, routes: dict, show_route: bool) -> dict:
+def _other_lines(row: dict) -> tuple[str, str]:
+    """(the table's line under the source, the card's line at the foot): the
+    other source's figure at the same hub, or "n/a" when that source is not
+    offered there (a row's `other` is None exactly then: haul at Jita or with
+    nothing listed in Jita, build with no build cost)."""
     other = row.get("other")
-    other_profit = hub_view.fmt_signed(other["profit_each"]) if other else ""
+    if other is not None:
+        profit = hub_view.fmt_signed(other["profit_each"])
+        return (f"{SHORT_SOURCE_NAMES[other['source']]}: {profit} each",
+                f"{SOURCE_NAMES[other['source']]} instead: {profit} each")
+    if "other" not in row:
+        return "", ""
+    missing = "haul" if row["source"] == "build" else "build"
+    return f"{SHORT_SOURCE_NAMES[missing]}: n/a", f"{SOURCE_NAMES[missing]}: n/a"
+
+
+def display_row(row: dict, routes: dict, show_route: bool) -> dict:
+    other_text, other_card = _other_lines(row)
     return {
         "name": row["name"], "link": item_link(row),
         "hub": HUB_NAMES[row["hub"]],
@@ -115,11 +134,7 @@ def display_row(row: dict, routes: dict, show_route: bool) -> dict:
         "supply": row["supply"] or "",
         "supply_text": hub_view.SUPPLY_LABELS.get(row["supply"], ""),
         "source": row["source"], "source_text": SOURCE_NAMES[row["source"]],
-        # The table's line under the source, and the card's line at the foot.
-        "other_text": (f"{SHORT_SOURCE_NAMES[other['source']]}: {other_profit} each"
-                       if other else ""),
-        "other_card": (f"{SOURCE_NAMES[other['source']]} instead: {other_profit} each"
-                       if other else ""),
+        "other_text": other_text, "other_card": other_card,
         "cost": hub_view.fmt_isk(row["cost"]),
         "cost_basis": "benchmark" if row["cost_basis"] == "benchmark" else "Jita sell orders",
         "copy_only": bool(row.get("copy_only")) and row["source"] == "build",
@@ -130,7 +145,9 @@ def display_row(row: dict, routes: dict, show_route: bool) -> dict:
         "profit_sign": _sign(row["profit_each"]),
         "margin": fmt_margin(row["margin"]),
         "sold": hub_format.fmt_rate(row["demand_30"]),
+        "sold_note": HISTORY_BEHIND_TITLE if row.get("history_behind") else "",
         "stock": f"{row['stock']:,}",
+        "stock_note": STOCK_TRUNCATED_TITLE if row.get("stock_truncated") else "",
         # Days of stock are a rate, formatted as the item page formats them.
         "stock_days": (f"{hub_format.fmt_rate(row['days_of_stock'])} days"
                        if row["days_of_stock"] is not None else ""),
@@ -209,3 +226,17 @@ def fmt_budget(v: float) -> str:
 def fmt_pct(v: float) -> str:
     """A percentage for a field: 20, 2.5, 3.37."""
     return f"{v:.4f}".rstrip("0").rstrip(".")
+
+
+def settings_text(settings: dict) -> str:
+    """The settings a result was computed with (its stored settings, not the
+    user's current ones): 'Budget 500M per item · market share 20% · sales
+    tax 3.37% · broker fee 1.5% · from Amarr', the last part only with a
+    starting system. Plain text: the template escapes it."""
+    parts = [f"Budget {fmt_budget(settings['budget_isk'])} per item",
+             f"market share {fmt_pct(settings['share_pct'])}%",
+             f"sales tax {fmt_pct(settings['sales_tax_pct'])}%",
+             f"broker fee {fmt_pct(settings['broker_fee_pct'])}%"]
+    if settings.get("origin_system_id") and settings.get("origin_name"):
+        parts.append(f"from {settings['origin_name']}")
+    return " · ".join(parts)

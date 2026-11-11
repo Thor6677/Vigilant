@@ -11,8 +11,10 @@ ingest that module exists to avoid, so a scan keeps its own row instead:
 
 `figures()` turns a row back into the inputs phase 1's `market_figures` takes
 and calls it, so the shared numbers cannot drift from the item page. It adds
-`high_30` (the highest daily high in the window) and `ladder` (the counted
-sell levels within the 10% stock band, for the Jita haul walk).
+`avg_high_30` (the highest daily AVERAGE price in the window, the price cap's
+basis: one absurd trade sets a day's `highest` but barely moves its average)
+and `ladder` (the counted sell levels within the 10% stock band, for the Jita
+haul walk). The stored days still carry `highest`, which nothing reads now.
 
 `ensure_summary` refreshes whichever part is stale. It reuses fresh rows from
 `market_history` when the item has been viewed, and NEVER writes that table.
@@ -206,9 +208,10 @@ def ladder_from_orders(orders: list[dict], station_id: int) -> tuple[list[list],
 
 
 def figures(row: MarketScanSummary | None, station_id: int, now: datetime) -> dict | None:
-    """Phase 1 market figures for one hub from its summary, plus `high_30`,
-    `ladder` and `behind`. None when a part is missing or the history is too
-    far behind to treat as current (phase 1's "stale")."""
+    """Phase 1 market figures for one hub from its summary, plus
+    `avg_high_30`, `ladder`, `behind` and `ladder_truncated`. None when a part
+    is missing or the history is too far behind to treat as current (phase
+    1's "stale")."""
     if row is None or row.days_json is None or row.ladder_json is None:
         return None
     now = now.astimezone(timezone.utc) if now.tzinfo else now.replace(tzinfo=timezone.utc)
@@ -229,8 +232,8 @@ def figures(row: MarketScanSummary | None, station_id: int, now: datetime) -> di
     fig = market_figures(days, orders, station_id, 1, end)
     fig.pop("buys", None)
     start = end - timedelta(days=WINDOW_DAYS)
-    highs = [d["highest"] for d in days if start <= d["date"] < end and d["highest"]]
-    fig["high_30"] = max(highs) if highs else None
+    averages = [d["average"] for d in days if start <= d["date"] < end and d["average"]]
+    fig["avg_high_30"] = max(averages) if averages else None
     lowest = fig["lowest_sell"]
     fig["ladder"] = ([(o["price"], o["volume_remain"]) for o in orders
                       if lowest <= o["price"] <= lowest * STOCK_BAND]

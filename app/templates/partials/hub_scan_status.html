@@ -5,7 +5,11 @@
    reply whose target was replaced while it was in flight. There is always
    exactly one #hs-status, the root here. Context from
    app/routes/market_scan.py _status_ctx: job, active, kind, ref, percent,
-   note, start_reply, same_list, has_result, count_text, interrupted.
+   note, start_reply, same_list, has_result, count_text, queued_behind,
+   interrupted.
+
+   Every job starts out queued, so a queued job says "Starting…" unless
+   MAX_RUNNING other jobs really are running (queued_behind).
 
    Newest request wins: each requester carries hx-sync="#hs-status-box:replace",
    which aborts whatever is in flight on the box and sends the new one. The
@@ -52,8 +56,11 @@
      {%- if active %} hx-get="/market/hub-scan/status?kind={{ kind }}&amp;ref={{ ref }}&amp;was=1"
      hx-trigger="every 2s" hx-target="#hs-status-box" hx-swap="innerHTML"
      hx-sync="#hs-status-box:drop" data-htmx-no-error="1"{% endif %}>
-  {% if active and job.state == 'queued' %}
+  {% if active and job.state == 'queued' and queued_behind %}
     <span>Queued: two scans are already running. Yours starts when one finishes.</span>
+    {{ cancel_button() }}
+  {% elif active and job.state == 'queued' %}
+    <span>Starting…</span>
     {{ cancel_button() }}
   {% elif active %}
     {% set progress = job.done ~ ' of ' ~ job.total ~ ' items' if job.total else 'Reading the list' %}

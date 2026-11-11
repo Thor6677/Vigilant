@@ -1,9 +1,9 @@
 """Hub Scan ranking rules (spec section 4). Pure: no network, no database.
 
 Input is, per hub, the market figures `scan_fetch.figures()` builds with phase
-1's `market_figures` (plus `high_30` and `ladder`), a build cost and the scan's
-settings. Output is one row per item: the hub and source (build, or haul from
-Jita) with the highest profit per day.
+1's `market_figures` (plus `avg_high_30` and `ladder`), a build cost and the
+scan's settings. Output is one row per item: the hub and source (build, or
+haul from Jita) with the highest profit per day.
 
 Rates are fractions here (0.20, 0.0337), percentages at the edges.
 """
@@ -16,7 +16,8 @@ from app.market.hub_analysis import tags
 HUB_ORDER = ("jita", "amarr", "dodixie", "hek", "rens")
 HAUL_SOURCE_HUB = "jita"
 STOCK_DAYS = 7          # how many days of the captured rate one seller brings
-PRICE_CAP = 1.25        # selling price is at most this multiple of the 30-day high
+PRICE_CAP = 1.25        # selling price is at most this multiple of the highest daily
+                        # average of the 30 days (a daily high is one trade's price)
 _EPS = 1e-9             # float slack: a result that is whole on paper must floor to that whole
 
 
@@ -35,14 +36,15 @@ def captured(fig: dict, share: float) -> float:
 
 def selling_price(fig: dict) -> tuple[float | None, str | None]:
     """(price, flag). flag is "capped" when the lowest sell was pulled down to
-    PRICE_CAP x the 30-day high, "none_listed" when nothing is listed and the
-    reference price stands in, else None. (None, None): no price at all."""
+    PRICE_CAP x the highest daily average of the 30 days, "none_listed" when
+    nothing is listed and the reference price stands in, else None. (None,
+    None): no price at all."""
     lowest = fig["lowest_sell"]
     if lowest is None:
         if fig["reference"] is None:
             return None, None
         return fig["reference"], "none_listed"
-    high = fig.get("high_30")
+    high = fig.get("avg_high_30")
     if high and lowest > PRICE_CAP * high:
         return PRICE_CAP * high, "capped"
     return lowest, None

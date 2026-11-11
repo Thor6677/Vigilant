@@ -2,8 +2,8 @@
    extends; the .hs-* rules and every script live in market_hub_scan.html
    (a partial must not carry or redefine page JS). Context from
    app/routes/market_scan.py: result (scan_results.load), view
-   (scan_view.build), filters, kind, ref, scanned, footnote, copy_only_title,
-   scan_cap, watchlists.
+   (scan_view.build), filters, kind, ref, scanned, settings_text, footnote,
+   copy_only_title, scan_cap, watchlists.
 
    Filtering and sorting are requests for this partial, not client-side
    script: #hs-filters asks for it on any change. Its "hide" box has no name;
@@ -26,6 +26,8 @@
 
    #hs-done is the finished line, the status while this result shows; its
    data-kind / data-ref tell the page script which list's result is showing.
+   Under it, the settings the result was computed with (its stored settings,
+   which may differ from the form's current values).
 
    "Add all to watchlist" (under the counts, when the user has a list and the
    result has priced rows) is outside #hs-filters too, whose change would
@@ -46,6 +48,10 @@
 {% macro copy_mark(r) -%}
 {% if r['copy_only'] %}<span class="hs-copy" title="{{ copy_only_title }}" aria-hidden="true">*</span><span class="visually-hidden"> ({{ copy_only_title }})</span>{% endif %}
 {%- endmacro %}
+{# A figure whose data lags (sold_note, stock_note): a mark, its words as the tooltip. #}
+{% macro lag_mark(text) -%}
+{% if text %}<span class="hs-mark" title="{{ text }}" aria-hidden="true">†</span><span class="visually-hidden"> ({{ text }})</span>{% endif %}
+{%- endmacro %}
 {% macro sort_th(key, label, left=False) -%}
 {% set on = view['sort'] == key %}
 <th scope="col"{% if left %} class="hs-l"{% endif %}
@@ -64,6 +70,7 @@
     {{ start_button('Rescan', 'b-btn is-ghost', 'hs-rescan-msg') }}
     <span id="hs-rescan-msg" class="hs-neg" role="status"></span>
 </div>
+<div class="hs-note hs-settings">{{ settings_text }}</div>
 {% for note in result['notes'] %}<div class="hs-note">{{ note }}</div>{% endfor %}
 {% if view['routes_note'] %}<div class="hs-note">{{ view['routes_note'] }}</div>{% endif %}
 
@@ -118,8 +125,8 @@
             <td>{{ r['price'] }}{% if r['price_flag'] %}<small title="{{ r['price_flag_title'] }}">{{ r['price_flag'] }}</small>{% endif %}</td>
             <td class="{{ sign(r['profit_sign']) }}">{{ r['profit_each'] }}</td>
             <td>{{ r['margin'] }}</td>
-            <td>{{ r['sold'] }}</td>
-            <td>{{ r['stock'] }}{% if r['stock_days'] %}<small>{{ r['stock_days'] }}</small>{% endif %}</td>
+            <td>{{ r['sold'] }}{{ lag_mark(r['sold_note']) }}</td>
+            <td>{{ r['stock'] }}{{ lag_mark(r['stock_note']) }}{% if r['stock_days'] %}<small>{{ r['stock_days'] }}</small>{% endif %}</td>
             <td>{{ r['qty'] }}<small>{{ r['qty_limit'] }}</small></td>
             <td class="hs-pd{{ sign(r['profit_day_sign']) }}">{{ r['profit_day'] }}</td>
             {% if view['show_route'] %}<td>{{ r['route']['text'] }}{% if r['route']['sub'] %}<small>{{ r['route']['sub'] }}</small>{% endif %}</td>{% endif %}
@@ -139,8 +146,8 @@
             <div><span>Profit each</span><b class="{{ sign(r['profit_sign']) }}">{{ r['profit_each'] }}</b></div>
             <div><span>Margin</span>{{ r['margin'] }}</div>
             <div><span>Quantity</span>{{ r['qty'] }}</div>
-            <div><span>Sold / day</span>{{ r['sold'] }}</div>
-            <div><span>Stock</span>{{ r['stock'] }}{% if r['stock_days'] %} · {{ r['stock_days'] }}{% endif %}</div>
+            <div><span>Sold / day</span>{{ r['sold'] }}{{ lag_mark(r['sold_note']) }}</div>
+            <div><span>Stock</span>{{ r['stock'] }}{{ lag_mark(r['stock_note']) }}{% if r['stock_days'] %} · {{ r['stock_days'] }}{% endif %}</div>
             {% if view['show_route'] %}<div><span>Route</span>{{ r['route']['text'] }}{% if r['route']['sub'] %} {{ r['route']['sub'] }}{% endif %}</div>{% endif %}
         </div>
         {% if r['other_card'] %}<div class="hs-alt">{{ r['other_card'] }}</div>{% endif %}

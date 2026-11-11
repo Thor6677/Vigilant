@@ -297,3 +297,28 @@ async def _cleanup_counts(factory):
 
 def test_cleanup_removes_only_old_summaries_and_idle_category_results(factory):
     assert _run(_cleanup_counts(factory)) == (1, 1)
+
+
+def test_rows_say_when_the_best_hubs_data_lags(factory):
+    """Rens' history was fetched two days ago and reaches three days back
+    (phase 1's "behind"), and its ladder was cut at MAX_LEVELS: the row says
+    both. The same figures with current data say neither."""
+    async def go():
+        days = [[(NOW.date() - timedelta(days=n)).isoformat(), 5, 100.0, 110.0]
+                for n in range(32, 2, -1)]
+        async with factory() as db:
+            lagging = _summary(_region("rens"), 2001, 160.0, 5, 5,
+                               history_at=NOW - timedelta(days=2))
+            lagging.days_json, lagging.ladder_truncated = json.dumps(days), True
+            db.add_all([_summary(_region("jita"), 2001, 100.0, 1000, 5), lagging,
+                        _summary(_region("jita"), 2002, 100.0, 1000, 5),
+                        _summary(_region("rens"), 2002, 160.0, 5, 5)])
+            await db.commit()
+        async with factory() as db:
+            summaries = await scan_results.load_summaries(db, [2001, 2002])
+        return scan_results.compute_rows(summaries, [2001, 2002], {}, {}, SETTINGS, set(), NOW)
+    lag, plain = _run(go())
+    assert (lag["status"], lag["hub"]) == ("ok", "rens")
+    assert lag["history_behind"] is True and lag["stock_truncated"] is True
+    assert (plain["status"], plain["hub"]) == ("ok", "rens")
+    assert plain["history_behind"] is False and plain["stock_truncated"] is False

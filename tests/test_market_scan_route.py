@@ -7,6 +7,7 @@ import asyncio
 import base64
 import json
 import re
+from dataclasses import replace
 from datetime import datetime, timezone
 from html import unescape
 from html.parser import HTMLParser
@@ -150,13 +151,13 @@ ROWS = [
 
 async def save_result(factory, user_id, rows, *, kind="category", ref=GROUP_ID,
                       label="Sample Ships", status="complete", item_total=None,
-                      item_scanned=None, routes=None, notes=None):
+                      item_scanned=None, routes=None, notes=None, settings=SETTINGS):
     async with factory() as db:
         await scan_results.save(
             db, user_id, kind, ref, label=label, status=status,
             item_total=len(rows) if item_total is None else item_total,
             item_scanned=len(rows) if item_scanned is None else item_scanned,
-            settings=SETTINGS, notes=notes or [], routes=routes or {}, rows=rows,
+            settings=settings, notes=notes or [], routes=routes or {}, rows=rows,
             now=SCANNED)
 
 
@@ -1560,3 +1561,95 @@ def test_manager_and_add_all_fit_a_phone():
     body = rule.group(1).replace(" ", "")
     assert "min-height:44px" in body and "font-size:16px" in body and "width:100%" in body
     assert re.search(r"\.hs-wl-li\s*\{[^}]*min-height:44px", phone)
+
+
+
+# ── a result's settings, lagging data, the other source ────────────────────
+
+def test_result_shows_the_settings_it_was_computed_with(app_db, factory):
+    """The stored settings, not the user's current ones."""
+    async def prefs_now():
+        async with factory() as db:
+            await hub_prefs.save_prefs(db, USER_ID, 4.0, 2.0, ORIGIN_ID)
+            await hub_prefs.save_scan_prefs(db, USER_ID, 2e9, 35)
+    _run(prefs_now())
+    _run(save_result(factory, USER_ID, ROWS))
+    html = _result(_authed_client())
+    line = "Budget 500M per item · market share 20% · sales tax 3.37% · broker fee 1.5%"
+    assert f'<div class="hs-note hs-settings">{line}</div>' in html
+    assert html.index('id="hs-done"') < html.index("hs-settings") < html.index('id="hs-filters"')
+    assert "Budget 2B" not in html and "market share 35%" not in html and "from " not in line
+
+    stored = replace(SETTINGS, origin_system_id=ORIGIN_ID, origin_name="<b>Sample</b> System")
+    _run(save_result(factory, USER_ID, ROWS, settings=stored))
+    html = _result(_authed_client())
+    assert f"{line} · from &lt;b&gt;Sample&lt;/b&gt; System</div>" in html
+    assert "<b>Sample</b>" not in html
+
+
+def test_lagging_figures_carry_a_mark_with_its_words(app_db, factory):
+    rows = [_ok("Sample Hull", TYPE_ID, history_behind=True, stock_truncated=True),
+            _ok("Plain Hull", 2009, profit_per_day=40.0)]
+    _run(save_result(factory, USER_ID, rows))
+    html = _result(_authed_client())
+    table = html[html.index('<table class="hs-table">'):html.index("</table>")]
+    cards = html[html.index('<div class="hs-cards m-only">'):]
+    behind = "Sales history for this hub is a few days behind."
+    truncated = "More than 300 price levels listed; stock may be understated."
+    for part in (table, cards):
+        assert part.count(f'<span class="hs-mark" title="{behind}" aria-hidden="true">') == 1
+        assert part.count(f'<span class="hs-mark" title="{truncated}" aria-hidden="true">') == 1
+        assert f'<span class="visually-hidden"> ({behind})</span>' in part
+    sold_cell = re.search(r"<td>5[^<]*<span class=\"hs-mark\" title=\"([^\"]+)\"", table)
+    assert sold_cell and sold_cell.group(1) == behind
+
+
+def test_a_source_not_offered_says_n_a(app_db, factory):
+    rows = [_ok("Jita Hull", TYPE_ID, hub="jita", source="build", cost_basis="benchmark",
+                other=None)]
+    _run(save_result(factory, USER_ID, rows))
+    html = _result(_authed_client())
+    assert "<small>Haul: n/a</small>" in html
+    assert '<div class="hs-alt">Haul from Jita: n/a</div>' in html
+
+
+# ── "Starting…" and the queue, starting while another list runs ──────────
+
+def test_a_queued_job_says_starting_unless_the_slots_are_full(app_db):
+    c = _authed_client()
+    c.post("/market/hub-scan/start", data={"kind": "category", "ref": "10"})
+    scan_runner._jobs[USER_ID].state = "queued"     # every job starts out queued
+
+    def status():
+        return c.get("/market/hub-scan/status?kind=category&ref=10").text
+    html = status()
+    assert "Starting…" in html and "Queued" not in html
+    assert 'hx-trigger="every 2s"' in html and 'hx-post="/market/hub-scan/cancel"' in html
+    scan_runner._jobs[OTHER_USER_ID] = scan_runner.Job(OTHER_USER_ID, "category", 10,
+                                                       SETTINGS, state="running")
+    assert "Starting…" in status()                  # one slot still free
+    scan_runner._jobs[93] = scan_runner.Job(93, "category", 10, SETTINGS, state="running")
+    html = status()
+    assert "Queued: two scans are already running." in html and "Starting…" not in html
+    assert 'hx-post="/market/hub-scan/cancel"' in html
+    scan_runner._jobs[93].state = "done"
+    assert "Starting…" in status()
+
+
+def test_start_while_another_list_runs_saves_no_preferences(app_db, factory):
+    c = _authed_client()
+    c.post("/market/hub-scan/start", data={
+        "kind": "category", "ref": "10", "budget": "1B", "share": "30",
+        "sales_tax": "4", "broker_fee": "1", "origin": ""})
+    before = _run(_get_prefs(factory, USER_ID))
+    r = c.post("/market/hub-scan/start", data={
+        "kind": "blueprints", "budget": "2B", "share": "40", "sales_tax": "5",
+        "broker_fee": "2", "origin": "Sample System"})
+    assert "Your other scan is still running; start this one when it ends." in r.text
+    assert "kind=category&amp;ref=10&amp;was=1" in r.text
+    after = _run(_get_prefs(factory, USER_ID))
+    fields = ("scan_budget_isk", "market_share_pct", "sales_tax_pct", "broker_fee_pct",
+              "origin_system_id")
+    assert [getattr(after, f) for f in fields] == [getattr(before, f) for f in fields]
+    assert [getattr(after, f) for f in fields] == [1e9, 30.0, 4.0, 1.0, None]
+    assert len(app_db.started) == 1                 # the second never asked to start

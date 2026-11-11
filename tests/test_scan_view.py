@@ -168,7 +168,9 @@ def test_signs_and_missing_figures():
                           supply=None, days_of_stock=None, price_flag="none_listed"), {}, False)
     assert (d["profit_sign"], d["profit_day_sign"]) == ("neg", "neg")
     assert d["profit_each"] == "−5.00" and d["margin"] == "—"
-    assert d["other_text"] == "" and d["other_card"] == "" and d["supply"] == ""
+    # other None: building is not offered at this hub (a haul row), so "n/a".
+    assert d["other_text"] == "Build: n/a" and d["other_card"] == "Build: n/a"
+    assert d["supply"] == ""
     assert d["stock_days"] == "" and d["price_flag"] == "none listed"
     assert v.display_row(row(profit_per_day=0.0), {}, False)["profit_day_sign"] == ""
 
@@ -197,3 +199,47 @@ def test_budget_field_reads_back_exactly():
         assert v.fmt_budget(value) == text
         assert hub_view.parse_isk(text) == value
     assert v.fmt_pct(20.0) == "20" and v.fmt_pct(3.37) == "3.37"
+
+
+def test_the_other_source_says_n_a_only_when_it_is_not_offered():
+    """A Jita build row (haul is never offered at Jita) and a haul row with no
+    build cost say "n/a" for the other source; a row that has the other
+    source's figure shows it; a row without the key shows nothing."""
+    jita_build = v.display_row(row(hub="jita", source="build", cost_basis="benchmark",
+                                   other=None), {}, False)
+    assert (jita_build["other_text"], jita_build["other_card"]) == (
+        "Haul: n/a", "Haul from Jita: n/a")
+    haul_only = v.display_row(row(other=None), {}, False)
+    assert (haul_only["other_text"], haul_only["other_card"]) == ("Build: n/a", "Build: n/a")
+    assert v.display_row(row(), {}, False)["other_text"] == "Build: +22.00 each"
+    bare = row()
+    del bare["other"]
+    assert v.display_row(bare, {}, False)["other_text"] == ""
+
+
+def test_lagging_data_marks_the_sold_and_stock_figures():
+    plain = v.display_row(row(), {}, False)
+    assert plain["sold_note"] == "" and plain["stock_note"] == ""
+    marked = v.display_row(row(history_behind=True, stock_truncated=True), {}, False)
+    assert marked["sold_note"] == "Sales history for this hub is a few days behind."
+    assert marked["stock_note"] == (
+        "More than 300 price levels listed; stock may be understated.")
+    assert v.display_row(row(history_behind=False, stock_truncated=True), {},
+                         False)["sold_note"] == ""
+
+
+def test_capped_price_tooltip_names_the_daily_average():
+    title = v.PRICE_FLAG_TITLES["capped"]
+    assert "more than 1.25× the highest daily average of the last 30 days" in title
+    assert "30-day high" not in title
+
+
+def test_settings_text_says_what_the_result_was_computed_with():
+    s = {"budget_isk": 5e8, "share_pct": 20.0, "sales_tax_pct": 3.37,
+         "broker_fee_pct": 1.5, "origin_system_id": None, "origin_name": ""}
+    assert v.settings_text(s) == (
+        "Budget 500M per item · market share 20% · sales tax 3.37% · broker fee 1.5%")
+    s.update(budget_isk=1.5e9, share_pct=12.5, origin_system_id=30099001,
+             origin_name="Sample System")
+    assert v.settings_text(s) == ("Budget 1.5B per item · market share 12.5% · "
+                                  "sales tax 3.37% · broker fee 1.5% · from Sample System")

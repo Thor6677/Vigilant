@@ -62,7 +62,10 @@ def compute_rows(summaries: dict, type_ids: list[int], names: dict[int, str],
                  benchmarks: dict, settings: Settings, failed: set[int],
                  now: datetime) -> list[dict]:
     """One row per type id, in the order given. `benchmarks[type_id]` is a
-    `hub_cost.Benchmark` (or missing: no build cost)."""
+    `hub_cost.Benchmark` (or missing: no build cost). An ok row also says
+    whether the best hub's sales history is a few days behind
+    (`history_behind`) and whether its sell ladder was cut at
+    scan_fetch.MAX_LEVELS (`stock_truncated`)."""
     rows = []
     for type_id in type_ids:
         base = {"type_id": type_id, "name": names.get(type_id, str(type_id))}
@@ -80,6 +83,9 @@ def compute_rows(summaries: dict, type_ids: list[int], names: dict[int, str],
             settings.broker_fee_pct / 100)
         if best["status"] == "ok":
             best["copy_only"] = bool(bench and bench.copy_only)
+            fig = figs[best["hub"]]
+            best["history_behind"] = bool(fig.get("behind"))
+            best["stock_truncated"] = bool(fig.get("ladder_truncated"))
         rows.append({**base, **best})
     return rows
 

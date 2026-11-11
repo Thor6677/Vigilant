@@ -183,7 +183,8 @@ def test_figures_agree_with_phase_one(factory, stubs):
     for key in ("lowest_sell", "demand_30", "demand_7", "trade_days", "reference",
                 "stock", "days_of_stock", "nothing_listed", "outliers"):
         assert fig[key] == expected[key], key
-    assert fig["high_30"] == 340.0
+    assert fig["avg_high_30"] == 330.0             # the highest daily average, not high
+    assert "high_30" not in fig
     assert fig["ladder"] == [(331.0, 20)]          # 400 is outside the 10% band
     assert fig["behind"] is False
     assert fig["ladder_truncated"] is False

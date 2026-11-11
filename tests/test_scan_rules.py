@@ -8,7 +8,7 @@ def fig(**over):
     """A hub's market figures as scan_fetch.figures() gives them."""
     base = {"demand_30": 10.0, "demand_7": 10.0, "trade_days": 30, "reference": 100.0,
             "lowest_sell": 120.0, "stock": 20, "days_of_stock": 2.0,
-            "nothing_listed": False, "high_30": 130.0, "ladder": [], "outliers": 0}
+            "nothing_listed": False, "avg_high_30": 130.0, "ladder": [], "outliers": 0}
     base.update(over)
     return base
 
@@ -24,7 +24,7 @@ def test_selling_price_plain_capped_and_none_listed():
     # 1.25 x 130 = 162.5; exactly on the cap is not capped
     assert r.selling_price(fig(lowest_sell=162.5)) == (162.5, None)
     assert r.selling_price(fig(lowest_sell=500.0)) == (162.5, "capped")
-    assert r.selling_price(fig(lowest_sell=500.0, high_30=None)) == (500.0, None)
+    assert r.selling_price(fig(lowest_sell=500.0, avg_high_30=None)) == (500.0, None)
     assert r.selling_price(fig(lowest_sell=None, nothing_listed=True)) == (100.0, "none_listed")
     assert r.selling_price(fig(lowest_sell=None, nothing_listed=True, reference=None)) == (None, None)
 
@@ -56,7 +56,7 @@ def test_haul_walks_the_ladder():
 
 
 def test_option_profit_per_day_is_capped_by_captured_rate():
-    f = fig(demand_30=10, demand_7=10, stock=0, lowest_sell=200.0, high_30=200.0)
+    f = fig(demand_30=10, demand_7=10, stock=0, lowest_sell=200.0, avg_high_30=200.0)
     o = r.option(f, "build", 100.0, 14, "hub", 0.2, 0.03, 0.02)
     # price 200, fees 5% -> 190 - 100 = 90 each; margin 0.9
     assert o["profit_each"] == pytest.approx(90.0)
@@ -67,7 +67,7 @@ def test_option_profit_per_day_is_capped_by_captured_rate():
 
 
 def test_option_never_divides_by_less_than_a_day():
-    f = fig(demand_30=100, demand_7=100, stock=0, lowest_sell=200.0, high_30=200.0)
+    f = fig(demand_30=100, demand_7=100, stock=0, lowest_sell=200.0, avg_high_30=200.0)
     o = r.option(f, "build", 100.0, 1, "budget", 1.0, 0, 0)
     assert o["units_per_day"] == pytest.approx(1.0)      # 1 unit / max(0.01, 1) day
 
@@ -79,8 +79,8 @@ def test_option_for_unusable_hub_is_none():
 
 
 def test_best_picks_highest_profit_per_day_across_hubs_and_sources():
-    jita = fig(lowest_sell=100.0, high_30=110.0, ladder=[(100.0, 1000)], stock=1000)
-    rens = fig(lowest_sell=160.0, high_30=170.0, stock=5, demand_30=5, demand_7=5)
+    jita = fig(lowest_sell=100.0, avg_high_30=110.0, ladder=[(100.0, 1000)], stock=1000)
+    rens = fig(lowest_sell=160.0, avg_high_30=170.0, stock=5, demand_30=5, demand_7=5)
     out = r.best_for_item({"jita": jita, "rens": rens, "amarr": None},
                           build_cost=130.0, budget=1e6, share=0.2, tax=0.0, broker=0.0)
     assert out["status"] == "ok"
@@ -91,7 +91,7 @@ def test_best_picks_highest_profit_per_day_across_hubs_and_sources():
 
 
 def test_haul_is_not_offered_at_jita():
-    jita = fig(lowest_sell=200.0, high_30=210.0, ladder=[(200.0, 50)])
+    jita = fig(lowest_sell=200.0, avg_high_30=210.0, ladder=[(200.0, 50)])
     out = r.best_for_item({"jita": jita}, build_cost=100.0, budget=1e6,
                           share=0.2, tax=0, broker=0)
     assert (out["hub"], out["source"]) == ("jita", "build")
@@ -99,7 +99,7 @@ def test_haul_is_not_offered_at_jita():
 
 
 def test_tie_goes_to_higher_margin_then_hub_order():
-    a = fig(lowest_sell=200.0, high_30=200.0, stock=0)
+    a = fig(lowest_sell=200.0, avg_high_30=200.0, stock=0)
     out = r.best_for_item({"amarr": dict(a), "rens": dict(a)}, build_cost=100.0,
                           budget=1e9, share=0.2, tax=0, broker=0)
     assert out["hub"] == "amarr"
@@ -115,7 +115,7 @@ def test_statuses_for_items_with_nothing_to_show():
 
 
 def test_row_carries_tags_and_market_figures():
-    rens = fig(lowest_sell=160.0, high_30=170.0, stock=5, days_of_stock=1.0,
+    rens = fig(lowest_sell=160.0, avg_high_30=170.0, stock=5, days_of_stock=1.0,
                demand_30=5, demand_7=5)
     out = r.best_for_item({"rens": rens}, build_cost=100.0, budget=1e6,
                           share=0.2, tax=0, broker=0)
@@ -133,20 +133,20 @@ def test_none_listed_price_assumes_no_stock_ahead():
 
 
 def test_losing_item_is_still_a_row_with_negative_profit():
-    f = fig(lowest_sell=80.0, high_30=90.0, stock=0)
+    f = fig(lowest_sell=80.0, avg_high_30=90.0, stock=0)
     out = r.best_for_item({"jita": f}, build_cost=100.0, budget=1e6, share=0.2, tax=0, broker=0)
     assert out["status"] == "ok" and out["profit_each"] < 0 and out["profit_per_day"] < 0
 
 
 def test_thin_best_hub_is_tagged_thin():
-    f = fig(trade_days=2, lowest_sell=200.0, high_30=200.0)
+    f = fig(trade_days=2, lowest_sell=200.0, avg_high_30=200.0)
     out = r.best_for_item({"jita": f}, build_cost=100.0, budget=1e6, share=0.2, tax=0, broker=0)
     assert out["speed"] == "thin"
 
 
 def test_haul_only_item_without_build_cost():
-    jita = fig(lowest_sell=100.0, high_30=110.0, ladder=[(100.0, 100)])
-    rens = fig(lowest_sell=160.0, high_30=170.0)
+    jita = fig(lowest_sell=100.0, avg_high_30=110.0, ladder=[(100.0, 100)])
+    rens = fig(lowest_sell=160.0, avg_high_30=170.0)
     out = r.best_for_item({"jita": jita, "rens": rens}, build_cost=None, budget=1e6,
                           share=0.2, tax=0, broker=0)
     assert (out["hub"], out["source"]) == ("rens", "haul") and out["other"] is None
@@ -154,7 +154,7 @@ def test_haul_only_item_without_build_cost():
 
 def test_row_has_no_inf_or_nan_and_zero_cost_margin_is_none():
     import json, math
-    f = fig(lowest_sell=200.0, high_30=200.0, days_of_stock=float("inf"))
+    f = fig(lowest_sell=200.0, avg_high_30=200.0, days_of_stock=float("inf"))
     out = r.best_for_item({"jita": f}, build_cost=0.0, budget=1e6, share=0.2, tax=0, broker=0)
     assert out["margin"] is None and out["days_of_stock"] is None
     json.dumps(out, allow_nan=False)
@@ -180,7 +180,7 @@ def test_build_with_no_cost_is_limited_by_the_hub():
 
 
 def test_capped_price_has_no_stock_ahead():
-    kw = dict(demand_30=10, demand_7=10, lowest_sell=500.0, high_30=130.0)
+    kw = dict(demand_30=10, demand_7=10, lowest_sell=500.0, avg_high_30=130.0)
     big = r.option(fig(stock=500, **kw), "build", 50.0, 14, "hub", 0.2, 0, 0)
     none = r.option(fig(stock=0, **kw), "build", 50.0, 14, "hub", 0.2, 0, 0)
     assert big["price_flag"] == "capped"
@@ -189,8 +189,8 @@ def test_capped_price_has_no_stock_ahead():
 
 
 def test_tie_on_profit_per_day_goes_to_the_higher_margin():
-    amarr = fig(lowest_sell=150.0, high_30=150.0, stock=0, demand_30=10, demand_7=10)
-    rens = fig(lowest_sell=200.0, high_30=200.0, stock=0, demand_30=5, demand_7=5)
+    amarr = fig(lowest_sell=150.0, avg_high_30=150.0, stock=0, demand_30=10, demand_7=10)
+    rens = fig(lowest_sell=200.0, avg_high_30=200.0, stock=0, demand_30=5, demand_7=5)
     # amarr: 50 each x 2/day = 100; rens: 100 each x 1/day = 100; margins 0.5 vs 1.0
     out = r.best_for_item({"amarr": amarr, "rens": rens}, build_cost=100.0,
                           budget=1e9, share=0.2, tax=0, broker=0)
@@ -210,7 +210,7 @@ def test_haul_stop_label_order_when_limits_coincide():
 
 def test_capped_haul_end_to_end():
     jita = fig(demand_30=0, demand_7=0, ladder=[(1000.0, 2), (1050.0, 10)])
-    amarr = fig(lowest_sell=2000.0, high_30=1500.0, demand_30=3, demand_7=3, stock=4)
+    amarr = fig(lowest_sell=2000.0, avg_high_30=1500.0, demand_30=3, demand_7=3, stock=4)
     out = r.best_for_item({"jita": jita, "amarr": amarr}, build_cost=None, budget=2500,
                           share=0.2, tax=0.04, broker=0.03)
     # price: 2000 > 1.25 x 1500 = 1875 -> 1875, capped, so stock (4) counts as 0
@@ -228,6 +228,50 @@ def test_capped_haul_end_to_end():
 
 
 def test_no_sales_in_seven_days_earns_nothing_per_day():
-    f = fig(demand_30=10, demand_7=0, stock=0, lowest_sell=200.0, high_30=200.0)
+    f = fig(demand_30=10, demand_7=0, stock=0, lowest_sell=200.0, avg_high_30=200.0)
     o = r.option(f, "build", 100.0, 1, "budget", 0.2, 0, 0)
     assert o["profit_each"] > 0 and o["profit_per_day"] == 0
+
+
+# ---- the price cap's basis: one spike trade must not lift it ----
+
+def _hub_figs(station, averages, highest, ladder):
+    """scan_fetch.figures() for 30 days of history ending yesterday (the last
+    day first in `averages` / `highest`) and a stored sell ladder."""
+    import json
+    from datetime import datetime, timedelta, timezone
+
+    from app.db.models import MarketScanSummary
+    from app.market import scan_fetch
+
+    now = datetime(2026, 11, 10, 14, 0, tzinfo=timezone.utc)
+    days = [[(now.date() - timedelta(days=n + 1)).isoformat(), 5, averages[n], highest[n]]
+            for n in range(30)]
+    row = MarketScanSummary(region_id=1, type_id=1, days_json=json.dumps(days),
+                            history_fetched_at=now.replace(tzinfo=None),
+                            ladder_json=json.dumps(ladder), ladder_truncated=False,
+                            orders_fetched_at=now.replace(tzinfo=None))
+    return scan_fetch.figures(row, station, now)
+
+
+def test_one_spike_day_does_not_lift_the_price_cap():
+    """Amarr: one trade at 6M set that day's high, but the day's average stayed
+    near 600k, and one listing sits at 6M. The cap is 1.25 x the highest daily
+    average (605k): Amarr is priced at 756,250, never 6M, and Rens, listed at
+    800k under its own cap, ranks first."""
+    flat = [600_000.0] * 30
+    amarr = _hub_figs(60008494, [605_000.0] + flat[1:], [6_000_000.0] + [640_000.0] * 29,
+                      [[6_000_000.0, 1]])
+    rens = _hub_figs(60004588, [650_000.0] * 30, [700_000.0] * 30, [[800_000.0, 3]])
+    jita = _hub_figs(60003760, [520_000.0] * 30, [540_000.0] * 30, [[500_000.0, 100]])
+    assert amarr["avg_high_30"] == 605_000.0
+    assert r.selling_price(amarr) == (pytest.approx(756_250.0), "capped")
+    out = r.best_for_item({"jita": jita, "amarr": amarr, "rens": rens}, build_cost=None,
+                          budget=5e8, share=0.2, tax=0, broker=0)
+    assert (out["hub"], out["source"]) == ("rens", "haul")
+    assert out["price"] == 800_000.0 and out["price_flag"] is None
+    # Amarr on its own: still the capped price, not the 6M listing.
+    alone = r.best_for_item({"jita": jita, "amarr": amarr}, build_cost=None,
+                            budget=5e8, share=0.2, tax=0, broker=0)
+    assert alone["hub"] == "amarr" and alone["price"] == pytest.approx(756_250.0)
+    assert alone["price_flag"] == "capped"

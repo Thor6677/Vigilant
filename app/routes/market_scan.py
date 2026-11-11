@@ -59,6 +59,7 @@ router = APIRouter(tags=["market"])
 templates = Jinja2Templates(directory="app/templates")
 
 PICK_A_LIST = "Pick a list to scan."
+OTHER_SCAN_RUNNING = "Your other scan is still running; start this one when it ends."
 
 
 def _kind_ref(kind: str, ref) -> tuple[str, int]:
@@ -99,7 +100,9 @@ async def _status_ctx(db: AsyncSession, user_id: int, job: scan_runner.Job | Non
     result's finished line (label, time, count, Rescan) as its status, so the
     count line is drawn only when there is none. Both are known here, with a
     one-id read for the result and a COUNT for the list, so the line arrives
-    whole; the polls of an active job touch the database not at all.
+    whole; the polls of an active job touch the database not at all. A
+    queued job says "Starting…" unless the running jobs fill every slot
+    (`queued_behind`).
     `start_reply` sends the start's notes (`note`) out of band into the
     page's #hs-start-note, above the status box: the status line itself is
     replaced by the first poll, which would wipe them."""
@@ -108,8 +111,12 @@ async def _status_ctx(db: AsyncSession, user_id: int, job: scan_runner.Job | Non
         kind, ref = job.kind, job.ref
     has_result = (not active and _has_list(kind, ref)
                   and await scan_results.exists(db, user_id, kind, ref))
+    # Every job starts out queued: it is only waiting its turn when the
+    # running jobs fill every slot.
+    queued_behind = (active and job.state == "queued"
+                     and scan_runner.running_count() >= scan_runner.MAX_RUNNING)
     return {"job": job, "active": active, "kind": kind, "ref": ref,
-            "note": note, "start_reply": start_reply,
+            "note": note, "start_reply": start_reply, "queued_behind": queued_behind,
             "same_list": job is not None and (job.kind, job.ref) == (kind, ref),
             "has_result": has_result,
             "count_text": ("" if active or has_result
@@ -242,7 +249,9 @@ async def hub_scan_start(request: Request, kind: str = Form("category"), ref: st
     named in the reply with the value used, as phase 1 does: "Budget used:
     100B." A blank field falls back to the saved value, so it is named too
     (FastAPI reads a blank form field as absent; the page always sends
-    every field). The notes go above the status line (see _status_ctx)."""
+    every field). The notes go above the status line (see _status_ctx).
+    Nothing is saved when nothing will start: no list picked, or the user's
+    scan of another list is still queued or running."""
     user_id = request.session.get("user_id")
     if not user_id:
         return HTMLResponse("", status_code=401)
@@ -252,6 +261,13 @@ async def hub_scan_start(request: Request, kind: str = Form("category"), ref: st
         return templates.TemplateResponse(
             request, "partials/hub_scan_status.html",
             await _status_ctx(db, user_id, scan_runner.get(user_id), kind, number,
+                              start_reply=True))
+    current = scan_runner.get(user_id)
+    if (current is not None and current.state in scan_runner.ACTIVE
+            and (current.kind, current.ref) != (kind, number)):
+        return templates.TemplateResponse(
+            request, "partials/hub_scan_status.html",
+            await _status_ctx(db, user_id, current, kind, number, OTHER_SCAN_RUNNING,
                               start_reply=True))
     prefs = await hub_prefs.get_prefs(db, user_id)
     tax, tax_adjusted = _fee(sales_tax, prefs.sales_tax_pct)
@@ -278,7 +294,7 @@ async def hub_scan_start(request: Request, kind: str = Form("category"), ref: st
     job = scan_runner.start(user_id, kind, number, scan_results.Settings(
         budget_isk, share_pct, tax, broker, origin_id, origin_name))
     if (job.kind, job.ref) != (kind, number):
-        notes = ["Your other scan is still running; start this one when it ends."]
+        notes = [OTHER_SCAN_RUNNING]        # it started between the check and here
     return templates.TemplateResponse(
         request, "partials/hub_scan_status.html",
         await _status_ctx(db, user_id, job, kind, number, " ".join(notes), start_reply=True))
@@ -332,6 +348,7 @@ async def hub_scan_result(request: Request, kind: str = "category", ref: str = "
     return templates.TemplateResponse(request, "partials/hub_scan_result.html", {
         "result": result, "filters": filters, "kind": kind, "ref": number,
         "scanned": scan_view.scanned_text(result["scanned_at"]),
+        "settings_text": scan_view.settings_text(result["settings"]),
         "view": scan_view.build(result, filters, sort, direction),
         "hub_names": scan_view.HUB_NAMES, "footnote": scan_view.FOOTNOTE,
         "copy_only_title": scan_view.COPY_ONLY_TITLE,

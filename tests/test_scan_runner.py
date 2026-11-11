@@ -701,3 +701,49 @@ def test_a_task_that_cannot_be_created_leaves_no_job(env):
                 scan_runner.start(91, "category", 10, S)
         return scan_runner.get(91)
     assert _run(go()) is None
+
+
+
+def test_rows_are_computed_in_chunks_with_the_loop_free_between(env, monkeypatch):
+    env.ids = list(range(3000, 3060))               # 60 items: 25, 25 and 10
+    real = scan_results.compute_rows
+    sizes, ticks_seen, ticks = [], [], {"n": 0}
+
+    def spy(summaries, type_ids, *rest):
+        sizes.append(len(type_ids))
+        ticks_seen.append(ticks["n"])
+        return real(summaries, type_ids, *rest)
+    monkeypatch.setattr(scan_runner.scan_results, "compute_rows", spy)
+
+    async def go():
+        async def ticker():
+            while True:
+                ticks["n"] += 1
+                await asyncio.sleep(0)
+        t = asyncio.ensure_future(ticker())
+        try:
+            return await _scan_and_load(env)
+        finally:
+            t.cancel()
+            await asyncio.gather(t, return_exceptions=True)
+    job, result = _run(go())
+    assert scan_runner.ROWS_AT_ONCE == 25 and sizes == [25, 25, 10]
+    assert ticks_seen[0] < ticks_seen[1] < ticks_seen[2]     # other tasks ran between
+    assert [r["type_id"] for r in result["rows"]] == env.ids
+
+
+def test_running_count_counts_only_running_jobs(env):
+    async def go():
+        scan_runner.reset()
+        env.hold.clear()
+        a = scan_runner.start(91, "category", 10, S)
+        b = scan_runner.start(92, "category", 10, S)
+        c = scan_runner.start(93, "category", 10, S)
+        right_away = scan_runner.running_count()   # every job starts out queued
+        await until(lambda: (a.state, b.state, c.state) == ("running", "running", "queued"))
+        during = scan_runner.running_count()
+        env.hold.set()
+        for j in (a, b, c):
+            await wait(j)
+        return right_away, during, scan_runner.running_count()
+    assert _run(go()) == (0, 2, 0)
