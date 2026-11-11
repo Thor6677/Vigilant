@@ -170,8 +170,9 @@
             <div class="hc-mkt">
                 <div><div class="hc-n">{{ r.lowest_sell }}</div><div class="hc-l">Lowest sell</div></div>
                 <div><div class="hc-n">{{ r.demand_30 }} {{ trend(r) }}</div><div class="hc-l">Sold / day</div></div>
-                {# Days of stock go in the label line: beside the count they wrapped. #}
-                <div><div class="hc-n">{{ r.stock }}</div><div class="hc-l">Stock{% if r.stock_days %} · {{ r.stock_days }}{% endif %}</div></div>
+                {# Days of stock go in the label line (beside the count they wrapped),
+                   unspaced and unbreakable so they fit a third of a phone's width. #}
+                <div><div class="hc-n">{{ r.stock }}</div><div class="hc-l">Stock{% if r.stock_days %} <span class="hc-sd">· {{ r.stock_days }}</span>{% endif %}</div></div>
             </div>
             <div class="hc-two">
                 <div>

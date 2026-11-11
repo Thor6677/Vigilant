@@ -726,7 +726,11 @@ def test_routes_the_planner_cannot_give_show_a_dash_and_a_note(app_db, monkeypat
 def test_phone_card_keeps_stock_count_and_days_on_separate_lines(app_db):
     body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?qty=10").text
     cards = body[body.index('<div class="hc-cards m-only">'):]
-    assert '<div class="hc-n">14</div><div class="hc-l">Stock · 2.8 days</div>' in cards
+    assert ('<div class="hc-n">14</div><div class="hc-l">Stock '
+            '<span class="hc-sd">· 2.8 days</span></div>') in cards
+    # Unspaced and unbreakable, or it wraps in a third of a phone's width.
+    rule = re.search(r"\.hc-sd \{([^}]*)\}", source("market_type.html")).group(1)
+    assert "white-space:nowrap" in rule and "letter-spacing:0" in rule
 
 
 def test_save_button_has_a_short_label_for_phones(app_db):
