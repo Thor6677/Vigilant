@@ -72,6 +72,10 @@ SKIP = (
     # their own. Approved points still arrive via structure_age_calibration
     # (COPY_ALL), tagged source='user'.
     'structure_age_submissions',
+    # Hub Scan: summaries regenerate on the next scan, and saved results carry
+    # production user ids and production prices.
+    'market_scan_summary',
+    'market_scan_result',
 )
 
 # Generated from Base.metadata on 2026-07-26 (85 tables, minus the 3 in SLICE).
@@ -107,6 +111,8 @@ COPY_ALL = (
     'market_history',
     'market_history_meta',
     'market_hub_prefs',
+    'market_watchlist',
+    'market_watchlist_item',
     'mining_ledger_entries',
     'net_worth_snapshots',
     'player_count_daily_aggregates',

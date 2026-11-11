@@ -422,6 +422,9 @@ async def startup():
             "ALTER TABLE update_policy ADD COLUMN observed_window VARCHAR(10)",
             # Structure age user anchor points: where each calibration point came from
             "ALTER TABLE structure_age_calibration ADD COLUMN source VARCHAR(8) NOT NULL DEFAULT 'triff'",
+            # Hub Scan: budget per item and market share, beside the hub comparison's fees
+            "ALTER TABLE market_hub_prefs ADD COLUMN scan_budget_isk FLOAT NOT NULL DEFAULT 500000000",
+            "ALTER TABLE market_hub_prefs ADD COLUMN market_share_pct FLOAT NOT NULL DEFAULT 20",
         ]:
             try:
                 await db.execute(text(stmt))

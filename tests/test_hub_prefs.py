@@ -68,3 +68,37 @@ def test_save_then_load_and_update_in_place(session_factory):
 ])
 def test_clamp_pct(raw, default, expected):
     assert hub_prefs.clamp_pct(raw, default) == pytest.approx(expected)
+
+
+def test_scan_defaults_without_a_row(session_factory):
+    async def go():
+        async with session_factory() as db:
+            return await hub_prefs.get_prefs(db, USER_ID)
+    p = _run(go())
+    assert p.scan_budget_isk == 500_000_000
+    assert p.market_share_pct == 20.0
+
+
+def test_save_scan_prefs_clamps_and_keeps_fees(session_factory):
+    async def go():
+        async with session_factory() as db:
+            await hub_prefs.save_prefs(db, USER_ID, 8, 2, 30099001)
+            await hub_prefs.save_scan_prefs(db, USER_ID, 5, 250)
+            low = await hub_prefs.get_prefs(db, USER_ID)
+            await hub_prefs.save_scan_prefs(db, USER_ID, 9e12, 0)
+            high = await hub_prefs.get_prefs(db, USER_ID)
+            return low, high
+    low, high = _run(go())
+    assert (low.scan_budget_isk, low.market_share_pct) == (1_000_000, 100.0)
+    assert (high.scan_budget_isk, high.market_share_pct) == (100_000_000_000, 1.0)
+    assert (high.sales_tax_pct, high.broker_fee_pct, high.origin_system_id) == (8, 2, 30099001)
+
+
+def test_save_prefs_keeps_scan_settings(session_factory):
+    async def go():
+        async with session_factory() as db:
+            await hub_prefs.save_scan_prefs(db, USER_ID, 2e9, 35)
+            await hub_prefs.save_prefs(db, USER_ID, 4, 1, None)
+            return await hub_prefs.get_prefs(db, USER_ID)
+    p = _run(go())
+    assert (p.scan_budget_isk, p.market_share_pct) == (2_000_000_000, 35.0)
