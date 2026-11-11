@@ -1,0 +1,141 @@
+{# Hub Scan result — htmx partial swapped into #hs-result (innerHTML), so no
+   extends; the .hs-* rules and every script live in market_hub_scan.html
+   (a partial must not carry or redefine page JS). Context from
+   app/routes/market_scan.py: result (scan_results.load), view
+   (scan_view.build), filters, kind, ref, scanned, footnote, copy_only_title,
+   scan_cap, watchlists.
+
+   Filtering and sorting are requests for this partial, not client-side
+   script: #hs-filters asks for it on any change. Its "hide" box has no name;
+   the page script enables the hidden losers=show input when the box is
+   unticked (before htmx reads the form), so a first load, which sends no
+   losers parameter, hides them by default. The sort buttons set the hidden
+   sort / dir and fire the form's change.
+
+   Rescan and "retry these" sit OUTSIDE #hs-filters (a POST also sends the
+   form it is in) and send the page's #hs-form with this result's list
+   pinned by hx-vals. They opt out of the ISS-007 pill, which would replace
+   their labels; the page script says when a start fails.
+
+   Desktop: one table in its own sideways scroller (m-hide on phones).
+   Phones: one card per row (m-only). Dict keys by subscript throughout. #}
+{% set c = view['counts'] %}
+{% set list_vals = {"kind": kind, "ref": ref}|tojson %}
+{% macro sign(s) -%}{% if s %} hs-{{ s }}{% endif %}{%- endmacro %}
+{% macro tags(r) -%}
+<span class="hs-tag hs-{{ r['speed'] }}">{{ r['speed_text'] }}</span>
+{%- if r['supply'] %} <span class="hs-tag hs-{{ r['supply'] }}">{{ r['supply_text'] }}</span>{% endif %}
+{%- endmacro %}
+{% macro copy_mark(r) -%}
+{% if r['copy_only'] %}<span class="hs-copy" title="{{ copy_only_title }}" aria-hidden="true">*</span><span class="visually-hidden"> ({{ copy_only_title }})</span>{% endif %}
+{%- endmacro %}
+{% macro sort_th(key, label, left=False) -%}
+{% set on = view['sort'] == key %}
+<th scope="col"{% if left %} class="hs-l"{% endif %}
+    {%- if on %} aria-sort="{{ 'descending' if view['direction'] == 'desc' else 'ascending' }}"{% endif %}><button type="button" class="hs-sort{% if on %} is-on{% endif %}" data-sort="{{ key }}">{{ label }}{% if on %} <span aria-hidden="true">{{ '▼' if view['direction'] == 'desc' else '▲' }}</span>{% endif %}</button></th>
+{%- endmacro %}
+{% macro start_button(label, cls) -%}
+<button type="button" class="{{ cls }} hs-start" hx-post="/market/hub-scan/start"
+        hx-include="#hs-form" hx-vals='{{ list_vals }}' hx-target="#hs-status"
+        hx-swap="outerHTML" data-htmx-no-error="1">{{ label }}</button>
+{%- endmacro %}
+
+<div class="hs-done">
+    <span><b class="hs-label">{{ result['label'] }}</b> — scanned {{ scanned }} EVE time · {{ result['rows']|length }} item{{ '' if result['rows']|length == 1 else 's' }}</span>
+    {% if result['status'] == 'incomplete' %}<span class="hs-neg">incomplete: {{ result['item_scanned'] }} of {{ [result['item_total'], scan_cap]|min }} scanned</span>{% endif %}
+    {{ start_button('Rescan', 'b-btn is-ghost') }}
+</div>
+{% for note in result['notes'] %}<div class="hs-note">{{ note }}</div>{% endfor %}
+{% if view['routes_note'] %}<div class="hs-note">{{ view['routes_note'] }}</div>{% endif %}
+
+<form id="hs-filters" class="hs-filters" hx-get="/market/hub-scan/result" hx-trigger="change"
+      hx-target="#hs-result" hx-swap="innerHTML">
+    <input type="hidden" name="kind" value="{{ kind }}">
+    <input type="hidden" name="ref" value="{{ ref }}">
+    <input type="hidden" name="sort" value="{{ view['sort'] }}">
+    <input type="hidden" name="dir" value="{{ view['direction'] }}">
+    <label class="hs-fl" for="hs-f-hub"><span>Hub</span>
+        <select class="b-input" id="hs-f-hub" name="hub">
+            <option value="">All</option>
+            {% for key, name in hub_names.items() %}<option value="{{ key }}"{% if filters['hub'] == key %} selected{% endif %}>{{ name }}</option>{% endfor %}
+        </select></label>
+    <label class="hs-fl" for="hs-f-source"><span>Source</span>
+        <select class="b-input" id="hs-f-source" name="source">
+            <option value="">Either</option>
+            <option value="build"{% if filters['source'] == 'build' %} selected{% endif %}>Build</option>
+            <option value="haul"{% if filters['source'] == 'haul' %} selected{% endif %}>Haul from Jita</option>
+        </select></label>
+    <input type="hidden" id="hs-losers-off" name="losers" value="show"{% if filters['hide_losers'] %} disabled{% endif %}>
+    <label class="hs-chk"><input type="checkbox" class="b-check" id="hs-losers"{% if filters['hide_losers'] %} checked{% endif %}> Hide items with no profit per day</label>
+    <label class="hs-chk"><input type="checkbox" class="b-check" name="under" value="1"{% if filters['under_only'] %} checked{% endif %}> Under-supplied only</label>
+</form>
+
+{% if view['rows'] %}
+<div class="hs-scroll m-hide">
+<table class="hs-table">
+    <thead>
+        <tr>
+            {{ sort_th('item', 'Item', True) }}
+            {{ sort_th('hub', 'Best hub', True) }}
+            <th scope="col" class="hs-l">Source</th>
+            {{ sort_th('cost', 'Cost each') }}
+            {{ sort_th('price', 'Sells for') }}
+            {{ sort_th('profit', 'Profit each') }}
+            {{ sort_th('margin', 'Margin') }}
+            {{ sort_th('sold', 'Sold / day') }}
+            {{ sort_th('stock', 'Stock · days') }}
+            {{ sort_th('qty', 'Quantity') }}
+            {{ sort_th('profit_day', 'Profit / day') }}
+            {% if view['show_route'] %}<th scope="col">Route</th>{% endif %}
+        </tr>
+    </thead>
+    <tbody>
+    {% for r in view['rows'] %}
+        <tr>
+            <td class="hs-l"><a class="hs-item" href="{{ r['link'] }}">{{ r['name'] }}</a></td>
+            <td class="hs-l">{{ r['hub'] }} {{ tags(r) }}</td>
+            <td class="hs-l"><span class="hs-src hs-src-{{ r['source'] }}">{{ r['source_text'] }}</span>{{ copy_mark(r) }}{% if r['other_text'] %}<small>{{ r['other_text'] }}</small>{% endif %}</td>
+            <td>{{ r['cost'] }}<small>{{ r['cost_basis'] }}</small></td>
+            <td>{{ r['price'] }}{% if r['price_flag'] %}<small title="{{ r['price_flag_title'] }}">{{ r['price_flag'] }}</small>{% endif %}</td>
+            <td class="{{ sign(r['profit_sign']) }}">{{ r['profit_each'] }}</td>
+            <td>{{ r['margin'] }}</td>
+            <td>{{ r['sold'] }}</td>
+            <td>{{ r['stock'] }}{% if r['stock_days'] %}<small>{{ r['stock_days'] }}</small>{% endif %}</td>
+            <td>{{ r['qty'] }}<small>{{ r['qty_limit'] }}</small></td>
+            <td class="hs-pd{{ sign(r['profit_day_sign']) }}">{{ r['profit_day'] }}</td>
+            {% if view['show_route'] %}<td>{{ r['route']['text'] }}{% if r['route']['sub'] %}<small>{{ r['route']['sub'] }}</small>{% endif %}</td>{% endif %}
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+
+<div class="hs-cards m-only">
+    {% for r in view['rows'] %}
+    <div class="hs-card">
+        <div class="hs-ctop"><a class="hs-item" href="{{ r['link'] }}">{{ r['name'] }}</a><span class="hs-big{{ sign(r['profit_day_sign']) }}">{{ r['profit_day'] }} / day</span></div>
+        <div class="hs-cline">{{ r['hub'] }} {{ tags(r) }}</div>
+        <div class="hs-cline"><span class="hs-src hs-src-{{ r['source'] }}">{{ r['source_text'] }}</span>{{ copy_mark(r) }} {{ r['cost'] }} → sells {{ r['price'] }}{% if r['price_flag'] %} <small class="hs-mut">({{ r['price_flag'] }})</small>{% endif %}</div>
+        <div class="hs-grid">
+            <div><span>Profit each</span><b class="{{ sign(r['profit_sign']) }}">{{ r['profit_each'] }}</b></div>
+            <div><span>Margin</span>{{ r['margin'] }}</div>
+            <div><span>Quantity</span>{{ r['qty'] }}</div>
+            <div><span>Sold / day</span>{{ r['sold'] }}</div>
+            <div><span>Stock</span>{{ r['stock'] }}{% if r['stock_days'] %} · {{ r['stock_days'] }}{% endif %}</div>
+            {% if view['show_route'] %}<div><span>Route</span>{{ r['route']['text'] }}{% if r['route']['sub'] %} {{ r['route']['sub'] }}{% endif %}</div>{% endif %}
+        </div>
+        {% if r['other_card'] %}<div class="hs-alt">{{ r['other_card'] }}</div>{% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="b-empty">{% if c['ok'] %}Nothing to show with these filters.{% else %}No item in this scan has figures to show.{% endif %}</div>
+{% endif %}
+
+<div class="hs-counts">Showing {{ c['shown'] }} of {{ c['ok'] }}
+    {%- if c['hidden'] %} · {{ c['hidden'] }} hidden: lose money or no sales this week{% endif %}
+    {%- if c['no_sales'] %} · {{ c['no_sales'] }} skipped: no recent sales{% endif %}
+    {%- if c['no_cost'] %} · {{ c['no_cost'] }} skipped: no cost{% endif %}
+    {%- if c['unavailable'] %} · {{ c['unavailable'] }} unavailable ({{ start_button('retry these', 'hs-linkbtn') }}){% endif %}
+</div>
+<p class="hs-foot">{{ footnote }}</p>

@@ -1,0 +1,358 @@
+{% extends "base.html" %}
+{% block title %}Hub Scan — Market — VIGILANT{% endblock %}
+{% block breadcrumbs %}
+<div class="b-breadcrumbs">
+    <a href="/dashboard">Dashboard</a>
+    <span class="b-crumb-sep">&gt;</span>
+    <a href="/market">Market</a>
+    <span class="b-crumb-sep">&gt;</span>
+    <span class="b-crumb-current">Hub Scan</span>
+</div>
+{% endblock %}
+
+{% block content %}
+{# Market → Hub Scan (app/routes/market_scan.py). The form makes no request
+   of its own: the Scan button posts it, and the page script asks for a new
+   status line when the list changes. #hs-status (partials/hub_scan_status.html)
+   polls while a scan runs and loads the result (partials/hub_scan_result.html)
+   into #hs-result when it ends. All behaviour is in the script at the foot of
+   this page; the fragments carry none (and no inline handlers: CSP).
+
+   The category picker reuses Build Finder's tree fragments
+   (/industry/build-finder/tree and /tree/search); their .bft-* rules and
+   the small part of its selection script this page needs are copied here,
+   since that CSS and JS live in build_finder.html.
+
+   Every button is type="button" and there is no submit button, so Enter in
+   a field never submits the form natively (the script also stops it). #}
+<style nonce="{{ request.state.csp_nonce }}">
+    /* Hub Scan. Desktop shows the result table; phones (≤640px) get one card
+       per item (m-hide / m-only switch them). Nothing here may be wider than
+       a 320px phone except the table, which scrolls inside .hs-scroll. */
+    .hs [hidden] { display:none !important; }
+    .hs-mut { color:var(--muted); font-size:10px; }
+    .hs-controls { display:flex; flex-wrap:wrap; gap:0.9rem 1.25rem; align-items:flex-end; padding:0.9rem; }
+    .hs-fld { display:flex; flex-direction:column; gap:3px; min-width:0; }
+    .hs-lbl { font-size:9px; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted); }
+    .hs-pick { flex:1 1 320px; }
+    .hs-hint { font-size:11px; color:var(--muted); padding:0.45rem 0; }
+    .hs-row { display:flex; flex-wrap:wrap; gap:0.75rem 1.25rem; align-items:flex-end; flex:1 1 100%; }
+    .hs-in-budget { width:8rem; }
+    .hs-in-pct { width:5rem; }
+    .hs-in-origin { width:9rem; }
+    .hs-seg { display:flex; flex-wrap:wrap; border:1px solid var(--border); }
+    .hs-seg-radio { position:absolute; opacity:0; width:1px; height:1px; min-height:0; pointer-events:none; }
+    .hs-seg label { display:flex; align-items:center; padding:0.45rem 0.8rem; font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:var(--muted); border-right:1px solid var(--border); cursor:pointer; user-select:none; }
+    .hs-seg label:last-child { border-right:none; }
+    .hs-seg label:hover { color:var(--text); }
+    .hs-seg-radio:checked + label { background:var(--accent); color:var(--bg); }
+    .hs-seg-radio:focus-visible + label { outline:2px solid var(--accent); outline-offset:-2px; }
+    .hs-path { font-size:11px; color:var(--accent); min-height:16px; padding:2px 0 4px; overflow-wrap:anywhere; }
+    .hs-tree { margin-top:4px; max-height:260px; overflow-y:auto; border:1px solid var(--border); background:var(--bg); }
+    /* Build Finder's tree fragment (partials/build_finder_tree.html). */
+    .bft-list { list-style:none; margin:0; padding:0; }
+    .bft-kids > .bft-list { padding-left:14px; }
+    .bft-row { display:flex; align-items:center; }
+    .bft-arrow { background:none; border:none; color:var(--muted); width:18px; flex:none; font:inherit; font-size:9px; cursor:pointer; padding:2px 0; }
+    .bft-arrow:hover { color:var(--accent); }
+    .bft-arrow-empty { width:18px; flex:none; display:inline-block; }
+    .bft-select { background:none; border:none; text-align:left; color:var(--text); flex:1; min-width:0; font:inherit; font-size:11px; cursor:pointer; padding:3px 4px; overflow-wrap:anywhere; }
+    .bft-select:hover, .bft-select.is-selected { color:var(--accent); }
+    .bft-empty { font-size:10px; color:var(--muted); padding:6px; }
+
+    .hs-status { display:flex; flex-wrap:wrap; gap:0.6rem 1rem; align-items:center; margin:1rem 0 0.25rem; font-size:12px; color:var(--muted); }
+    .hs-bar { flex:1 1 180px; max-width:420px; height:6px; background:var(--surface); border:1px solid var(--border); }
+    .hs-bar i { display:block; height:100%; background:var(--accent); }
+    .hs-note-inline { color:var(--text); }
+    .hs-done { display:flex; flex-wrap:wrap; gap:0.5rem 1rem; align-items:center; margin:0.75rem 0 0.25rem; font-size:12px; color:var(--muted); }
+    .hs-label { color:var(--text); font-weight:600; overflow-wrap:anywhere; }
+    .hs-note { font-size:11px; color:var(--muted); padding:0.3rem 0 0; }
+    .hs-filters { display:flex; flex-wrap:wrap; gap:0.75rem 1.25rem; align-items:flex-end; margin:0.9rem 0; font-size:12px; color:var(--muted); }
+    .hs-fl { display:flex; flex-direction:column; gap:3px; }
+    .hs-fl > span { font-size:9px; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted); }
+    .hs-chk { display:flex; gap:0.45rem; align-items:center; cursor:pointer; }
+
+    .hs-scroll { overflow-x:auto; border-top:1px solid var(--border); }
+    .hs-table { width:100%; border-collapse:collapse; min-width:1080px; font-size:12px; }
+    .hs-table th { font-size:9px; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted); font-weight:600; text-align:right; padding:0.6rem 0.6rem; border-bottom:1px solid var(--border); white-space:nowrap; vertical-align:bottom; }
+    .hs-table td { padding:0.6rem 0.6rem; text-align:right; vertical-align:top; white-space:nowrap; border-bottom:1px solid var(--border); }
+    .hs-table .hs-l { text-align:left; }
+    .hs-table td small { display:block; font-size:10px; color:var(--muted); }
+    .hs-sort { background:none; border:none; padding:0; margin:0; font:inherit; letter-spacing:inherit; text-transform:inherit; color:inherit; cursor:pointer; white-space:nowrap; }
+    .hs-sort:hover, .hs-sort.is-on { color:var(--accent); }
+    .hs-item { color:var(--text); font-weight:600; text-decoration:none; border-bottom:1px dotted var(--muted); }
+    .hs-item:hover { color:var(--accent); }
+    .hs-tag { display:inline-block; font-size:9px; letter-spacing:0.14em; text-transform:uppercase; padding:1px 6px; border:1px solid; white-space:nowrap; vertical-align:middle; }
+    .hs-fast { color:var(--success); border-color:var(--success); }
+    .hs-steady { color:var(--info); border-color:var(--info); }
+    /* Amber on purpose, as the item page's .hc-slow: --warn is the accent gold here. */
+    .hs-slow { color:#c97a20; border-color:#c97a20; }
+    .hs-thin { color:var(--muted); border-color:var(--muted); }
+    .hs-under { color:var(--accent); border-color:var(--accent); background:var(--accent-faint); }
+    .hs-saturated { color:var(--danger); border-color:var(--danger); }
+    .hs-src { display:inline-block; padding:1px 7px; font-size:10px; letter-spacing:0.12em; text-transform:uppercase; border:1px solid var(--border); white-space:nowrap; }
+    .hs-src-build { color:var(--accent); border-color:var(--accent); }
+    .hs-src-haul { color:var(--info); border-color:var(--info); }
+    .hs-copy { color:var(--accent); margin-left:2px; cursor:help; }
+    .hs-pos { color:var(--success); }
+    .hs-neg { color:var(--danger); }
+    .hs-pd { font-weight:600; }
+    .hs-counts { font-size:11px; color:var(--muted); margin-top:0.75rem; }
+    .hs-linkbtn { background:none; border:none; padding:0; font:inherit; color:var(--accent); cursor:pointer; text-decoration:underline; }
+    .hs-foot { font-size:10px; color:var(--muted); margin-top:0.6rem; padding-top:0.6rem; border-top:1px solid var(--border); }
+
+    .hs-cards { margin-top:0.5rem; }
+    .hs-card { border:1px solid var(--border); background:var(--surface); padding:0.75rem; margin-bottom:0.6rem; min-width:0; }
+    .hs-ctop { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:baseline; gap:0.25rem 0.5rem; }
+    .hs-ctop .hs-item { min-width:0; overflow-wrap:anywhere; }
+    .hs-big { font-size:16px; white-space:nowrap; }
+    .hs-cline { margin-top:0.4rem; font-size:12px; overflow-wrap:anywhere; }
+    .hs-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:0.6rem; margin-top:0.6rem; font-size:13px; }
+    .hs-grid > div { min-width:0; overflow-wrap:anywhere; }
+    .hs-grid span { display:block; font-size:9px; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted); }
+    .hs-alt { margin-top:0.6rem; padding-top:0.5rem; border-top:1px dashed var(--border); color:var(--muted); font-size:11px; }
+
+    @media (max-width: 640px) {
+        .hs-controls { padding:0.75rem; gap:0.6rem; }
+        .hs-pick, .hs-fld-kind { flex:1 1 100%; }
+        .hs-row { gap:0.6rem; }
+        .hs-row > .hs-fld, .hs-fl { flex:1 1 45%; }
+        .hs-controls .b-input, .hs-filters .b-input { width:100%; min-height:44px; font-size:16px; }
+        .hs-seg label { flex:1 1 auto; justify-content:center; min-height:44px; padding:0 0.5rem; letter-spacing:0.04em; }
+        .hs-chk { min-height:44px; flex:1 1 100%; }
+        .hs-bar { flex-basis:100%; max-width:none; }
+    }
+</style>
+
+<div class="b-page-header">
+    <div>
+        <h1 class="b-page-title">Hub Scan</h1>
+        <p class="hs-mut" style="margin:0.25rem 0 0;">
+            Scan a list of items across Jita, Amarr, Dodixie, Hek and Rens. Each item
+            shows the hub where it earns the most per day, building it or hauling it from Jita.
+        </p>
+    </div>
+</div>
+
+<div class="b-section hs">
+    <form id="hs-form" class="hs-controls" autocomplete="off"
+          data-category-ref="{{ ref if kind == 'category' else 0 }}">
+        <div class="hs-fld hs-fld-kind">
+            <span class="hs-lbl" id="hs-kind-lbl">Scan</span>
+            <div class="hs-seg" role="radiogroup" aria-labelledby="hs-kind-lbl">
+                <input type="radio" class="hs-seg-radio" id="hs-kind-category" name="kind" value="category"{% if kind == 'category' %} checked{% endif %}><label for="hs-kind-category">Category</label>
+                <input type="radio" class="hs-seg-radio" id="hs-kind-blueprints" name="kind" value="blueprints"{% if kind == 'blueprints' %} checked{% endif %}><label for="hs-kind-blueprints">My blueprints</label>
+                <input type="radio" class="hs-seg-radio" id="hs-kind-watchlist" name="kind" value="watchlist"{% if kind == 'watchlist' %} checked{% endif %}><label for="hs-kind-watchlist">Watchlist</label>
+            </div>
+        </div>
+        {# The list being scanned: a market group id, 0, or a watchlist id. #}
+        <input type="hidden" id="hs-ref" name="ref" value="{{ ref }}">
+
+        <div class="hs-fld hs-pick" id="hs-pick-category"{% if kind != 'category' %} hidden{% endif %}>
+            <label class="hs-lbl" for="hs-tree-search">Category</label>
+            <div id="hs-path" class="hs-path">{{ category_path or 'None picked yet: choose one below.' }}</div>
+            <input type="text" id="hs-tree-search" name="q" class="b-input"
+                   placeholder="Search market groups (2+ letters)" autocomplete="off"
+                   hx-get="/industry/build-finder/tree/search"
+                   hx-trigger="input changed delay:300ms"
+                   hx-target="#hs-tree" hx-swap="innerHTML">
+            {# hx-target "this": nothing above may pass its own target down. #}
+            <div id="hs-tree" class="hs-tree"
+                 hx-get="/industry/build-finder/tree?parent=0"
+                 hx-trigger="load" hx-target="this"></div>
+        </div>
+        <div class="hs-fld hs-pick" id="hs-pick-blueprints"{% if kind != 'blueprints' %} hidden{% endif %}>
+            <span class="hs-lbl">My blueprints</span>
+            <div class="hs-hint">What your characters' and corporations' blueprints make.</div>
+        </div>
+        <div class="hs-fld hs-pick" id="hs-pick-watchlist"{% if kind != 'watchlist' %} hidden{% endif %}>
+            <label class="hs-lbl" for="hs-watchlist">Watchlist</label>
+            {% if watchlists %}
+            <select id="hs-watchlist" class="b-input">
+                {% for w in watchlists %}<option value="{{ w['id'] }}"{% if kind == 'watchlist' and ref == w['id'] %} selected{% endif %}>{{ w['name'] }}</option>{% endfor %}
+            </select>
+            {% else %}
+            <div class="hs-hint">You have no watchlists yet.</div>
+            {% endif %}
+        </div>
+
+        <div class="hs-row">
+            {# No numeric keypad for the budget: it takes "500M" and "1.5B". #}
+            <label class="hs-fld" for="hs-budget"><span class="hs-lbl">Budget per item</span>
+                <input class="b-input hs-in-budget" id="hs-budget" type="text" inputmode="text"
+                       name="budget" value="{{ budget }}" placeholder="500M"></label>
+            <label class="hs-fld" for="hs-share"><span class="hs-lbl">Market share %</span>
+                <input class="b-input hs-in-pct" id="hs-share" type="text" inputmode="decimal"
+                       name="share" value="{{ share_pct }}"></label>
+            <label class="hs-fld" for="hs-tax"><span class="hs-lbl">Sales tax %</span>
+                <input class="b-input hs-in-pct" id="hs-tax" type="text" inputmode="decimal"
+                       name="sales_tax" value="{{ sales_tax_pct }}"></label>
+            <label class="hs-fld" for="hs-broker"><span class="hs-lbl">Broker fee %</span>
+                <input class="b-input hs-in-pct" id="hs-broker" type="text" inputmode="decimal"
+                       name="broker_fee" value="{{ broker_fee_pct }}"></label>
+            <label class="hs-fld" for="hs-origin"><span class="hs-lbl">Starting system</span>
+                <input class="b-input hs-in-origin" id="hs-origin" type="text" name="origin"
+                       value="{{ origin_name }}" placeholder="none"></label>
+            <span class="hs-fld">
+                <button type="button" id="hs-start" class="b-btn is-primary hs-start"
+                        hx-post="/market/hub-scan/start" hx-include="#hs-form"
+                        hx-target="#hs-status" hx-swap="outerHTML"
+                        data-htmx-no-error="1">Scan</button>
+            </span>
+            <span id="hs-start-msg" class="hs-mut" role="status"></span>
+        </div>
+    </form>
+</div>
+
+<div class="hs">
+{% include "partials/hub_scan_status.html" %}
+<div id="hs-result"></div>
+</div>
+
+<script nonce="{{ request.state.csp_nonce }}">
+/* Hub Scan page behaviour. The status line and the result arrive by htmx,
+   so everything that acts on them is delegated from <body> / document. */
+(function () {
+    var form = document.getElementById('hs-form');
+    var ref = document.getElementById('hs-ref');
+    if (!form || !ref) return;
+    var categoryRef = form.getAttribute('data-category-ref') || '0';
+
+    function kindValue() {
+        var k = form.querySelector('input[name="kind"]:checked');
+        return k ? k.value : 'category';
+    }
+    function showStatus(kind, id) {
+        if (!window.htmx) return;
+        htmx.ajax('GET', '/market/hub-scan/status?kind=' + encodeURIComponent(kind) +
+                  '&ref=' + encodeURIComponent(id), {target: '#hs-status', swap: 'outerHTML'});
+    }
+    function showPicker(kind) {
+        ['category', 'blueprints', 'watchlist'].forEach(function (k) {
+            var el = document.getElementById('hs-pick-' + k);
+            if (el) el.hidden = k !== kind;
+        });
+    }
+
+    /* Enter in a field must not submit the form. */
+    form.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && e.target.tagName === 'INPUT') e.preventDefault();
+    });
+
+    /* (a) The category tree (Build Finder's fragments). */
+    function nodePath(btn) {
+        /* "Ships › Frigates › …" from the li.bft-node ancestors; a search
+           result is un-nested and carries its full path already. */
+        var names = [];
+        var li = btn.closest('li.bft-node');
+        while (li) {
+            var sel = li.querySelector(':scope > .bft-row > .bft-select');
+            if (sel) names.unshift(sel.dataset.mgName);
+            li = li.parentElement ? li.parentElement.closest('li.bft-node') : null;
+        }
+        return names.join(' › ');
+    }
+    var tree = document.getElementById('hs-tree');
+    if (tree) {
+        tree.addEventListener('click', function (e) {
+            var btn = e.target.closest('.bft-select');
+            if (!btn) return;
+            categoryRef = btn.dataset.mgId;
+            ref.value = categoryRef;
+            var path = document.getElementById('hs-path');
+            if (path) path.textContent = nodePath(btn);
+            tree.querySelectorAll('.bft-select.is-selected').forEach(function (el) {
+                el.classList.remove('is-selected');
+            });
+            btn.classList.add('is-selected');
+            showStatus('category', categoryRef);
+        });
+        /* A loaded branch toggles open and shut without asking again. */
+        tree.addEventListener('htmx:beforeRequest', function (evt) {
+            var el = evt.detail.elt;
+            if (!el.classList || !el.classList.contains('bft-arrow')) return;
+            var kids = document.getElementById('bft-kids-' + el.dataset.mgId);
+            if (kids && kids.dataset.loaded === '1') {
+                evt.preventDefault();
+                var open = kids.style.display !== 'none';
+                kids.style.display = open ? 'none' : '';
+                el.textContent = open ? '▸' : '▾';
+            }
+        });
+        tree.addEventListener('htmx:afterRequest', function (evt) {
+            var el = evt.detail.elt;
+            if (el.classList && el.classList.contains('bft-arrow') && evt.detail.successful) {
+                el.textContent = '▾';
+            }
+        });
+    }
+
+    /* (b) The list kind and the watchlist picker. */
+    form.addEventListener('change', function (e) {
+        var t = e.target;
+        if (t.name === 'kind') {
+            var k = kindValue();
+            var wl = document.getElementById('hs-watchlist');
+            showPicker(k);
+            ref.value = k === 'category' ? categoryRef : (k === 'watchlist' && wl ? wl.value : '0');
+            showStatus(k, ref.value);
+        } else if (t.id === 'hs-watchlist') {
+            ref.value = t.value;
+            showStatus('watchlist', ref.value);
+        }
+    });
+
+    /* (c) Column headers re-sort: the same column again flips the direction. */
+    document.body.addEventListener('click', function (e) {
+        var btn = e.target.closest ? e.target.closest('.hs-sort') : null;
+        var f = document.getElementById('hs-filters');
+        if (!btn || !f || !window.htmx) return;
+        var sort = f.elements.namedItem('sort'), dir = f.elements.namedItem('dir');
+        if (sort.value === btn.dataset.sort) {
+            dir.value = dir.value === 'desc' ? 'asc' : 'desc';
+        } else {
+            sort.value = btn.dataset.sort;
+            dir.value = '';
+        }
+        htmx.trigger(f, 'change');
+    });
+
+    /* (d) The "hide" box has no name: unticked, it enables losers=show. Capture
+       phase, so this runs before htmx (listening on the form) reads it. */
+    document.addEventListener('change', function (e) {
+        if (!e.target || e.target.id !== 'hs-losers') return;
+        var off = document.getElementById('hs-losers-off');
+        if (off) off.disabled = e.target.checked;
+    }, true);
+
+    /* Failed requests the site's error pill must not handle: a start button
+       (the pill would replace its label) says so beside Scan, and a result
+       that failed to load says so in #hs-result. */
+    function startButton(evt) {
+        var el = evt.detail && evt.detail.elt;
+        return el && el.classList && el.classList.contains('hs-start');
+    }
+    function say(text) {
+        var line = document.getElementById('hs-start-msg');
+        if (line) line.textContent = text;
+    }
+    document.body.addEventListener('htmx:beforeRequest', function (e) {
+        if (startButton(e)) say('');
+    });
+    ['htmx:responseError', 'htmx:sendError', 'htmx:timeout'].forEach(function (name) {
+        document.body.addEventListener(name, function (e) {
+            if (startButton(e)) say('Could not start the scan; try again.');
+            var el = e.detail && e.detail.elt;
+            if (el && el.classList && el.classList.contains('hs-loader')) {
+                var box = document.getElementById('hs-result');
+                if (!box) return;
+                var note = document.createElement('div');
+                note.className = 'hs-note';
+                note.textContent = 'Could not load the saved result; refresh to retry.';
+                box.replaceChildren(note);
+            }
+        });
+    });
+})();
+</script>
+{% endblock %}

@@ -16,6 +16,14 @@ async def get(db: AsyncSession, user_id: int, watchlist_id: int) -> MarketWatchl
     )).scalar_one_or_none()
 
 
+async def all_for(db: AsyncSession, user_id: int) -> list[MarketWatchlist]:
+    """The user's lists, by name."""
+    return list((await db.execute(
+        select(MarketWatchlist).where(MarketWatchlist.user_id == user_id)
+        .order_by(MarketWatchlist.name)
+    )).scalars())
+
+
 async def item_ids(db: AsyncSession, watchlist_id: int) -> list[int]:
     return [t for (t,) in (await db.execute(
         select(MarketWatchlistItem.type_id)
