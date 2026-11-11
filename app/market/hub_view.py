@@ -12,35 +12,51 @@ def fmt_isk(v: float | None) -> str:
     if v is None:
         return "—"
     a = abs(v)
+    # Pick the unit from the ROUNDED value so we never print four digits
+    # before the point (999_950 -> "1.0M", not "1000.0K").
+    if round(a / 1e6, 1) >= 1000:
+        return f"{v / 1e9:.2f}B"
     if a >= 1e9:
         return f"{v / 1e9:.2f}B"
+    if round(a / 1e3, 1) >= 1000:
+        return f"{v / 1e6:.1f}M"
     if a >= 1e6:
         return f"{v / 1e6:.1f}M"
+    if round(a, 2) >= 1000:
+        return f"{v / 1e3:.1f}K"
     if a >= 1e3:
         return f"{v / 1e3:.1f}K"
     return f"{v:.2f}"
 
 
+def _negative(v: float) -> bool:
+    """Negative after rounding to 2 decimals (so -0.001 is not shown as -0.00)."""
+    return round(v, 2) < 0
+
+
 def fmt_signed(v: float | None) -> str:
     if v is None:
         return "—"
-    return ("−" if v < 0 else "+") + fmt_isk(abs(v))
+    return ("−" if _negative(v) else "+") + fmt_isk(abs(v))
 
 
 def _sign(v: float | None) -> str:
     if v is None:
         return ""
-    return "neg" if v < 0 else "pos"
+    return "neg" if _negative(v) else "pos"
 
 
 def fmt_rate(v: float) -> str:
     if v >= 10:
         return f"{v:.0f}"
+    if 0 < v < 0.05:
+        return "<0.1"
     return f"{v:.1f}".rstrip("0").rstrip(".")
 
 
 def _day(v: float) -> str:
-    return "<1" if v < 1 else str(round(v))
+    n = math.floor(v + 0.5)  # round half up, not banker's rounding
+    return "<1" if n < 1 else str(n)
 
 
 def fmt_days_range(best: float | None, typical: float | None) -> str:
@@ -111,12 +127,18 @@ def _tag_text(result: dict) -> str:
 
 
 def pick_boxes(picks: dict, results: dict[str, dict | None], names: dict[str, str]) -> list[dict]:
-    """The 'fastest sale' / 'best margin' boxes above the hubs."""
+    """The 'fastest sale' / 'best margin' boxes above the hubs. Every key in
+    `picks` must be present with a non-None result in `results` and a name in
+    `names` (which `hub_analysis.best_picks` guarantees)."""
     fastest, margin = picks["fastest"], picks["margin"]
     boxes = []
 
     def _days(r):
         return fmt_days_range(r["list"]["days_best"], r["list"]["days_typical"])
+
+    def _when(r):
+        d = _days(r)
+        return "under a day" if d == "<1" else f"about {d} days"
 
     def _profit(r):
         lw = r["list"]
@@ -126,7 +148,7 @@ def pick_boxes(picks: dict, results: dict[str, dict | None], names: dict[str, st
     if fastest is not None and fastest == margin:
         r = results[fastest]
         boxes.append({"k": "Fastest sale and best margin",
-                      "v": f"{names[fastest]} — about {_days(r)} days",
+                      "v": f"{names[fastest]} — {_when(r)}",
                       "d": f"{_profit(r)}. {_tag_text(r)}."})
         return boxes
     if fastest is not None:
@@ -135,10 +157,11 @@ def pick_boxes(picks: dict, results: dict[str, dict | None], names: dict[str, st
         if r["list"]["profit_each"] is not None:
             detail = f"{_profit(r)}. {detail}"
         boxes.append({"k": "Fastest sale",
-                      "v": f"{names[fastest]} — about {_days(r)} days", "d": detail})
+                      "v": f"{names[fastest]} — {_when(r)}", "d": detail})
     if margin is not None:
         r = results[margin]
         boxes.append({"k": "Best margin",
                       "v": f"{names[margin]} — {_profit(r)}",
-                      "d": f"{_tag_text(r)}. About {_days(r)} days."})
+                      "d": f"{_tag_text(r)}. " + ("Under a day." if _days(r) == "<1"
+                                             else f"About {_days(r)} days.")})
     return boxes
