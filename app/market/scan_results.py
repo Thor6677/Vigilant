@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete, or_, select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import MarketScanResult, MarketScanSummary
@@ -15,6 +17,9 @@ from app.market import scan_fetch, scan_rules
 
 SUMMARY_MAX_AGE = timedelta(days=2)
 CATEGORY_RESULT_MAX_IDLE = timedelta(days=30)
+OPENED_STAMP_INTERVAL = timedelta(hours=1)
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -98,34 +103,49 @@ async def save(db: AsyncSession, user_id: int, kind: str, ref: int, *, label: st
     # Serialise first so a bad value raises before the session is touched.
     settings_json, notes_json = _dumps(settings.as_dict()), _dumps(notes)
     routes_json, rows_json = _dumps(routes), _dumps(rows)
-    row = await _find(db, user_id, kind, ref)
-    if row is None:
-        row = MarketScanResult(user_id=user_id, list_kind=kind, list_ref=ref)
-        db.add(row)
-    row.label, row.status = label[:200], status
-    row.scanned_at = row.opened_at = _naive(now)
-    row.item_total, row.item_scanned = item_total, item_scanned
-    row.settings_json, row.notes_json = settings_json, notes_json
-    row.routes_json, row.rows_json = routes_json, rows_json
+    stamp = _naive(now)
+    values = {
+        "label": label[:200], "status": status, "scanned_at": stamp, "opened_at": stamp,
+        "item_total": item_total, "item_scanned": item_scanned,
+        "settings_json": settings_json, "notes_json": notes_json,
+        "routes_json": routes_json, "rows_json": rows_json,
+    }
+    # One atomic upsert on the unique key: two racing saves cannot both insert.
+    stmt = sqlite_insert(MarketScanResult).values(
+        user_id=user_id, list_kind=kind, list_ref=ref, **values)
+    await db.execute(stmt.on_conflict_do_update(
+        index_elements=["user_id", "list_kind", "list_ref"], set_=values))
     await db.commit()
 
 
 async def load(db: AsyncSession, user_id: int, kind: str, ref: int,
                now: datetime | None = None) -> dict | None:
     """The saved result as plain data (`scanned_at` aware UTC), or None.
-    Stamps `opened_at`."""
+    May write: stamps `opened_at` when the stored stamp is at least
+    OPENED_STAMP_INTERVAL old. The result is built before any write, and a
+    failed stamp is rolled back and logged, never raised."""
     row = await _find(db, user_id, kind, ref)
     if row is None:
         return None
-    row.opened_at = _naive(now or datetime.now(timezone.utc))
-    await db.commit()
-    return {
+    result = {
         "kind": row.list_kind, "ref": row.list_ref, "label": row.label,
         "status": row.status, "scanned_at": _utc(row.scanned_at),
         "item_total": row.item_total, "item_scanned": row.item_scanned,
         "settings": json.loads(row.settings_json), "notes": json.loads(row.notes_json),
         "routes": json.loads(row.routes_json), "rows": json.loads(row.rows_json),
     }
+    stamp = _naive(now or datetime.now(timezone.utc))
+    if stamp - row.opened_at >= OPENED_STAMP_INTERVAL:
+        try:
+            row.opened_at = stamp
+            await db.commit()
+        except Exception:
+            log.warning("Hub Scan: could not stamp opened_at", exc_info=True)
+            try:
+                await db.rollback()
+            except Exception:
+                log.warning("Hub Scan: rollback after failed stamp also failed", exc_info=True)
+    return result
 
 
 async def delete_for(db: AsyncSession, user_id: int, kind: str, ref: int) -> None:
@@ -137,7 +157,9 @@ async def delete_for(db: AsyncSession, user_id: int, kind: str, ref: int) -> Non
 
 async def cleanup(db: AsyncSession, now: datetime) -> tuple[int, int]:
     """(summaries deleted, results deleted). A summary goes when BOTH parts are
-    older than SUMMARY_MAX_AGE (or absent)."""
+    older than SUMMARY_MAX_AGE (or absent). Meant to run from the daily
+    scheduler. A summary row always carries at least one stamped part once
+    written, so a row mid-scan is not removed."""
     now = _naive(now)
     cutoff = now - SUMMARY_MAX_AGE
     s = await db.execute(delete(MarketScanSummary).where(

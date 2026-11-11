@@ -1,6 +1,7 @@
 """Hub Scan results: computing rows, saving, loading, deleting, cleanup."""
 import asyncio
 import json
+import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
 
@@ -72,8 +73,22 @@ async def _compute(factory, type_ids, failed, bench):
                                      bench, SETTINGS, failed, NOW)
 
 
-def test_rows_follow_the_rules_and_keep_the_order(factory):
+def test_rows_follow_the_rules_and_keep_the_order(factory, monkeypatch):
+    calls = []
+    real = scan_results.scan_rules.best_for_item
+
+    def spy(*args):
+        calls.append(args)
+        return real(*args)
+
+    monkeypatch.setattr(scan_results.scan_rules, "best_for_item", spy)
+    settings = Settings(budget_isk=5e8, share_pct=20.0, sales_tax_pct=3.37, broker_fee_pct=1.5)
+    monkeypatch.setattr(sys.modules[__name__], "SETTINGS", settings)
     rows = _run(_compute(factory, [2001, 2002, 2003], failed={2003}, bench={}))
+    assert calls
+    for _figs, _cost, budget, share, tax, broker in calls:
+        assert budget == pytest.approx(5e8) and share == pytest.approx(0.20)
+        assert tax == pytest.approx(0.0337) and broker == pytest.approx(0.015)
     assert [r["type_id"] for r in rows] == [2001, 2002, 2003]
     assert rows[0]["status"] == "ok" and (rows[0]["hub"], rows[0]["source"]) == ("rens", "haul")
     assert rows[0]["name"] == "Sample Hull" and rows[0]["copy_only"] is False
@@ -120,13 +135,17 @@ async def _save_twice_and_load(factory):
         other = await scan_results.load(db, 92, "category", 10, NOW)
     async with factory() as db:
         count = len((await db.execute(select(MarketScanResult))).scalars().all())
-    return mine, mine, other, count
+    async with factory() as db:
+        other_kind = await scan_results.load(db, 91, "watchlist", 10, NOW)
+        other_ref = await scan_results.load(db, 91, "category", 11, NOW)
+    return mine, other, count, other_kind, other_ref
 
 
 def test_save_replaces_and_load_is_per_user(factory):
-    first, second, other, count = _run(_save_twice_and_load(factory))
-    assert first["label"] == "New label" and second is not None
+    first, other, count, other_kind, other_ref = _run(_save_twice_and_load(factory))
+    assert first["label"] == "New label"
     assert other is None and count == 1
+    assert other_kind is None and other_ref is None
     assert first["rows"] == [{"type_id": 1, "status": "no_sales", "name": "x"}]
     assert first["settings"]["budget_isk"] == 5e8
     assert first["scanned_at"] == NOW and first["notes"] == ["n"]
@@ -167,6 +186,72 @@ def test_load_stamps_opened_at(factory):
     assert row.scanned_at == NOW.replace(tzinfo=None)
 
 
+def test_load_stamp_is_skipped_within_the_hour_and_due_after(factory):
+    async def opened():
+        async with factory() as db:
+            return (await db.execute(select(MarketScanResult))).scalar_one().opened_at
+
+    async def go():
+        async with factory() as db:
+            await _save(db, 91)
+        async with factory() as db:
+            await scan_results.load(db, 91, "category", 10, NOW + timedelta(minutes=59))
+        within = await opened()
+        async with factory() as db:
+            await scan_results.load(db, 91, "category", 10, NOW + timedelta(hours=2))
+        return within, await opened()
+
+    within, after = _run(go())
+    assert within == NOW.replace(tzinfo=None)
+    assert after == (NOW + timedelta(hours=2)).replace(tzinfo=None)
+
+
+def test_failed_stamp_does_not_fail_the_read(factory, monkeypatch):
+    async def go():
+        async with factory() as db:
+            await _save(db, 91)
+        async with factory() as db:
+            async def boom():
+                raise RuntimeError("database is locked")
+
+            real_commit = db.commit
+            monkeypatch.setattr(db, "commit", boom)
+            res = await scan_results.load(db, 91, "category", 10, NOW + timedelta(hours=3))
+            monkeypatch.setattr(db, "commit", real_commit)
+            again = (await db.execute(select(MarketScanResult))).scalar_one()
+            return res, again.opened_at
+
+    res, opened = _run(go())
+    assert res is not None and res["label"] == "New label"
+    assert opened == NOW.replace(tzinfo=None)
+
+
+def test_save_is_an_upsert_even_when_the_row_was_never_loaded(factory):
+    async def go():
+        async with factory() as a, factory() as b:
+            # Neither session has read the row: both would have taken the insert path.
+            await _save(a, 91, label="First")
+            await _save(b, 91, label="Second")
+        async with factory() as db:
+            return (await db.execute(select(MarketScanResult))).scalars().all()
+
+    rows = _run(go())
+    assert len(rows) == 1 and rows[0].label == "Second"
+
+
+def test_naive_now_is_accepted_by_save(factory):
+    async def go():
+        async with factory() as db:
+            await scan_results.save(
+                db, 91, "category", 10, label="L", status="complete", item_total=1,
+                item_scanned=1, settings=SETTINGS, notes=[], routes={}, rows=[],
+                now=NOW.replace(tzinfo=None))
+        async with factory() as db:
+            return await scan_results.load(db, 91, "category", 10)
+
+    assert _run(go())["scanned_at"] == NOW
+
+
 def test_delete_for_removes_only_that_list(factory):
     async def go():
         async with factory() as db:
@@ -193,7 +278,7 @@ async def _cleanup_counts(factory):
             _summary(1, 3, 100.0, 5, 5, history_at=hour, orders_at=old),    # C: stays
         ])
         await db.commit()
-    for kind, ref, idle in (("category", 10, 31), ("category", 11, 5), ("watchlist", 12, 90)):
+    for kind, ref, idle in (("category", 10, 31), ("category", 11, 5), ("watchlist", 12, 90), ("blueprints", 13, 90)):
         async with factory() as db:
             await _save(db, 91, kind=kind, ref=ref)
         async with factory() as db:
@@ -206,7 +291,7 @@ async def _cleanup_counts(factory):
     async with factory() as db:
         left = sorted(r.type_id for r in (await db.execute(select(MarketScanSummary))).scalars())
         refs = sorted(r.list_ref for r in (await db.execute(select(MarketScanResult))).scalars())
-    assert left == [2, 3] and refs == [11, 12]
+    assert left == [2, 3] and refs == [11, 12, 13]
     return counts
 
 
