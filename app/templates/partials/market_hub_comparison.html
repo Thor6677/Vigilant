@@ -83,7 +83,8 @@
                and would filter the "Saved." reply down to nothing). #}
             <button type="button" id="hc-save" class="b-btn is-ghost" hx-post="/market/hub-prefs"
                     hx-include="#hc-form" hx-target="#hc-saved"
-                    hx-swap="innerHTML" data-htmx-no-error="1">Save fees and start</button>
+                    hx-swap="innerHTML" data-htmx-no-error="1"
+                    aria-label="Save fees and start">{# the full label wraps on a phone #}<span class="m-hide">Save fees and start</span><span class="m-only">Save</span></button>
         </span>
         <span id="hc-saved" class="hc-mut" role="status"></span>
     </form>
@@ -169,7 +170,8 @@
             <div class="hc-mkt">
                 <div><div class="hc-n">{{ r.lowest_sell }}</div><div class="hc-l">Lowest sell</div></div>
                 <div><div class="hc-n">{{ r.demand_30 }} {{ trend(r) }}</div><div class="hc-l">Sold / day</div></div>
-                <div><div class="hc-n">{{ r.stock }}{% if r.stock_days %} · {{ r.stock_days }}{% endif %}</div><div class="hc-l">Stock</div></div>
+                {# Days of stock go in the label line: beside the count they wrapped. #}
+                <div><div class="hc-n">{{ r.stock }}</div><div class="hc-l">Stock{% if r.stock_days %} · {{ r.stock_days }}{% endif %}</div></div>
             </div>
             <div class="hc-two">
                 <div>

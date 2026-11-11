@@ -723,6 +723,21 @@ def test_routes_the_planner_cannot_give_show_a_dash_and_a_note(app_db, monkeypat
     assert '<td class="hc-gl">—<span class="hc-small"></span></td>' in amarr
 
 
+def test_phone_card_keeps_stock_count_and_days_on_separate_lines(app_db):
+    body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?qty=10").text
+    cards = body[body.index('<div class="hc-cards m-only">'):]
+    assert '<div class="hc-n">14</div><div class="hc-l">Stock · 2.8 days</div>' in cards
+
+
+def test_save_button_has_a_short_label_for_phones(app_db):
+    body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?qty=10").text
+    button = body[body.index('id="hc-save"'):]
+    button = button[:button.index("</button>")]
+    assert 'aria-label="Save fees and start"' in button
+    assert '<span class="m-hide">Save fees and start</span>' in button
+    assert '<span class="m-only">Save</span>' in button
+
+
 def test_save_button_has_the_id_the_page_script_keys_on(app_db):
     body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?qty=10").text
     assert 'id="hc-save"' in _tag(body, 'hx-post="/market/hub-prefs"')
