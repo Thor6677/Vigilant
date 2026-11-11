@@ -32,6 +32,9 @@ TODAY = date(2026, 11, 10)
 # rule reads the meta stamp's date, so a real clock would make every figure
 # depend on the day the tests run.
 NOW = datetime(2026, 11, 10, 12, 0, tzinfo=timezone.utc)
+# The same day after the game has published yesterday's history
+# (hub_analysis.PUBLISH_HOUR_UTC): for tests where history is behind.
+AFTERNOON = datetime(2026, 11, 10, 14, 0, tzinfo=timezone.utc)
 JITA = APPRAISAL_HUBS["jita"]
 AMARR = APPRAISAL_HUBS["amarr"]
 HEK = APPRAISAL_HUBS["hek"]
@@ -135,7 +138,7 @@ def app_db(factory, monkeypatch):
     monkeypatch.setattr(orders, "_fetch_orders_esi", fake_orders)
     monkeypatch.setattr(history, "_fetch_history_esi", fake_history)
     monkeypatch.setattr(market_hubs.hub_cost, "benchmark", fake_benchmark)
-    monkeypatch.setattr(market_hubs, "_today", lambda: TODAY)
+    monkeypatch.setattr(market_hubs, "_now", lambda: NOW)
     monkeypatch.setattr(history, "_now", lambda: NOW)
     yield calls
     main.app.dependency_overrides.pop(get_db, None)
@@ -506,6 +509,8 @@ def test_a_skipped_hub_still_shows_its_stale_stored_history(app_db, factory, mon
         raise RuntimeError("down")
 
     monkeypatch.setattr(history, "_fetch_history_esi", history_down)
+    monkeypatch.setattr(market_hubs, "_now", lambda: AFTERNOON)
+    monkeypatch.setattr(history, "_now", lambda: AFTERNOON)
     before = len(app_db)
     body = client.get(f"/market/type/{TYPE_ID}/hubs?qty=10").text
     assert app_db[before:] == [("history", JITA["region_id"])]   # Dodixie not attempted
@@ -632,9 +637,24 @@ def test_one_hub_far_behind_is_unavailable_and_the_age_line_uses_the_oldest_show
 
 
 def test_a_hub_two_days_behind_renders_with_a_history_note(app_db, factory, monkeypatch):
-    yesterday_pm = datetime(2026, 11, 9, 13, 0, tzinfo=timezone.utc)
-    _seed_history(factory, [DODIXIE["region_id"]], TODAY - timedelta(days=3), yesterday_pm)
-    body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?qty=10").text
+    # Dodixie was last fetched two days ago and its refresh now fails: by the
+    # afternoon two published days are missing.
+    client = _authed_client()
+    client.get(f"/market/type/{TYPE_ID}/hubs?qty=10")        # all five histories stored
+    _seed_history(factory, [DODIXIE["region_id"]], TODAY - timedelta(days=3),
+                  AFTERNOON - timedelta(days=2))
+
+    working = history._fetch_history_esi
+
+    async def dodixie_down(region_id, type_id):
+        if region_id == DODIXIE["region_id"]:
+            raise RuntimeError("down")
+        return await working(region_id, type_id)
+
+    monkeypatch.setattr(history, "_fetch_history_esi", dodixie_down)
+    monkeypatch.setattr(market_hubs, "_now", lambda: AFTERNOON)
+    monkeypatch.setattr(history, "_now", lambda: AFTERNOON)
+    body = client.get(f"/market/type/{TYPE_ID}/hubs?qty=10").text
     assert body.count("Unavailable") == 2          # Hek's orders only
     assert body.count('<tr class="hc-s">') == 4
     note = HISTORY_NOTE.format("2026-11-07")
@@ -645,6 +665,75 @@ def test_a_hub_two_days_behind_renders_with_a_history_note(app_db, factory, monk
     cards = body[body.index('<div class="hc-cards m-only">'):]
     card = cards[cards.index("Dodixie</span>"):]
     assert note in card[:card.index('<div class="hc-mkt">')]
+
+
+@pytest.mark.parametrize("now", [NOW, AFTERNOON])
+def test_a_quiet_item_with_fresh_history_gets_no_history_note(app_db, factory,
+                                                              monkeypatch, now):
+    # Last traded nine days ago at every hub, fetched 23 hours ago: the
+    # history is as current as it can be, so nothing is "behind".
+    regions = [h["region_id"] for h in APPRAISAL_HUBS.values()]
+    _seed_history(factory, regions, TODAY - timedelta(days=9), now - timedelta(hours=23))
+    monkeypatch.setattr(market_hubs, "_now", lambda: now)
+    monkeypatch.setattr(history, "_now", lambda: now)
+    body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?qty=10").text
+    assert [c for c in app_db if c[0] == "history"] == []      # still fresh: no refetch
+    assert body.count('<tr class="hc-s">') == 4
+    assert "(history to" not in body
+
+
+def test_a_copy_only_blueprint_adds_a_note_to_the_benchmark(app_db, monkeypatch):
+    async def copy_only(db, type_id):
+        return hub_cost.Benchmark(268e6, 10, None, True)
+    monkeypatch.setattr(market_hubs.hub_cost, "benchmark", copy_only)
+    client = _authed_client()
+    body = client.get(f"/market/type/{TYPE_ID}/hubs?qty=10").text
+    assert "comes only as a copy" in body and "overstated" in body
+    # With the user's own cost the benchmark is not what the figures use.
+    typed = client.get(f"/market/type/{TYPE_ID}/hubs?qty=10&cost=300m").text
+    assert "comes only as a copy" not in typed
+
+
+def test_an_ordinary_blueprint_has_no_copy_note(app_db):
+    body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?qty=10").text
+    assert "comes only as a copy" not in body
+
+
+def test_when_every_hub_loses_the_box_says_smallest_loss(app_db):
+    body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?qty=10&cost=400m").text
+    assert "No hub covers your cost." in body
+    assert "smallest loss" in body.lower() and "best margin" not in body.lower()
+    profitable = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?qty=10").text
+    assert "No hub covers your cost." not in profitable
+    assert "best margin" in profitable.lower()
+
+
+def test_routes_the_planner_cannot_give_show_a_dash_and_a_note(app_db, monkeypatch):
+    async def fake_routes(db, origin, hub_systems):
+        return {key: (market_hubs.hub_route.UNAVAILABLE if key == "amarr"
+                      else {"jumps": 3, "highsec": True}) for key in hub_systems}
+
+    monkeypatch.setattr(market_hubs.hub_route, "hub_routes", fake_routes)
+    body = _authed_client().get(
+        f"/market/type/{TYPE_ID}/hubs?qty=10&origin=sample+system").text
+    assert body.count("Jump counts are unavailable right now") == 1
+    assert "no route" not in body and "3 j" in body
+    table = body[body.index('<table class="hc-table m-hide">'):body.index("</table>")]
+    amarr = table[table.index("Amarr</span>"):table.index("Dodixie</span>")]
+    assert '<td class="hc-gl">—<span class="hc-small"></span></td>' in amarr
+
+
+def test_save_button_has_the_id_the_page_script_keys_on(app_db):
+    body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?qty=10").text
+    assert 'id="hc-save"' in _tag(body, 'hx-post="/market/hub-prefs"')
+    page = _authed_client().get(f"/market/type/{TYPE_ID}").text
+    script = page[page.index("Hub comparison: the save status line"):]
+    script = script[:script.index("</script>")]
+    assert "el.id !== 'hc-save'" in script and "getElementById('hc-saved')" in script
+    for event in ("htmx:beforeRequest", "htmx:responseError", "htmx:sendError",
+                  "htmx:timeout"):
+        assert event in script
+    assert "Not saved; try again." in script
 
 
 def test_a_stale_order_book_still_renders_with_its_age(app_db, monkeypatch):

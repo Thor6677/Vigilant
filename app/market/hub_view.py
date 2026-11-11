@@ -30,6 +30,10 @@ NO_PRICE_NOTE = ("No benchmark cost right now (a material has no price) — ente
                  "unit to see profit and margin.")
 # Why there is no benchmark (hub_cost.Benchmark.missing) → the note that says so.
 _NO_COST_NOTES = {"no_blueprint": NO_COST_NOTE, "unpriced": NO_PRICE_NOTE}
+COPY_ONLY_NOTE = ("This item's blueprint comes only as a copy (loyalty store or drop). What "
+                  "the copy costs is not in the benchmark, so profit and margin are "
+                  "overstated — enter your own cost per unit.")
+ROUTES_UNAVAILABLE_NOTE = "Jump counts are unavailable right now (EVE's route planner did not answer)."
 UNREADABLE_COST_BENCHMARK = "Could not read that cost; using the benchmark."
 UNREADABLE_COST_NONE = "Could not read that cost; enter a number such as 180m."
 
@@ -136,11 +140,13 @@ def fee_note(label: str, pct: float) -> str:
 def hub_row(key: str, name: str, result: dict | None, route: dict | None, qty: int,
             origin_set: bool = False, history_to: date | None = None) -> dict:
     """`route` is None both when no starting system is set and when one is set
-    but the hub cannot be reached from it; `origin_set` tells them apart.
+    but the hub cannot be reached from it; `origin_set` tells them apart. A
+    route the planner could not give (hub_route.UNAVAILABLE) shows as a dash.
     `history_to` is the last day this hub's history covers, given only when
     that is far enough behind to mention (see hub_analysis.history_state)."""
     if result is None:
         return {"key": key, "name": name, "unavailable": True}
+    route_down = bool(route) and route.get("unavailable")
     lw, now = result["list"], result["now"]
     stock_days = result["days_of_stock"]
     outliers = result["outliers"]
@@ -169,9 +175,10 @@ def hub_row(key: str, name: str, result: dict | None, route: dict | None, qty: i
         "now_fill": f"fills {now['fillable']} of {qty}" if now["fillable"] else "",
         "now_profit": fmt_signed(now["profit_each"]), "now_sign": _sign(now["profit_each"]),
         "now_batch": fmt_signed(now["batch_profit"]),
-        "route": (f"{route['jumps']} j" if route
+        "route": ("—" if route_down else f"{route['jumps']} j" if route
                   else "no route" if origin_set else ""),
-        "route_note": ("highsec" if route["highsec"] else "leaves highsec") if route else "",
+        "route_note": ("" if route_down or not route
+                       else "highsec" if route["highsec"] else "leaves highsec"),
     }
 
 
@@ -182,10 +189,24 @@ def _tag_text(result: dict) -> str:
     return " · ".join(parts)
 
 
+NO_HUB_COVERS_COST = "No hub covers your cost."
+
+
+def all_lose(picks: dict, results: dict[str, dict | None]) -> bool:
+    """Whether the best list-and-wait profit at any hub is a loss. False
+    with no cost (no profit figures) and when a hub breaks even."""
+    margin = picks.get("margin")
+    if margin is None:
+        return False
+    return results[margin]["list"]["profit_each"] < 0
+
+
 def pick_boxes(picks: dict, results: dict[str, dict | None], names: dict[str, str]) -> list[dict]:
     """The 'fastest sale' / 'best margin' boxes above the hubs. Every key in
     `picks` must be present with a non-None result in `results` and a name in
-    `names` (which `hub_analysis.best_picks` guarantees)."""
+    `names` (which `hub_analysis.best_picks` guarantees). When even the best
+    hub loses money against the cost, the margin box is titled 'smallest
+    loss' (the page adds `NO_HUB_COVERS_COST` above the boxes)."""
     fastest, margin = picks["fastest"], picks["margin"]
     boxes = []
 
@@ -202,9 +223,11 @@ def pick_boxes(picks: dict, results: dict[str, dict | None], names: dict[str, st
         pct = f" ({lw['margin'] * 100:.1f}%)" if lw["margin"] is not None else ""
         return f"{fmt_signed(lw['profit_each'])} each{pct}"
 
+    loss = all_lose(picks, results)
+    margin_title = "Smallest loss" if loss else "Best margin"
     if fastest is not None and fastest == margin:
         r = results[fastest]
-        boxes.append({"k": "Fastest sale and best margin",
+        boxes.append({"k": f"Fastest sale and {margin_title.lower()}",
                       "v": f"{names[fastest]} — {_when(r)}" if _when(r) else names[fastest],
                       "d": f"{_profit(r)}. {_tag_text(r)}."})
         return boxes
@@ -222,6 +245,6 @@ def pick_boxes(picks: dict, results: dict[str, dict | None], names: dict[str, st
         detail = _tag_text(r) + "."
         if when:
             detail += f" {when[0].upper()}{when[1:]}."
-        boxes.append({"k": "Best margin",
+        boxes.append({"k": margin_title,
                       "v": f"{names[margin]} — {_profit(r)}", "d": detail})
     return boxes

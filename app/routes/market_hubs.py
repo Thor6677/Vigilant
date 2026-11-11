@@ -15,7 +15,8 @@ All maths is in `app.market.hub_analysis`; all strings in
 `app.market.hub_view` (numbers through `app.market.hub_format`). This module
 only gathers data: regional history and hub orders through the existing
 cached fetchers, plus the global price list for the benchmark cost — at most
-eleven upstream requests for a first view and none while the caches are warm.
+eleven upstream requests for a first view and none while the caches are warm
+(a starting system adds up to five route lookups, remembered for a day).
 A refresh of the results (`HX-Target: hc-results`, sent by the refresh and the
 retry button) with a readable cost typed skips the benchmark entirely: the
 form, whose placeholder is the only other place it shows, is not redrawn then.
@@ -42,9 +43,16 @@ failures at all five hubs first; ordinary input changes never send it.
 History age: each hub is analysed over the 30 days ending on the last day its
 stored history covers (`hub_analysis.coverage_end`), so a day the game has not
 published yet is not counted as a day without sales. A hub whose history is
-2–3 days behind yesterday (a refresh that keeps failing) is shown with a
+missing 2–3 published days (a refresh that keeps failing) is shown with a
 "history to <date>" note; further behind, it is shown as unavailable rather
-than analysed from old rows. The age line names the oldest coverage shown.
+than analysed from old rows. That is judged from when the history was last
+fetched (`hub_analysis.history_state`), not from the last day the item
+traded, so a quiet item with fresh history gets no note. The age line names
+the oldest coverage shown.
+
+Routes: jump counts come from EVE's route planner (`hub_route`), as Gate
+Check's do. If it cannot be reached the route cells show a dash and a note
+says so; the rest of the comparison is unaffected.
 
 Cost label: an entry link (Build Finder, manufacturing calculator) sends
 `cost_mode=build` with the cost of the user's own build. The first load
@@ -88,9 +96,9 @@ MAX_QTY = 1_000_000
 RESULTS_TARGET = "hc-results"
 
 
-def _today() -> date:
+def _now() -> datetime:
     """Clock seam — monkeypatched in tests."""
-    return datetime.now(timezone.utc).date()
+    return datetime.now(timezone.utc)
 
 
 def _parse_qty(raw) -> int:
@@ -228,6 +236,8 @@ async def market_type_hubs(
     else:
         unit_cost, source = None, None
     notes = [hub_view.cost_note(unit_cost, source, bench.me, bench.missing)]
+    if source == "benchmark" and bench.copy_only:
+        notes.append(hub_view.COPY_ONLY_NOTE)
     if typed_cost is None and cost.strip():
         notes.append(hub_view.UNREADABLE_COST_BENCHMARK if bench.cost is not None
                      else hub_view.UNREADABLE_COST_NONE)
@@ -249,8 +259,8 @@ async def market_type_hubs(
     order_lists = await asyncio.gather(
         *(market_orders.get_orders(h["region_id"], type_id) for h in hubs))
 
-    today = _today()
-    yesterday = today - timedelta(days=1)
+    now = _now()
+    yesterday = now.date() - timedelta(days=1)
     results: dict[str, dict | None] = {}
     behind: dict[str, date] = {}      # hubs whose history is behind: last day covered
     oldest_cover = None
@@ -281,7 +291,7 @@ async def market_type_hubs(
         # The window ends on the last day the stored history covers; never
         # past yesterday, since today is not over.
         covered_to = min(coverage_end((d["date"] for d in days), fetched.date()), yesterday)
-        state = history_state(covered_to, today)
+        state = history_state((d["date"] for d in days), fetched, now)
         if state == "stale":
             results[key] = None   # too far behind to analyse as if current
             continue
@@ -300,6 +310,8 @@ async def market_type_hubs(
             for key, hub in zip(HUB_ORDER, hubs) if hub["station_id"] in stations
         }
         routes = await hub_route.hub_routes(db, origin_id, hub_systems)
+        if any(r is not None and r.get("unavailable") for r in routes.values()):
+            notes.append(hub_view.ROUTES_UNAVAILABLE_NOTE)
 
     picks = best_picks(results, HUB_ORDER)
     return templates.TemplateResponse(request, "partials/market_hub_comparison.html", {
@@ -318,6 +330,7 @@ async def market_type_hubs(
         "age_str": _age_str(type_id, oldest_cover),
         "show_route": origin_id is not None,
         "picks": hub_view.pick_boxes(picks, results, HUB_NAMES),
+        "no_cover": hub_view.NO_HUB_COVERS_COST if hub_view.all_lose(picks, results) else "",
         "rows": [hub_view.hub_row(k, HUB_NAMES[k], results[k], routes.get(k), quantity,
                                   origin_set=origin_id is not None,
                                   history_to=behind.get(k))
@@ -338,8 +351,8 @@ async def market_hub_prefs_save(
 ):
     """Save fees and starting system. Returns a short status line that htmx
     swaps in beside the button, including when the database refuses the
-    write. Errors htmx does not swap (401, 403, 5xx, no response) leave the
-    line as it was."""
+    write. For errors htmx does not swap (401, 403, 5xx, no response) the
+    page script in market_type.html writes "Not saved; try again." there."""
     user_id = request.session.get("user_id")
     if not user_id:
         return HTMLResponse("", status_code=401)

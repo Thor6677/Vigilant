@@ -20,7 +20,7 @@ and show a false falling trend.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from statistics import median
 
 from app.market.hub_format import days_phrase, fmt_rate
@@ -28,14 +28,18 @@ from app.market.hub_format import days_phrase, fmt_rate
 WINDOW_DAYS = 30
 SHORT_WINDOW_DAYS = 7
 
-# How far the stored history may lag behind yesterday (in days; see
-# `history_lag`). 0–1 is normal. From HISTORY_BEHIND_DAYS the hub is shown
-# with a "history to <date>" note; beyond STALE_HISTORY_MAX_DAYS it is shown
-# as unavailable rather than analysed from old rows.
+# How far the stored history may lag behind the newest day the game has
+# published (in days; see `history_lag`). 0–1 is normal. From
+# HISTORY_BEHIND_DAYS the hub is shown with a "history to <date>" note; beyond
+# STALE_HISTORY_MAX_DAYS it is shown as unavailable rather than analysed from
+# old rows.
 HISTORY_BEHIND_DAYS = 2
 STALE_HISTORY_MAX_DAYS = 3
 # A fetch always includes every day up to this many days before it.
 FETCH_COVERS_TO_DAYS = 2
+# The game publishes a day's history the next day, late morning UTC. From
+# this hour on, yesterday is taken as published (a margin is left on purpose).
+PUBLISH_HOUR_UTC = 13
 
 OUTLIER_FLOOR = 0.5     # sell orders under this share of the reference price are ignored
 STOCK_BAND = 1.10       # "competing stock" = listed within 10% of the lowest sell
@@ -72,15 +76,32 @@ def coverage_end(row_dates: Iterable[date], fetched_on: date) -> date:
     return max(newest, fetched_on - timedelta(days=FETCH_COVERS_TO_DAYS))
 
 
-def history_lag(covered_to: date, today: date) -> int:
-    """Days between the last covered day and yesterday (0 = up to date)."""
-    return ((today - timedelta(days=1)) - covered_to).days
+def published_through(moment: datetime) -> date:
+    """The newest day whose history the game has published by `moment`
+    (UTC; naive is read as UTC): yesterday from PUBLISH_HOUR_UTC, else the
+    day before."""
+    if moment.tzinfo is not None:
+        moment = moment.astimezone(timezone.utc)
+    back = 1 if moment.hour >= PUBLISH_HOUR_UTC else 2
+    return moment.date() - timedelta(days=back)
 
 
-def history_state(covered_to: date, today: date) -> str:
+def history_lag(row_dates: Iterable[date], fetched: datetime, now: datetime) -> int:
+    """How many published days the stored history is missing (0 = none).
+
+    Measured from the fetch, not from the last day the item traded: the
+    history reaches the later of its newest row and what was published when
+    it was fetched, and that is compared with what is published now. So a
+    quiet item whose history was fetched within the last day is never
+    'behind', however long ago it last traded."""
+    reaches = max(max(row_dates, default=date.min), published_through(fetched))
+    return max((published_through(now) - reaches).days, 0)
+
+
+def history_state(row_dates: Iterable[date], fetched: datetime, now: datetime) -> str:
     """'current' (lag 0–1), 'behind' (2–3: analysed, with a note) or
     'stale' (more: the hub is shown as unavailable)."""
-    lag = history_lag(covered_to, today)
+    lag = history_lag(row_dates, fetched, now)
     if lag > STALE_HISTORY_MAX_DAYS:
         return "stale"
     if lag >= HISTORY_BEHIND_DAYS:

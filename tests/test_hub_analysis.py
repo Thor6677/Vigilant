@@ -1,6 +1,6 @@
 """Hub comparison maths (spec section 4). Pure functions, no I/O.
 Names and prices are invented."""
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -82,14 +82,54 @@ def test_coverage_end_with_only_old_rows_is_two_days_before_the_fetch():
         TODAY - timedelta(days=3))
 
 
-@pytest.mark.parametrize("behind, lag, state", [
-    (1, 0, "current"), (2, 1, "current"), (3, 2, "behind"), (4, 3, "behind"),
-    (5, 4, "stale"), (60, 59, "stale"),
+def _at(day, hour):
+    return datetime(day.year, day.month, day.day, hour, tzinfo=timezone.utc)
+
+
+def test_published_through_is_yesterday_from_13_utc_else_the_day_before():
+    assert ha.published_through(_at(TODAY, 12)) == TODAY - timedelta(days=2)
+    assert ha.published_through(_at(TODAY, 13)) == TODAY - timedelta(days=1)
+    # Naive is read as UTC; another zone is converted first.
+    assert ha.published_through(datetime(TODAY.year, TODAY.month, TODAY.day, 13)) == (
+        TODAY - timedelta(days=1))
+    plus_five = timezone(timedelta(hours=5))
+    assert ha.published_through(
+        datetime(TODAY.year, TODAY.month, TODAY.day, 17, tzinfo=plus_five)) == (
+        TODAY - timedelta(days=2))      # 12:00 UTC
+
+
+@pytest.mark.parametrize("fetched_days_ago, lag, state", [
+    (0, 0, "current"), (1, 1, "current"), (2, 2, "behind"), (3, 3, "behind"),
+    (4, 4, "stale"), (30, 30, "stale"),
 ])
-def test_history_lag_and_state(behind, lag, state):
-    covered_to = TODAY - timedelta(days=behind)
-    assert ha.history_lag(covered_to, TODAY) == lag
-    assert ha.history_state(covered_to, TODAY) == state
+def test_history_lag_and_state_follow_the_fetch_for_a_quiet_item(fetched_days_ago, lag,
+                                                                 state):
+    # Last traded two months ago: only the fetch says how current it is.
+    rows = [TODAY - timedelta(days=60)]
+    now = _at(TODAY, 14)
+    fetched = now - timedelta(days=fetched_days_ago)
+    assert ha.history_lag(rows, fetched, now) == lag
+    assert ha.history_state(rows, fetched, now) == state
+
+
+def test_a_quiet_item_fetched_within_a_day_is_never_behind():
+    rows = [TODAY - timedelta(days=9)]
+    for hour in range(24):
+        now = _at(TODAY, hour)
+        fetched = now - timedelta(hours=23, minutes=59)
+        assert ha.history_state(rows, fetched, now) == "current"
+
+
+def test_a_newer_row_than_the_fetch_implies_counts_as_coverage():
+    # Fetched three days ago at 14:00, but a row for two days ago is stored.
+    now = _at(TODAY, 14)
+    fetched = now - timedelta(days=3)
+    assert ha.history_lag([], fetched, now) == 3
+    assert ha.history_lag([TODAY - timedelta(days=2)], fetched, now) == 1
+
+
+def test_history_lag_is_never_negative():
+    assert ha.history_lag([TODAY], _at(TODAY, 14), _at(TODAY, 9)) == 0
 
 
 def test_reference_price_is_the_median_daily_average():

@@ -26,9 +26,11 @@
    The retry and save buttons carry data-htmx-no-error="1": that handler
    checks its opt-out on the requesting element and would otherwise write
    its "couldn't load" pill INSIDE the button, replacing its label. A failed
-   retry leaves the row saying unavailable; a failed save leaves #hc-saved as
-   it was (the endpoint answers a database error with a 200 "Not saved"
-   line, which is swapped in like "Saved.").
+   retry leaves the row saying unavailable. A save clears #hc-saved when it
+   starts and a failed one writes "Not saved; try again." there: the page
+   script in market_type.html does both, keyed on the button's id (#hc-save),
+   since htmx swaps nothing for a 401, 403, 5xx or no response. A database
+   error is answered with a 200 "Not saved" line, swapped in like "Saved.".
 
    Desktop: one table, a row per hub with its verdict underneath (m-hide on
    phones). Phones: one card per hub (m-only). No inline handlers (CSP). #}
@@ -79,7 +81,7 @@
         <span class="hc-fld">
             {# Nothing above this button may carry hx-select (it is inherited,
                and would filter the "Saved." reply down to nothing). #}
-            <button type="button" class="b-btn is-ghost" hx-post="/market/hub-prefs"
+            <button type="button" id="hc-save" class="b-btn is-ghost" hx-post="/market/hub-prefs"
                     hx-include="#hc-form" hx-target="#hc-saved"
                     hx-swap="innerHTML" data-htmx-no-error="1">Save fees and start</button>
         </span>
@@ -93,6 +95,7 @@
     {% for note in notes %}<div class="hc-note">{{ note }}</div>{% endfor %}
 
     {% if picks %}
+    {% if no_cover %}<div class="hc-note hc-neg">{{ no_cover }}</div>{% endif %}
     <div class="hc-picks">
         {% for p in picks %}
         <div class="hc-pick">

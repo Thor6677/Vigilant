@@ -200,6 +200,34 @@ def test_pick_boxes_same_hub_collapse_to_one():
     assert [b["k"] for b in boxes] == ["Fastest sale and best margin"]
 
 
+def _losing(profit):
+    return _result(list={"price": 331e6, "profit_each": profit, "margin": profit / 400e6,
+                         "days_best": 2.0, "days_typical": 4.8, "batch_profit": profit * 10})
+
+
+def test_pick_boxes_say_smallest_loss_when_every_hub_loses():
+    results = {"amarr": _losing(-30e6), "rens": _losing(-12e6)}
+    picks = {"fastest": "amarr", "margin": "rens"}
+    assert hv.all_lose(picks, results)
+    boxes = hv.pick_boxes(picks, results, NAMES)
+    assert [b["k"] for b in boxes] == ["Fastest sale", "Smallest loss"]
+    assert boxes[1]["v"].startswith("Rens — −12.0M each")
+    one = hv.pick_boxes({"fastest": "rens", "margin": "rens"}, results, NAMES)
+    assert [b["k"] for b in one] == ["Fastest sale and smallest loss"]
+
+
+def test_break_even_or_no_cost_is_not_a_loss():
+    assert not hv.all_lose({"fastest": "amarr", "margin": "amarr"}, {"amarr": _losing(0.0)})
+    assert not hv.all_lose({"fastest": "amarr", "margin": None}, {"amarr": _result()})
+    assert not hv.all_lose({"fastest": None, "margin": None}, {})
+
+
+def test_a_route_the_planner_could_not_give_is_a_dash():
+    row = hv.hub_row("amarr", "Amarr", _result(), {"unavailable": True}, qty=10,
+                     origin_set=True)
+    assert row["route"] == "—" and row["route_note"] == ""
+
+
 def test_pick_boxes_without_a_cost_or_any_data():
     boxes = hv.pick_boxes({"fastest": "amarr", "margin": None},
                           {"amarr": _result()}, NAMES)

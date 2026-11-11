@@ -160,6 +160,26 @@
 </div>
 
 <script nonce="{{ request.state.csp_nonce }}">
+/* Hub comparison: the save status line. htmx swaps nothing for a failed
+   request (401, 403, 5xx, no response), so an earlier "Saved." would stay
+   and read as if the new values were stored. Clear it when a save starts
+   and say so when one fails. Keyed on the button's id; the partial arrives
+   later by htmx, hence the listeners on <body>. */
+(function () {
+    function status(evt, text) {
+        var el = evt.detail && evt.detail.elt;
+        if (!el || el.id !== 'hc-save') return;
+        var line = document.getElementById('hc-saved');
+        if (line) line.textContent = text;
+    }
+    document.body.addEventListener('htmx:beforeRequest', function (e) { status(e, ''); });
+    ['htmx:responseError', 'htmx:sendError', 'htmx:timeout'].forEach(function (name) {
+        document.body.addEventListener(name, function (e) { status(e, 'Not saved; try again.'); });
+    });
+})();
+</script>
+
+<script nonce="{{ request.state.csp_nonce }}">
 (function () {
     var TYPE_ID = {{ type_id }};
     var range = '1y', chart = null, lastData = null;
