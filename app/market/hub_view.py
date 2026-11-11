@@ -137,8 +137,14 @@ def pick_boxes(picks: dict, results: dict[str, dict | None], names: dict[str, st
         return fmt_days_range(r["list"]["days_best"], r["list"]["days_typical"])
 
     def _when(r):
+        """'under a day', 'up to 8 days', 'about 2 – 5 days'."""
         d = _days(r)
-        return "under a day" if d == "<1" else f"about {d} days"
+        if d == "<1":
+            return "under a day"
+        if d.startswith("<1 – "):
+            hi = d[len("<1 – "):]
+            return "up to 1 day" if hi == "1" else f"up to {hi} days"
+        return f"about {d} days"
 
     def _profit(r):
         lw = r["list"]
@@ -160,8 +166,8 @@ def pick_boxes(picks: dict, results: dict[str, dict | None], names: dict[str, st
                       "v": f"{names[fastest]} — {_when(r)}", "d": detail})
     if margin is not None:
         r = results[margin]
+        when = _when(r)
         boxes.append({"k": "Best margin",
                       "v": f"{names[margin]} — {_profit(r)}",
-                      "d": f"{_tag_text(r)}. " + ("Under a day." if _days(r) == "<1"
-                                             else f"About {_days(r)} days.")})
+                      "d": f"{_tag_text(r)}. {when[0].upper()}{when[1:]}."})
     return boxes

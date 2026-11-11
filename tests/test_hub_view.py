@@ -157,3 +157,33 @@ def test_pick_boxes_sub_day_fastest_and_margin():
     one = hv.pick_boxes({"fastest": "amarr", "fastest_thin": False, "margin": "amarr"},
                         {"amarr": _subday()}, NAMES)
     assert one[0]["v"] == "Amarr \u2014 under a day"
+
+
+def _mixed(best, typical):
+    return _result(list={"price": 331e6, "profit_each": 46.9e6, "margin": 0.175,
+                         "days_best": best, "days_typical": typical,
+                         "batch_profit": 469e6})
+
+
+def test_pick_boxes_mixed_sub_day_range_reads_up_to():
+    results = {"amarr": _mixed(0.2, 7.6), "rens": _mixed(0.3, 4.4)}
+    boxes = hv.pick_boxes({"fastest": "amarr", "fastest_thin": False, "margin": "rens"},
+                          results, NAMES)
+    assert boxes[0]["v"] == "Amarr — up to 8 days"
+    assert boxes[1]["d"].endswith("Up to 4 days.")
+    assert "<1" not in boxes[0]["v"] + boxes[1]["d"]
+    assert "about" not in boxes[0]["v"] and "About" not in boxes[1]["d"]
+
+
+def test_pick_boxes_mixed_sub_day_range_up_to_one_day():
+    results = {"amarr": _mixed(0.2, 0.6), "rens": _mixed(0.3, 0.7)}
+    boxes = hv.pick_boxes({"fastest": "amarr", "fastest_thin": False, "margin": "rens"},
+                          results, NAMES)
+    assert boxes[0]["v"] == "Amarr — up to 1 day"
+    assert boxes[1]["d"].endswith("Up to 1 day.")
+
+
+def test_pick_boxes_combined_mixed_sub_day_range():
+    one = hv.pick_boxes({"fastest": "amarr", "fastest_thin": False, "margin": "amarr"},
+                        {"amarr": _mixed(0.2, 7.6)}, NAMES)
+    assert one[0]["v"] == "Amarr — up to 8 days"

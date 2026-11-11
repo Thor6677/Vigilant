@@ -24,20 +24,25 @@ BENCHMARK_NOTE = ("Benchmark: materials at EVE's average reference price, "
 
 async def benchmark(db: AsyncSession, product_type_id: int) -> tuple[float | None, int]:
     """(cost per unit | None, ME assumed). None when the product has no
-    manufacturing blueprint or any material is unpriced."""
-    bp = (await db.execute(
+    manufacturing blueprint or any material is unpriced. With several
+    blueprints for one product, the lowest blueprint_type_id that actually
+    has manufacturing materials is used."""
+    blueprints = (await db.execute(
         select(SDEBlueprintInfo.blueprint_type_id, SDEBlueprintInfo.product_quantity)
         .where(SDEBlueprintInfo.product_type_id == product_type_id)
         .order_by(SDEBlueprintInfo.blueprint_type_id)
-    )).first()
-    if bp is None:
-        return None, BENCHMARK_ME
-    rows = (await db.execute(
-        select(SDEBlueprintMaterial.material_type_id, SDEBlueprintMaterial.quantity)
-        .where(SDEBlueprintMaterial.blueprint_type_id == bp.blueprint_type_id)
-        .where(SDEBlueprintMaterial.activity_id == 1)
     )).all()
-    if not rows:
+    bp = rows = None
+    for candidate in blueprints:
+        rows = (await db.execute(
+            select(SDEBlueprintMaterial.material_type_id, SDEBlueprintMaterial.quantity)
+            .where(SDEBlueprintMaterial.blueprint_type_id == candidate.blueprint_type_id)
+            .where(SDEBlueprintMaterial.activity_id == 1)
+        )).all()
+        if rows:
+            bp = candidate
+            break
+    if bp is None:
         return None, BENCHMARK_ME
     materials = [{"type_id": tid, "quantity": qty} for tid, qty in rows]
     invented = await sde.get_invention_data(db, [product_type_id])

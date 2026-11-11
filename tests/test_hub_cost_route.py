@@ -84,6 +84,19 @@ def test_benchmark_cost_none_when_a_material_is_unpriced(session_factory, monkey
     assert _benchmark(session_factory) is None
 
 
+def test_benchmark_cost_skips_a_lower_blueprint_with_no_materials(session_factory,
+                                                                  monkeypatch):
+    async def add_empty_blueprint():
+        async with session_factory() as db:
+            db.add(SDEBlueprintInfo(blueprint_type_id=BLUEPRINT - 10,
+                                    product_type_id=PRODUCT, product_quantity=7))
+            await db.commit()
+
+    _run(add_empty_blueprint())
+    _patch_cost_sources(monkeypatch, {34: 5.0, 35: 20.0})
+    assert _benchmark(session_factory) == pytest.approx(315.0)
+
+
 def test_benchmark_cost_none_without_a_blueprint(session_factory, monkeypatch):
     _patch_cost_sources(monkeypatch, {34: 5.0, 35: 20.0})
     assert _benchmark(session_factory, type_id=9999) is None
@@ -119,10 +132,18 @@ def test_security_is_highsec_from_0_45():
 
 # ── fetch stamps ────────────────────────────────────────────────────────
 
-def test_orders_fetched_at_is_none_until_a_fetch_succeeds(monkeypatch):
+@pytest.fixture
+def clean_order_cache():
+    """Empty the module-level order cache before AND after, so a failing
+    assertion cannot leak cached books into later tests."""
+    orders._cache.clear()
+    orders._locks.clear()
+    yield
     orders._cache.clear()
     orders._locks.clear()
 
+
+def test_orders_fetched_at_is_none_until_a_fetch_succeeds(monkeypatch, clean_order_cache):
     async def boom(region_id, type_id):
         raise RuntimeError("down")
 
@@ -136,8 +157,6 @@ def test_orders_fetched_at_is_none_until_a_fetch_succeeds(monkeypatch):
     monkeypatch.setattr(orders, "_fetch_orders_esi", ok)
     _run(orders.get_orders(REGION, PRODUCT))
     assert orders.fetched_at(REGION, PRODUCT) is not None
-    orders._cache.clear()
-    orders._locks.clear()
 
 
 def test_history_fetched_at_reads_the_meta_stamp(session_factory, monkeypatch):
