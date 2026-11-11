@@ -17,13 +17,16 @@
 {%- if r.supply %} <span class="hc-tag hc-{{ r.supply }}">{{ r.supply_label }}</span>{% endif %}
 {%- endmacro %}
 {% macro trend(r) -%}
-{% if r.trend == 'up' %}<span class="hc-pos" title="7-day rate is above the 30-day rate">▲</span>
-{%- elif r.trend == 'down' %}<span class="hc-neg" title="7-day rate is below the 30-day rate">▼</span>{% endif %}
+{% if r.trend == 'up' %}<span class="hc-pos" title="7-day rate is above the 30-day rate" aria-hidden="true">▲</span><span class="visually-hidden">rising</span>
+{%- elif r.trend == 'down' %}<span class="hc-neg" title="7-day rate is below the 30-day rate" aria-hidden="true">▼</span><span class="visually-hidden">falling</span>{% endif %}
 {%- endmacro %}
+{# retry=1 makes the server forget this item's remembered upstream failures
+   (orders and history, all five hubs) before fetching; only this button
+   sends it, never the form. #}
 {% macro retry() -%}
 <button type="button" class="hc-retry" hx-get="/market/type/{{ type_id }}/hubs"
-        hx-include="#hc-form" hx-target="#hc-results" hx-select="#hc-results"
-        hx-swap="outerHTML">retry</button>
+        hx-include="#hc-form" hx-vals='{"retry": "1"}' hx-target="#hc-results"
+        hx-select="#hc-results" hx-swap="outerHTML">retry</button>
 {%- endmacro %}
 
 <div class="b-section hc">
@@ -74,20 +77,23 @@
     </div>
     {% endif %}
 
+    {# The wrapper scrolls the table sideways in windows too narrow for it
+       (641–1000px) instead of the whole page. #}
+    <div class="hc-scroll">
     <table class="hc-table m-hide">
         <thead>
             <tr>
-                <th></th>
-                <th colspan="3" class="hc-grp">Market</th>
-                <th colspan="3" class="hc-grp hc-gl">List and wait</th>
-                <th colspan="2" class="hc-grp hc-gl">Sell now</th>
-                {% if show_route %}<th class="hc-gl"></th>{% endif %}
+                <td></td>
+                <th colspan="3" scope="colgroup" class="hc-grp">Market</th>
+                <th colspan="3" scope="colgroup" class="hc-grp hc-gl">List and wait</th>
+                <th colspan="2" scope="colgroup" class="hc-grp hc-gl">Sell now</th>
+                {% if show_route %}<td class="hc-gl"></td>{% endif %}
             </tr>
             <tr>
-                <th>Hub</th><th>Lowest sell</th><th>Sold / day</th><th>Stock · days</th>
-                <th class="hc-gl">Profit each</th><th>Margin</th><th>Days to sell {{ qty }}</th>
-                <th class="hc-gl">Avg price</th><th>Profit each</th>
-                {% if show_route %}<th class="hc-gl">Route</th>{% endif %}
+                <th scope="col">Hub</th><th scope="col">Lowest sell</th><th scope="col">Sold / day</th><th scope="col">Stock · days</th>
+                <th scope="col" class="hc-gl">Profit each</th><th scope="col">Margin</th><th scope="col">Days to sell {{ qty }}</th>
+                <th scope="col" class="hc-gl">Avg price</th><th scope="col">Profit each</th>
+                {% if show_route %}<th scope="col" class="hc-gl">Route</th>{% endif %}
             </tr>
         </thead>
         <tbody>
@@ -117,6 +123,7 @@
         {% endfor %}
         </tbody>
     </table>
+    </div>
 
     <div class="hc-cards m-only">
         {% for r in rows %}
@@ -151,7 +158,7 @@
                 </div>
             </div>
             <div class="hc-cf">
-                <span>{% if show_route and r.route %}{{ r.route }} · {{ r.route_note }}{% endif %}</span>
+                <span>{% if show_route and r.route %}{{ r.route }}{% if r.route_note %} · {{ r.route_note }}{% endif %}{% endif %}</span>
                 <span>Highest buy {{ r.highest_buy }}</span>
             </div>
         </div>

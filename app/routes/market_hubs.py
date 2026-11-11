@@ -16,10 +16,20 @@ for a first view and none while the caches are warm.
 History is read on the request's own session, one hub after another, because
 `get_history` writes — sharing a session across concurrent writers is unsafe.
 Orders have no database side and are fetched concurrently.
+
+Upstream failures: both fetchers remember a failure for 90 seconds and do not
+retry that (region, type) meanwhile, so input changes during an ESI outage
+cost nothing upstream. Within one request, once a history fetch fails the
+remaining hubs that would need the network are not attempted (they are marked
+failed and show as unavailable); hubs with fresh stored history still render.
+So an outage costs at most one slow history attempt per request, not five.
+The retry button sends `retry=1`, which forgets this type's remembered
+failures at all five hubs first; ordinary input changes never send it.
 """
 from __future__ import annotations
 
 import asyncio
+import math
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, Form, Request
@@ -52,11 +62,18 @@ def _today() -> date:
 
 
 def _parse_qty(raw) -> int:
+    """1 – MAX_QTY. Too large (including 'inf', '1e999' and very long digit
+    strings, which float() reads as infinity) clamps to MAX_QTY; blank, junk,
+    'nan' and anything below 1 give 1."""
     try:
-        n = int(float(str(raw).replace(",", "").strip()))
-    except (TypeError, ValueError, OverflowError):
+        v = float(str(raw).replace(",", "").strip())
+    except (TypeError, ValueError):
         return 1
-    return max(1, min(MAX_QTY, n))
+    if math.isnan(v) or v < 1:
+        return 1
+    if v >= MAX_QTY:
+        return MAX_QTY
+    return int(v)
 
 
 async def _resolve_origin(db: AsyncSession, raw: str | None, saved_id: int | None):
@@ -100,6 +117,7 @@ async def market_type_hubs(
     origin: str | None = None,
     sales_tax: str | None = None,
     broker_fee: str | None = None,
+    retry: str = "",
     db: AsyncSession = Depends(get_db),
 ):
     user_id = request.session.get("user_id")
@@ -136,16 +154,29 @@ async def market_type_hubs(
         notes.append(origin_error)
 
     hubs = [APPRAISAL_HUBS[k] for k in HUB_ORDER]
+    if retry == "1":
+        for hub in hubs:
+            market_orders.clear_failure(hub["region_id"], type_id)
+            market_history.clear_failure(hub["region_id"], type_id)
     order_lists = await asyncio.gather(
         *(market_orders.get_orders(h["region_id"], type_id) for h in hubs))
 
     today = _today()
     results: dict[str, dict | None] = {}
     latest_day = None
+    history_down = False
     for key, hub, raw_orders in zip(HUB_ORDER, hubs, order_lists):
-        rows = await market_history.get_history(hub["region_id"], type_id, db)
-        history_ok = await market_history.fetched_at(db, hub["region_id"], type_id) is not None
-        orders_ok = market_orders.fetched_at(hub["region_id"], type_id) is not None
+        region = hub["region_id"]
+        if history_down and not await market_history.is_fresh(db, region, type_id):
+            # ESI failed for another hub a moment ago: don't spend another slow
+            # attempt on this one now; stored rows (if any) are still served.
+            market_history.mark_failed(region, type_id)
+        failing_before = market_history.recently_failed(region, type_id)
+        rows = await market_history.get_history(region, type_id, db)
+        if not failing_before and market_history.recently_failed(region, type_id):
+            history_down = True  # this request's fetch for this hub just failed
+        history_ok = await market_history.fetched_at(db, region, type_id) is not None
+        orders_ok = market_orders.fetched_at(region, type_id) is not None
         if not (history_ok and orders_ok):
             results[key] = None
             continue
@@ -182,7 +213,8 @@ async def market_type_hubs(
         "age_str": _age_str(type_id, latest_day),
         "show_route": origin_id is not None,
         "picks": hub_view.pick_boxes(picks, results, HUB_NAMES),
-        "rows": [hub_view.hub_row(k, HUB_NAMES[k], results[k], routes.get(k), quantity)
+        "rows": [hub_view.hub_row(k, HUB_NAMES[k], results[k], routes.get(k), quantity,
+                                  origin_set=origin_id is not None)
                  for k in HUB_ORDER],
     })
 

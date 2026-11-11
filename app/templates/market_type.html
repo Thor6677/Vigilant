@@ -35,7 +35,9 @@
     .hc-fld > span:first-child { font-size:9px; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted); }
     .hc-age { padding:0.5rem 0 0; }
     .hc-note { font-size:10px; color:var(--muted); padding:0.4rem 0 0; }
-    .hc-picks { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:0.75rem; margin:1rem 0; }
+    /* min(260px,100%): a 320px phone is narrower than 260px plus the page
+       padding, so a plain 260px minimum would overflow it. */
+    .hc-picks { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr)); gap:0.75rem; margin:1rem 0; }
     .hc-pick { border:1px solid var(--accent-dim); border-left:3px solid var(--accent); background:var(--accent-faint); padding:0.6rem 0.85rem; }
     .hc-pick-k { font-size:9px; letter-spacing:0.18em; text-transform:uppercase; color:var(--accent); }
     .hc-pick-v { font-size:14px; color:var(--text); margin-top:2px; }
@@ -43,6 +45,9 @@
     .hc-tag { display:inline-block; font-size:9px; letter-spacing:0.14em; text-transform:uppercase; padding:1px 7px; border:1px solid; white-space:nowrap; }
     .hc-fast { color:var(--success); border-color:var(--success); }
     .hc-steady { color:var(--info); border-color:var(--info); }
+    /* Amber on purpose, not var(--warn): in this design system --warn is the
+       same gold as --accent, and #c97a20 is the established warning colour
+       (see .b-banner.is-warn in design-system/css/components.css). */
     .hc-slow { color:#c97a20; border-color:#c97a20; }
     .hc-thin { color:var(--muted); border-color:var(--muted); }
     .hc-under { color:var(--accent); border-color:var(--accent); background:var(--accent-faint); }
@@ -51,7 +56,11 @@
     .hc-neg { color:var(--danger); }
     .hc-hub { font-size:13px; font-weight:600; color:var(--text); }
     .hc-retry { background:none; border:none; padding:0; font:inherit; color:var(--accent); cursor:pointer; text-decoration:underline; }
+    /* Between the phone cards (≤640px) and a wide window the table can be
+       wider than the section: scroll it here, not the page. */
+    .hc-scroll { overflow-x:auto; }
     .hc-table { width:100%; border-collapse:collapse; font-size:12px; }
+    .hc-table thead td { border-bottom:1px solid var(--border); }
     .hc-table th { font-size:9px; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted); font-weight:600; text-align:right; padding:0.5rem 0.6rem; border-bottom:1px solid var(--border); vertical-align:bottom; }
     .hc-table th:first-child, .hc-table td:first-child { text-align:left; }
     .hc-table th.hc-grp { text-align:center; color:var(--accent); border-bottom:1px solid var(--accent-dim); }

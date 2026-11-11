@@ -106,6 +106,19 @@ def test_hub_row_unavailable():
         "key": "hek", "name": "Hek", "unavailable": True}
 
 
+def test_hub_row_tells_no_starting_system_from_no_route():
+    # No starting system: the route cells stay empty (the column is hidden).
+    row = hv.hub_row("amarr", "Amarr", _result(), None, qty=10)
+    assert row["route"] == "" and row["route_note"] == ""
+    # A starting system but no way to the hub: say so.
+    row = hv.hub_row("amarr", "Amarr", _result(), None, qty=10, origin_set=True)
+    assert row["route"] == "no route" and row["route_note"] == ""
+    # A starting system and a route: unchanged.
+    row = hv.hub_row("amarr", "Amarr", _result(), {"jumps": 4, "highsec": True}, qty=10,
+                     origin_set=True)
+    assert row["route"] == "4 j" and row["route_note"] == "highsec"
+
+
 def test_route_that_leaves_highsec():
     row = hv.hub_row("hek", "Hek", _result(), {"jumps": 19, "highsec": False}, qty=10)
     assert row["route_note"] == "leaves highsec"

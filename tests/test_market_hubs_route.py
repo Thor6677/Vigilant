@@ -3,23 +3,23 @@ import asyncio
 import base64
 import json
 import re
-import tempfile
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from html import unescape
 
 import itsdangerous
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.market.history as history
 import app.market.orders as orders
-from app.db.models import Base, User, get_db
+from app.db.models import Base, MarketHistoryMeta, User, get_db
 from app.db.sde_models import SDEStation, SDESystem, SDEType
 from app.esi.market import APPRAISAL_HUBS
 from app.market import hub_prefs
 from app.routes import market_hubs
-from tests._mobile import render_page
+from tests._mobile import render_page, source
 from tests.conftest import ensure_user
 
 USER_ID = 92
@@ -27,6 +27,7 @@ PREFS_USER_ID = 93      # has saved fees: 8% sales tax, 2% broker fee
 TYPE_ID = 2001
 NOT_MARKET = 2999
 TODAY = date(2026, 11, 10)
+JITA = APPRAISAL_HUBS["jita"]
 AMARR = APPRAISAL_HUBS["amarr"]
 HEK = APPRAISAL_HUBS["hek"]
 DODIXIE = APPRAISAL_HUBS["dodixie"]
@@ -58,12 +59,11 @@ def _authed_client(user_id=USER_ID):
 
 
 @pytest.fixture
-def factory():
+def factory(tmp_path):
     """Temp DB with one market type, one non-market type, a starting system,
-    the five hub stations and a user with saved fees."""
-    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-    tmp.close()
-    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp.name}")
+    the five hub stations and a user with saved fees. The file lives in
+    pytest's tmp_path, so it is cleaned up with it."""
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'hubs.db'}")
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
     async def setup():
@@ -183,11 +183,15 @@ def test_a_hub_whose_history_failed_is_unavailable(app_db, monkeypatch):
 
     monkeypatch.setattr(history, "_fetch_history_esi", history_down_at_dodixie)
     body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?qty=10").text
-    # Dodixie (history) and Hek (orders): each once in the table, once in the cards.
-    assert body.count("Unavailable") == 4
+    # Dodixie (history), Hek (orders) and Rens: once Dodixie's history fetch
+    # has failed, Rens (after it, with no stored history) is not attempted in
+    # the same request. Each once in the table, once in the cards.
+    assert body.count("Unavailable") == 6
     assert re.search(r'Dodixie</span></td>\s*<td colspan="\d+" class="hc-unavail">Unavailable',
                      body)
-    assert body.count('<tr class="hc-s">') == 3
+    assert re.search(r'Rens</span></td>\s*<td colspan="\d+" class="hc-unavail">Unavailable',
+                     body)
+    assert body.count('<tr class="hc-s">') == 2
     assert "+46.9M" in body
 
 
@@ -198,10 +202,25 @@ def test_quantity_is_clamped_and_typed_cost_is_used(app_db):
     assert "+14.9M" in resp.text                   # 331M * 0.9513 - 300M
 
 
-@pytest.mark.parametrize("raw, shown", [("5000000", "1000000"), ("abc", "1")])
+@pytest.mark.parametrize("raw, shown", [
+    ("5000000", "1000000"), ("abc", "1"),
+    ("1e999", "1000000"), ("inf", "1000000"),
+    pytest.param("9" * 400, "1000000", id="400-digits"),
+    ("nan", "1"), ("", "1"), ("-inf", "1"),
+])
 def test_quantity_upper_clamp_and_junk(app_db, raw, shown):
-    body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?qty={raw}").text
+    body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs", params={"qty": raw}).text
     assert f'name="qty" value="{shown}"' in body
+
+
+@pytest.mark.parametrize("raw, n", [
+    ("10", 10), ("1,500", 1500), ("2.7", 2), ("0", 1), ("-4", 1), ("5000000", 1_000_000),
+    ("1e999", 1_000_000), ("inf", 1_000_000), ("Infinity", 1_000_000),
+    pytest.param("9" * 400, 1_000_000, id="400-digits"),
+    ("nan", 1), ("-inf", 1), ("", 1), ("abc", 1), (None, 1),
+])
+def test_parse_qty(raw, n):
+    assert market_hubs._parse_qty(raw) == n
 
 
 def test_fees_fall_back_to_saved_preferences(app_db):
@@ -248,6 +267,144 @@ def test_unknown_starting_system_is_reported(app_db):
         f"/market/type/{TYPE_ID}/hubs?qty=10&origin=Nowhere+Sample").text
     assert "Unknown system: Nowhere Sample." in body
     assert ">Route<" not in body
+
+
+def test_unroutable_hub_says_no_route_in_table_and_cards(app_db, monkeypatch):
+    async def fake_routes(db, origin, hub_systems):
+        return {key: (None if key == "amarr" else {"jumps": 3, "highsec": True})
+                for key in hub_systems}
+
+    monkeypatch.setattr(market_hubs.hub_route, "hub_routes", fake_routes)
+    body = _authed_client().get(
+        f"/market/type/{TYPE_ID}/hubs?qty=10&origin=sample+system").text
+    table = body[body.index('<table class="hc-table m-hide">'):body.index("</table>")]
+    cards = _element(body, "hc-results")[_element(body, "hc-results").index("hc-cards"):]
+    assert table.count("no route") == 1 and cards.count("no route") == 1
+    assert "no route ·" not in cards
+
+
+def test_starting_system_text_is_escaped(app_db):
+    body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs",
+                                params={"qty": "10", "origin": 'x"><b>bold'}).text
+    assert '"><b>' not in body
+    assert 'value="x&#34;&gt;&lt;b&gt;bold"' in body
+    assert "Unknown system: x&#34;&gt;&lt;b&gt;bold." in body
+
+
+# ── remembered failures in the endpoint ─────────────────────────────────
+
+def test_a_failed_hub_is_not_refetched_until_retry(app_db):
+    client = _authed_client()
+    hek = ("orders", HEK["region_id"])
+    client.get(f"/market/type/{TYPE_ID}/hubs?qty=10")
+    assert app_db.count(hek) == 1
+    before = len(app_db)
+    body = client.get(f"/market/type/{TYPE_ID}/hubs?qty=11").text
+    assert len(app_db) == before                   # nothing upstream at all, Hek included
+    assert "Days to sell 11" in body
+    body = client.get(f"/market/type/{TYPE_ID}/hubs?qty=11&retry=1").text
+    assert app_db.count(hek) == 2                  # the retry tries Hek once more
+    assert len(app_db) == before + 1               # and nothing else: the rest are fresh
+    assert body.count("Unavailable") == 2
+
+
+def test_retry_clears_remembered_history_failures_too(app_db, monkeypatch):
+    state = {"down": True}
+
+    async def flaky_history(region_id, type_id):
+        app_db.append(("history", region_id))
+        if state["down"]:
+            raise RuntimeError("down")
+        return [{"date": (TODAY - timedelta(days=i + 1)).isoformat(), "average": 330e6,
+                 "highest": 340e6, "lowest": 320e6, "volume": 5, "order_count": 3}
+                for i in range(30)]
+
+    monkeypatch.setattr(history, "_fetch_history_esi", flaky_history)
+    client = _authed_client()
+    client.get(f"/market/type/{TYPE_ID}/hubs?qty=10")
+    state["down"] = False
+    client.get(f"/market/type/{TYPE_ID}/hubs?qty=10")
+    assert [c for c in app_db if c[0] == "history"] == [("history", JITA["region_id"])]
+    body = client.get(f"/market/type/{TYPE_ID}/hubs?qty=10&retry=1").text
+    assert len([c for c in app_db if c[0] == "history"]) == 6     # one more for each hub
+    assert body.count("Unavailable") == 2                          # only Hek's orders
+
+
+def test_with_esi_down_a_first_view_makes_one_history_attempt(app_db, monkeypatch):
+    async def orders_down(region_id, type_id):
+        app_db.append(("orders", region_id))
+        raise RuntimeError("down")
+
+    async def history_down(region_id, type_id):
+        app_db.append(("history", region_id))
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(orders, "_fetch_orders_esi", orders_down)
+    monkeypatch.setattr(history, "_fetch_history_esi", history_down)
+    resp = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?qty=10")
+    assert resp.status_code == 200
+    assert len([c for c in app_db if c[0] == "orders"]) <= 5
+    assert len([c for c in app_db if c[0] == "history"]) <= 1
+    assert resp.text.count("Unavailable") == 10    # five hubs, table and cards
+    assert 'class="hc-picks"' not in resp.text
+
+
+def test_history_failure_mid_request_skips_only_hubs_that_need_the_network(
+        app_db, factory, monkeypatch):
+    client = _authed_client()
+    client.get(f"/market/type/{TYPE_ID}/hubs?qty=10")        # all five histories stored
+
+    async def forget(region_ids):
+        async with factory() as db:
+            await db.execute(delete(MarketHistoryMeta).where(
+                MarketHistoryMeta.region_id.in_(region_ids)))
+            await db.commit()
+
+    # Jita and Dodixie now need a fetch; Amarr, Hek and Rens are fresh.
+    _run(forget([JITA["region_id"], DODIXIE["region_id"]]))
+
+    async def history_down(region_id, type_id):
+        app_db.append(("history", region_id))
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(history, "_fetch_history_esi", history_down)
+    before = len(app_db)
+    body = client.get(f"/market/type/{TYPE_ID}/hubs?qty=10").text
+    assert app_db[before:] == [("history", JITA["region_id"])]   # Dodixie not attempted
+    assert history.recently_failed(DODIXIE["region_id"], TYPE_ID)
+    assert not history.recently_failed(AMARR["region_id"], TYPE_ID)
+    # Jita and Dodixie (no history) and Hek (orders) are unavailable; Amarr
+    # and Rens render from their stored history.
+    assert body.count("Unavailable") == 6
+    assert body.count('<tr class="hc-s">') == 2
+
+
+def test_a_stale_order_book_still_renders_with_its_age(app_db, monkeypatch):
+    now = datetime(2026, 11, 10, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(orders, "_now", lambda: now)
+    stale_book = [
+        {"is_buy_order": False, "price": 331e6, "volume_remain": 14,
+         "location_id": AMARR["station_id"], "min_volume": 1},
+        {"is_buy_order": True, "price": 284e6, "volume_remain": 6,
+         "location_id": AMARR["station_id"], "min_volume": 1},
+    ]
+    orders._cache[(AMARR["region_id"], TYPE_ID)] = (now - timedelta(hours=7), stale_book)
+    working = orders._fetch_orders_esi
+
+    async def amarr_down(region_id, type_id):
+        if region_id == AMARR["region_id"]:
+            app_db.append(("orders", region_id))
+            raise RuntimeError("down")
+        return await working(region_id, type_id)
+
+    monkeypatch.setattr(orders, "_fetch_orders_esi", amarr_down)
+    body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?qty=10").text
+    assert app_db.count(("orders", AMARR["region_id"])) == 1   # the refresh was tried
+    assert "Orders 420 min old" in body
+    assert not re.search(r'Amarr</span></td>\s*<td colspan="\d+" class="hc-unavail"', body)
+    assert body.count("Unavailable") == 2                       # only Hek
+    assert body.count('<tr class="hc-s">') == 4                 # Amarr loaded as well
+    assert "+46.9M" in body
 
 
 def test_post_hub_prefs_saves_fees_and_starting_system(app_db, factory):
@@ -327,6 +484,54 @@ def test_partial_hides_the_route_column_without_a_starting_system():
 def test_partial_has_no_inline_event_handlers():
     html = _render()
     assert "onclick=" not in html and "onchange=" not in html
+    # The same idea as the site-wide scan (tests/test_csp_inline_handlers.py),
+    # on the rendered HTML: no on<event>= attribute of any kind.
+    assert not re.search(r"\bon[a-z]+\s*=", html)
+
+
+def test_only_the_retry_button_asks_for_a_retry():
+    html = _render()
+    assert """hx-vals='{"retry": "1"}'""" in _tag(html, 'class="hc-retry"')
+    assert "retry" not in _tag(html, "<form")
+    assert 'name="retry"' not in html
+
+
+def test_table_headers_have_scopes():
+    html = _render()
+    headers = re.findall(r"<th\b[^>]*>", html)
+    assert headers
+    for th in headers:
+        assert ('scope="colgroup"' in th) == ("colspan" in th), th
+        assert 'scope="col"' in th or 'scope="colgroup"' in th, th
+
+
+def test_trend_arrows_have_text_for_screen_readers():
+    html = _render(rows=[_row("Jita", trend="up"), _row("Amarr", trend="down")])
+    assert re.search(r'<span class="hc-pos"[^>]*aria-hidden="true"[^>]*>▲</span>'
+                     r'<span class="visually-hidden">rising</span>', html)
+    assert re.search(r'<span class="hc-neg"[^>]*aria-hidden="true"[^>]*>▼</span>'
+                     r'<span class="visually-hidden">falling</span>', html)
+
+
+def test_desktop_table_scrolls_inside_its_own_box():
+    html = _render()
+    assert re.search(r'<div class="hc-scroll">\s*<table class="hc-table m-hide">', html)
+    css = source("market_type.html")
+    assert re.search(r"\.hc-scroll\s*\{[^}]*overflow-x:\s*auto", css)
+
+
+def test_pick_boxes_fit_a_narrow_phone():
+    css = source("market_type.html")
+    rule = re.search(r"\.hc-picks\s*\{([^}]*)\}", css).group(1)
+    assert "minmax(min(260px,100%),1fr)" in rule.replace(" ", "")
+
+
+def test_slow_tag_keeps_the_amber_warning_colour():
+    css = source("market_type.html")
+    assert re.search(r"\.hc-slow\s*\{\s*color:#c97a20;", css)
+    # Documented next to the rule: --warn is the accent gold here, not amber.
+    i = css.index(".hc-slow")
+    assert "--warn" in css[css.rindex("/*", 0, i):i]
 
 
 # ── inputs stay in place; results refresh on their own ─────────────────

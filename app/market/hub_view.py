@@ -114,7 +114,10 @@ def cost_note(cost: float | None, source: str | None, me: int) -> str:
     return f"Cost used: {fmt_isk(cost)} each — {_COST_SOURCES[source].format(me=me)}."
 
 
-def hub_row(key: str, name: str, result: dict | None, route: dict | None, qty: int) -> dict:
+def hub_row(key: str, name: str, result: dict | None, route: dict | None, qty: int,
+            origin_set: bool = False) -> dict:
+    """`route` is None both when no starting system is set and when one is set
+    but the hub cannot be reached from it; `origin_set` tells them apart."""
     if result is None:
         return {"key": key, "name": name, "unavailable": True}
     lw, now = result["list"], result["now"]
@@ -144,7 +147,8 @@ def hub_row(key: str, name: str, result: dict | None, route: dict | None, qty: i
         "now_fill": f"fills {now['fillable']} of {qty}" if now["fillable"] else "",
         "now_profit": fmt_signed(now["profit_each"]), "now_sign": _sign(now["profit_each"]),
         "now_batch": fmt_signed(now["batch_profit"]),
-        "route": f"{route['jumps']} j" if route else "",
+        "route": (f"{route['jumps']} j" if route
+                  else "no route" if origin_set else ""),
         "route_note": ("highsec" if route["highsec"] else "leaves highsec") if route else "",
     }
 
