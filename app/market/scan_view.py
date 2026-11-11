@@ -46,8 +46,9 @@ def parse_filters(hub: str, source: str, losers: str, under: str) -> dict:
 
 
 def _loser(row: dict) -> bool:
-    """No profit per day: loses money, or has not sold in the last 7 days."""
-    return row["profit_per_day"] <= 0
+    """No profit per day: loses money, has not sold in the last 7 days, or
+    has no figure at all (None counts as 0)."""
+    return (row.get("profit_per_day") or 0) <= 0
 
 
 def _passes(row: dict, f: dict) -> bool:
@@ -95,6 +96,15 @@ def _sign(v: float | None) -> str:
     return "pos" if v > 0 else "neg"
 
 
+def fmt_margin(margin: float | None) -> str:
+    """'48.5%', '−4.0%' (the minus sign U+2212, as every other figure), '—'
+    for none. The sign comes from the rounded figure: no '−0.0%'."""
+    if margin is None:
+        return "—"
+    pct = round(margin * 100, 1)
+    return f"{'−' if pct < 0 else ''}{abs(pct):.1f}%"
+
+
 def display_row(row: dict, routes: dict, show_route: bool) -> dict:
     other = row.get("other")
     other_profit = hub_view.fmt_signed(other["profit_each"]) if other else ""
@@ -118,15 +128,17 @@ def display_row(row: dict, routes: dict, show_route: bool) -> dict:
         "price_flag_title": PRICE_FLAG_TITLES.get(row["price_flag"], ""),
         "profit_each": hub_view.fmt_signed(row["profit_each"]),
         "profit_sign": _sign(row["profit_each"]),
-        "margin": f"{row['margin'] * 100:.1f}%" if row["margin"] is not None else "—",
+        "margin": fmt_margin(row["margin"]),
         "sold": hub_format.fmt_rate(row["demand_30"]),
         "stock": f"{row['stock']:,}",
         # Days of stock are a rate, formatted as the item page formats them.
         "stock_days": (f"{hub_format.fmt_rate(row['days_of_stock'])} days"
                        if row["days_of_stock"] is not None else ""),
         "qty": f"{row['qty']:,}", "qty_limit": QTY_LIMITS.get(row["qty_limit"], ""),
-        "profit_day": hub_view.fmt_signed(row["profit_per_day"]),
-        "profit_day_sign": _sign(row["profit_per_day"]),
+        "profit_day": hub_view.fmt_signed(row.get("profit_per_day")),
+        "profit_day_sign": _sign(row.get("profit_per_day")),
+        # The card says "+52.00 / day", or only "—" when there is no figure.
+        "has_profit_day": row.get("profit_per_day") is not None,
         "route": _route(routes.get(row["hub"])) if show_route else None,
     }
 
@@ -136,8 +148,14 @@ def routes_unavailable(routes: dict) -> bool:
 
 
 def build(result: dict, filters: dict, sort: str, direction: str) -> dict:
-    """Everything the result partial needs. `hidden` counts the rows that the
-    "hide" box alone keeps out: they pass every other filter."""
+    """Everything the result partial needs.
+
+    The counts add up to `total`, every row of the scan ("Showing X of N"):
+    shown + hidden + filtered + no_sales + no_cost + unavailable. `hidden`
+    counts the priced rows that the "hide" box alone keeps out (they pass
+    every other filter); `filtered` the priced rows the hub, source or
+    under-supplied filters keep out, whether or not they make money. `ok` is
+    every priced row, whatever the filters."""
     rows = result["rows"]
     routes = result.get("routes") or {}
     ok = [r for r in rows if r["status"] == "ok"]
@@ -156,8 +174,9 @@ def build(result: dict, filters: dict, sort: str, direction: str) -> dict:
         "routes_note": (hub_view.ROUTES_UNAVAILABLE_NOTE
                         if show_route and routes_unavailable(routes) else ""),
         "counts": {
-            "shown": len(shown), "ok": len(ok),
+            "shown": len(shown), "total": len(rows), "ok": len(ok),
             "hidden": len(candidates) - len(shown),
+            "filtered": len(ok) - len(candidates),
             "no_sales": sum(1 for r in rows if r["status"] == "no_sales"),
             "no_cost": sum(1 for r in rows if r["status"] == "no_cost"),
             "unavailable": sum(1 for r in rows if r["status"] == "unavailable"),

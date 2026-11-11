@@ -9,6 +9,7 @@ import json
 import re
 from datetime import datetime, timezone
 from html import unescape
+from html.parser import HTMLParser
 
 import itsdangerous
 import pytest
@@ -188,6 +189,49 @@ def _result(client, query="kind=category&ref=10"):
     return client.get(f"/market/hub-scan/result?{query}").text
 
 
+_VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
+         "source", "track", "wbr"}
+
+
+class _Tree(HTMLParser):
+    """Each id's ancestors, as attribute dicts, outermost first."""
+    def __init__(self):
+        super().__init__()
+        self.stack, self.chains = [], {}
+
+    def _record(self, attrs):
+        a = dict(attrs)
+        if a.get("id"):
+            self.chains.setdefault(a["id"], []).append([dict(s[1]) for s in self.stack])
+        return a
+
+    def handle_starttag(self, tag, attrs):
+        a = self._record(attrs)
+        if tag not in _VOID:
+            self.stack.append((tag, a))
+
+    def handle_startendtag(self, tag, attrs):
+        self._record(attrs)
+
+    def handle_endtag(self, tag):
+        for i in range(len(self.stack) - 1, -1, -1):
+            if self.stack[i][0] == tag:
+                del self.stack[i:]
+                return
+
+
+def _ancestors(html, el_id):
+    """The ancestors of the one element with `el_id` (fails if not exactly one)."""
+    tree = _Tree()
+    tree.feed(html)
+    (chain,) = tree.chains[el_id]
+    return chain
+
+
+def _ancestor_ids(html, el_id):
+    return [a.get("id") for a in _ancestors(html, el_id)]
+
+
 # ── access ─────────────────────────────────────────────────────────────────
 
 def test_anonymous_is_turned_away(app_db):
@@ -253,7 +297,9 @@ def test_page_with_a_list_in_the_address_loads_its_count_and_result(app_db):
     html = _authed_client().get("/market/hub-scan?kind=category&ref=10").text
     assert 'value="10"' in _tag(html, 'id="hs-ref"')
     assert "Sample Ships" in html                               # the chosen path
-    assert "/market/hub-scan/count?kind=category&amp;ref=10" in html
+    # The count is in the line itself (no second request); the result loads.
+    assert '<span id="hs-count">1 item.</span>' in html
+    assert "/market/hub-scan/count" not in html
     assert "/market/hub-scan/result?kind=category&amp;ref=10" in html
 
 
@@ -318,7 +364,8 @@ def test_count_messages(app_db, factory):
 def test_idle_status_loads_count_and_result(app_db):
     html = _authed_client().get("/market/hub-scan/status?kind=category&ref=10").text
     assert "every 2s" not in html and "data-htmx-no-error" not in _tag(html, 'id="hs-status"')
-    assert "/market/hub-scan/count?kind=category&amp;ref=10" in html
+    assert '<span id="hs-count">1 item.</span>' in html
+    assert "/market/hub-scan/count" not in html
     assert "/market/hub-scan/result?kind=category&amp;ref=10" in html
 
 
@@ -341,11 +388,14 @@ def test_active_status_polls_every_2s_and_opts_out_of_the_error_pill(app_db):
     html = c.get("/market/hub-scan/status?kind=category&ref=10").text
     status = _tag(html, 'id="hs-status"')
     for attr in ('hx-get="/market/hub-scan/status?kind=category&amp;ref=10&amp;was=1"',
-                 'hx-trigger="every 2s"', 'hx-swap="outerHTML"', 'data-htmx-no-error="1"'):
+                 'hx-trigger="every 2s"', 'hx-target="#hs-status-box"', 'hx-swap="innerHTML"',
+                 'hx-sync="#hs-status-box:drop"', 'data-htmx-no-error="1"'):
         assert attr in status
     assert "1 of 4 items" in html and "Scanning Sample Ships" in html
     cancel = _tag(html, 'hx-post="/market/hub-scan/cancel"')
-    assert 'data-htmx-no-error="1"' in cancel and 'hx-target="#hs-status"' in cancel
+    for attr in ('data-htmx-no-error="1"', 'hx-target="#hs-status-box"', 'hx-swap="innerHTML"',
+                 'hx-sync="#hs-status-box:replace"'):
+        assert attr in cancel
     assert "/market/hub-scan/result" not in html                 # loads when it ends
 
 
@@ -385,6 +435,329 @@ def test_cancel_returns_the_status_line(app_db):
     assert r.status_code == 200 and 'id="hs-status"' in r.text
     c.post("/market/hub-scan/start", data={"kind": "category", "ref": "10"})
     assert 'id="hs-status"' in c.post("/market/hub-scan/cancel").text
+
+
+# ── overlapping updates: stable targets, newest request wins ───────────────
+# htmx 1.9.12 drops a reply whose target was replaced while it was in
+# flight, so every update goes into a box that is never replaced. These pin
+# the markup; whether overlapping requests then behave needs a browser.
+
+def test_page_wraps_the_status_line_in_a_stable_box(app_db, factory):
+    _run(_add_watchlist(factory, USER_ID, "Sample List"))
+    c = _authed_client()
+    for url in ("/market/hub-scan", "/market/hub-scan?kind=category&ref=10",
+                "/market/hub-scan?kind=watchlist"):
+        html = c.get(url).text
+        for el_id in ("hs-status-box", "hs-status", "hs-result", "hs-start-note",
+                      "hs-status-src", "hs-wl-src", "hs-wl-box", "hs-watchlists"):
+            assert html.count(f'id="{el_id}"') == 1, (url, el_id)
+        box = _tag(html, 'id="hs-status-box"')
+        assert 'aria-live="polite"' in box
+        # No htmx attribute on the box: hx-sync and hx-target are inherited.
+        assert "hx-" not in box and "hx-" not in _tag(html, 'id="hs-result"')
+        assert "hs-status-box" in _ancestor_ids(html, "hs-status")
+        assert "hs-status-box" not in _ancestor_ids(html, "hs-result")
+        assert "hs-wl-box" in _ancestor_ids(html, "hs-watchlists")
+        assert "hx-" not in _tag(html, 'id="hs-wl-box"')
+        # The notes line sits outside the box, so a poll cannot wipe it.
+        assert "hs-status-box" not in _ancestor_ids(html, "hs-start-note")
+        assert 'role="status"' in _tag(html, 'id="hs-start-note"')
+
+
+def test_page_script_sources_carry_the_sync_and_nothing_else(app_db):
+    html = _authed_client().get("/market/hub-scan?kind=category&ref=10").text
+    for el_id, box in (("hs-status-src", "#hs-status-box"), ("hs-wl-src", "#hs-wl-box")):
+        tag = _tag(html, f'id="{el_id}"')
+        assert f'hx-sync="{box}:replace"' in tag and 'data-htmx-no-error="1"' in tag
+        assert "hidden" in tag and "hx-get" not in tag and "hx-post" not in tag
+        # htmx.ajax reads hx-include / hx-vals / hx-sync from the source's
+        # ancestors too: none of them may carry any, nor be swapped.
+        for a in _ancestors(html, el_id):
+            assert not any(k.startswith("hx-") for k in a), (el_id, a)
+            assert a.get("id") not in ("hs-form", "hs-status-box", "hs-result", "hs-wl-box")
+    page = source("market_hub_scan.html")
+    show = page[page.index("function showStatus("):page.index("function showPicker(")]
+    assert "source: document.getElementById('hs-status-src')" in show
+    assert "target: '#hs-status-box', swap: 'innerHTML'" in show
+    load = page[page.index("function loadManager("):page.index("/* Enter in a field")]
+    assert "source: document.getElementById('hs-wl-src')" in load
+    assert "target: '#hs-wl-box', swap: 'innerHTML'" in load
+    # An aborted load rejects htmx.ajax's promise: caught, not logged.
+    assert "quiet(htmx.ajax(" in show and "quiet(htmx.ajax(" in load
+    assert "promise.catch(function () {})" in page
+
+
+def test_nothing_swaps_the_status_line_itself(app_db, factory):
+    for name in ("market_hub_scan.html", "partials/hub_scan_status.html",
+                 "partials/hub_scan_result.html"):
+        text = source(name)
+        assert 'hx-target="#hs-status"' not in text, name
+        assert "target: '#hs-status'" not in text, name
+    _run(save_result(factory, USER_ID, ROWS))
+    c = _authed_client()
+    replies = [c.get("/market/hub-scan/status?kind=category&ref=10").text,
+               c.get("/market/hub-scan/status?kind=category&ref=0").text,
+               c.post("/market/hub-scan/cancel").text,
+               c.post("/market/hub-scan/start", data={"kind": "category", "ref": "10"}).text,
+               c.get("/market/hub-scan/status?kind=category&ref=10").text]
+    for html in replies:
+        assert html.count('id="hs-status"') == 1
+        root = _tag(html, 'id="hs-status"')
+        assert "outerHTML" not in root and 'hx-target="#hs-status"' not in root
+        assert 'id="hs-status-box"' not in html          # the box is the page's, never sent
+
+
+def test_every_status_requester_targets_the_box_and_the_newest_wins(app_db, factory):
+    rows = ROWS + [{"type_id": 2007, "name": "Lost Hull", "status": "unavailable"}]
+    _run(save_result(factory, USER_ID, rows))
+    c = _authed_client()
+    page = c.get("/market/hub-scan").text
+    result = _result(c)
+    c.post("/market/hub-scan/start", data={"kind": "category", "ref": "10"})
+    active = c.get("/market/hub-scan/status?kind=category&ref=10").text
+    scan_runner._jobs[USER_ID].state = "queued"
+    queued = c.get("/market/hub-scan/status?kind=category&ref=10").text
+    requesters = [t for html in (page, result, active, queued)
+                  for t in re.findall(r"<[a-z]+\b[^>]*\bhx-(?:get|post)=[^>]*>", html)
+                  if 'hx-target="#hs-status-box"' in t]
+    kinds = {re.search(r'hx-(?:get|post)="([^"?]+)', t).group(1) for t in requesters}
+    assert kinds == {"/market/hub-scan/start", "/market/hub-scan/cancel",
+                     "/market/hub-scan/status"}
+    for t in requesters:
+        assert 'hx-swap="innerHTML"' in t and 'data-htmx-no-error="1"' in t, t
+        if 'hx-trigger="every 2s"' in t:
+            assert 'hx-sync="#hs-status-box:drop"' in t, t    # a tick never aborts the user
+        else:
+            assert 'hx-sync="#hs-status-box:replace"' in t, t
+    for html, marker, msg in ((page, 'id="hs-start"', "hs-start-msg"),
+                              (result, ">Rescan<", "hs-rescan-msg"),
+                              (result, ">retry these<", "hs-retry-msg")):
+        assert f'data-msg="{msg}"' in _tag(html, marker), marker
+        assert html.count(f'id="{msg}"') == 1, msg
+
+
+def test_the_poll_exists_only_for_an_active_job(app_db, factory):
+    _run(save_result(factory, USER_ID, ROWS))
+    c = _authed_client()
+
+    def status(query="kind=category&ref=10"):
+        return c.get(f"/market/hub-scan/status?{query}").text
+
+    idle = [status(), status("kind=category&ref=0"), status("kind=blueprints&ref=0"),
+            status("kind=category&ref=10&was=1"), c.get("/market/hub-scan").text]
+    c.post("/market/hub-scan/start", data={"kind": "category", "ref": "10"})
+    job = scan_runner._jobs[USER_ID]
+    running = status()
+    job.state = "queued"
+    queued = status()
+    for state in ("done", "failed", "cancelled"):
+        job.state = state
+        idle.append(status())
+    for html in idle:
+        assert "every 2s" not in html and "hx-get" not in _tag(html, 'id="hs-status"')
+    for html in (running, queued):
+        assert html.count('hx-trigger="every 2s"') == 1
+        assert 'hx-trigger="every 2s"' in _tag(html, 'id="hs-status"')
+
+
+def test_result_requests_are_newest_first(app_db, factory):
+    _run(save_result(factory, USER_ID, ROWS))
+    c = _authed_client()
+    loader = _tag(c.get("/market/hub-scan/status?kind=category&ref=10").text, 'class="hs-loader"')
+    filters = _tag(_result(c), 'id="hs-filters"')
+    for tag in (loader, filters):
+        for attr in ('hx-target="#hs-result"', 'hx-swap="innerHTML"',
+                     'hx-sync="#hs-result:replace"'):
+            assert attr in tag, (tag, attr)
+    assert 'data-htmx-no-error="1"' in loader
+
+
+# ── one status line at a time ──────────────────────────────────────────────
+
+def test_count_line_only_without_a_saved_result(app_db, factory, monkeypatch):
+    c = _authed_client()
+    html = c.get("/market/hub-scan/status?kind=category&ref=10").text
+    assert '<span id="hs-count">1 item.</span>' in html
+    _run(save_result(factory, USER_ID, ROWS))
+    # Whether a result exists is read cheaply: the status never loads it.
+    loads = []
+    real_load = scan_results.load
+
+    async def counting_load(*args, **kwargs):
+        loads.append(args[1:4])
+        return await real_load(*args, **kwargs)
+    monkeypatch.setattr(scan_results, "load", counting_load)
+    for html in (c.get("/market/hub-scan/status?kind=category&ref=10").text,
+                 c.get("/market/hub-scan?kind=category&ref=10").text,
+                 c.get("/market/hub-scan/status?kind=category&ref=10&was=1").text):
+        assert 'id="hs-count"' not in html and "1 item." not in html
+        assert "/market/hub-scan/result?kind=category&amp;ref=10" in html   # the finished line
+    assert loads == []
+    # Nothing to show in the line itself: it takes no room above the result.
+    assert "is-blank" in _tag(c.get("/market/hub-scan/status?kind=category&ref=10").text,
+                              'id="hs-status"')
+    assert "is-blank" not in _tag(c.get("/market/hub-scan/status?kind=category&ref=10&was=1").text,
+                                  'id="hs-status"')
+    # Another list with no result: its count, and the loader still clears #hs-result.
+    html = c.get("/market/hub-scan/status?kind=blueprints&ref=0").text
+    assert "counted when the scan starts" in html and "/market/hub-scan/result?kind=blueprints" in html
+    # A failed scan of the list still names the failure above the saved result.
+    c.post("/market/hub-scan/start", data={"kind": "category", "ref": "10"})
+    job = scan_runner._jobs[USER_ID]
+    job.state, job.message = "failed", "The scan failed. Scan again."
+    html = c.get("/market/hub-scan/status?kind=category&ref=10").text
+    assert "The scan failed" in html and 'id="hs-count"' not in html
+
+
+def test_the_count_line_is_per_user(app_db, factory):
+    _run(save_result(factory, OTHER_USER_ID, ROWS))
+    html = _authed_client().get("/market/hub-scan/status?kind=category&ref=10").text
+    assert '<span id="hs-count">1 item.</span>' in html
+
+
+def test_counts_line_says_what_other_filters_took_out(app_db, factory):
+    rows = [_ok("Sample Hull", TYPE_ID),
+            _ok("Build Hull", 2004, hub="amarr", source="build", cost_basis="benchmark",
+                supply=None, profit_per_day=90.0),
+            {"type_id": 2003, "name": "Quiet Hull", "status": "no_sales"}]
+    _run(save_result(factory, USER_ID, rows))
+    html = _result(_authed_client(), "kind=category&ref=10&hub=amarr")
+    counts = re.sub(r"\s+", " ", html[html.index('class="hs-counts"'):])
+    assert "Showing 1 of 3 · 1 filtered out · 1 skipped: no recent sales" in counts
+
+
+# ── start notes, session, phones, accessibility ────────────────────────────
+
+def _note(html):
+    i = html.index('<div id="hs-start-note"')
+    return html[html.index(">", i) + 1:html.index("</div>", i)]
+
+
+def test_start_says_which_values_it_used_when_not_as_typed(app_db):
+    c = _authed_client()
+    start = "/market/hub-scan/start"
+    base = {"kind": "category", "ref": "10", "budget": "500M", "share": "20",
+            "sales_tax": "3.37", "broker_fee": "1.5"}
+
+    def post(**over):
+        job = scan_runner._jobs.get(USER_ID)
+        if job is not None:
+            job.state = "done"
+        return c.post(start, data={**base, **over}).text
+
+    html = post(budget="0.5M", share="500", sales_tax="200", broker_fee="junk")
+    assert 'hx-swap-oob="innerHTML"' in _tag(html, 'id="hs-start-note"')
+    note = _note(html)
+    for text in ("Budget used: 1M.", "Market share used: 100%.", "Sales tax used: 100%.",
+                 hub_view.fee_note("Broker fee", hub_prefs.DEFAULT_BROKER_FEE_PCT)):
+        assert text in note, text
+    # Out of band, not in the status line (the first poll would wipe it).
+    assert "used:" not in html[:html.index('<div id="hs-start-note"')]
+    assert "Budget used: 100B." in _note(post(budget="500B"))      # clamped to the ceiling
+    post()                                       # every start saves: back to the base values
+    assert "Budget used: 500M." in _note(post(budget="lots"))     # unreadable: the saved one
+    assert "Market share used: 20%." in _note(post(share=""))     # blank: the saved one
+    # Used as typed: no note at all.
+    for over in ({}, {"budget": "1.5B", "share": "30", "sales_tax": "4", "broker_fee": "1"},
+                 {"budget": " 1.5b ", "share": "30.0"}):
+        assert _note(post(**over)) == "", over
+    # A blank field falls back to the saved value, and says so.
+    post()
+    assert "Budget used: 500M." in _note(post(budget=""))
+    # The other start notes go to the same place.
+    job = scan_runner._jobs[USER_ID]
+    job.state = "running"
+    note = _note(c.post(start, data={"kind": "blueprints"}).text)
+    assert note == "Your other scan is still running; start this one when it ends."
+
+
+def test_page_script_says_the_session_ended_in_the_status_box():
+    page = source("market_hub_scan.html")
+    i = page.index("['htmx:responseError', 'htmx:sendError', 'htmx:timeout']")
+    handler = page[i:page.index("})();", i)]
+    assert "statusRequest(e) && (code === 401 || code === 403)" in handler
+    assert "statusLine('Your session has ended. ', 'Sign in again.')" in handler
+    line = page[page.index("function statusLine("):page.index("function managerRequest(")]
+    # One #hs-status replaces the box's content, poll element and all.
+    for needle in ("getElementById('hs-status-box')", "line.id = 'hs-status'",
+                   "box.replaceChildren(line)", "a.href = '/'", "textContent"):
+        assert needle in line, needle
+    assert "innerHTML" not in line
+    # Start errors are written beside the button pressed.
+    assert "btn.getAttribute('data-msg')" in page
+    assert "startMessage(start, 'Could not start the scan; try again.')" in handler
+
+
+def test_result_has_a_message_beside_rescan_and_retry(app_db, factory):
+    rows = ROWS + [{"type_id": 2007, "name": "Lost Hull", "status": "unavailable"}]
+    _run(save_result(factory, USER_ID, rows))
+    html = _result(_authed_client())
+    assert "hs-done" in _ancestor_ids(html, "hs-rescan-msg")
+    assert 'role="status"' in _tag(html, 'id="hs-rescan-msg"')
+    counts = html[html.index('class="hs-counts"'):]
+    counts = counts[:counts.index("</div>")]
+    assert 'id="hs-retry-msg"' in counts and 'role="status"' in _tag(counts, 'id="hs-retry-msg"')
+    done = _tag(html, 'id="hs-done"')
+    assert 'data-kind="category"' in done and 'data-ref="10"' in done
+
+
+def test_picked_search_result_path_uses_the_page_separator():
+    page = source("market_hub_scan.html")
+    path = page[page.index("function nodePath("):page.index("var tree =")]
+    assert "sel.dataset.mgName.split(' > ').join(' › ')" in path
+    assert "names.join(' › ')" in path
+
+
+def test_long_names_wrap_on_a_phone():
+    css = source("market_hub_scan.html")
+    rule = re.search(r"([^{}]*\.hs-status > \*[^{}]*)\{([^}]*)\}", css)
+    assert rule, "the wrapping rule"
+    selectors = rule.group(1)
+    for sel in (".hs-status > *", ".hs-done > *", ".hs-wl-head > *", ".hs-counts", ".hs-msg"):
+        assert sel in selectors, sel
+    body = rule.group(2).replace(" ", "")
+    assert "min-width:0" in body and "overflow-wrap:anywhere" in body
+    assert re.search(r"\.hs-wl-name\s*\{[^}]*min-width:0;[^}]*overflow-wrap:anywhere", css)
+    assert re.search(r"\.hs-ctop \.hs-item\s*\{[^}]*min-width:0;[^}]*overflow-wrap:anywhere", css)
+    assert re.search(r"\.hs-pick \.b-input\s*\{[^}]*max-width:100%", css)
+
+
+def test_progress_bar_says_how_far_in_words(app_db):
+    c = _authed_client()
+    c.post("/market/hub-scan/start", data={"kind": "category", "ref": "10"})
+    bar = _tag(c.get("/market/hub-scan/status?kind=category&ref=10").text, 'role="progressbar"')
+    assert 'aria-valuetext="1 of 4 items"' in bar and 'aria-valuenow="25"' in bar
+    scan_runner._jobs[USER_ID].total = 0
+    bar = _tag(c.get("/market/hub-scan/status?kind=category&ref=10").text, 'role="progressbar"')
+    assert 'aria-valuetext="Reading the list"' in bar
+
+
+def test_sort_buttons_and_filters_keep_their_ids_across_swaps(app_db, factory):
+    """htmx gives focus back to the element with the focused one's id."""
+    _run(save_result(factory, USER_ID, ROWS))
+    c = _authed_client()
+    first, second = _result(c), _result(c, "kind=category&ref=10&sort=margin&dir=asc")
+    for html in (first, second):
+        for key in ("item", "hub", "cost", "price", "profit", "margin", "sold", "stock",
+                    "qty", "profit_day"):
+            assert html.count(f'id="hs-sort-{key}"') == 1, key
+            assert f'data-sort="{key}"' in _tag(html, f'id="hs-sort-{key}"')
+        for el_id in ("hs-f-hub", "hs-f-source", "hs-losers", "hs-f-under"):
+            assert html.count(f'id="{el_id}"') == 1, el_id
+    assert 'name="under"' in _tag(first, 'id="hs-f-under"')
+    head = second[second.index("<thead>"):second.index("</thead>")]
+    sorted_th = [t for t in re.findall(r"<th\b[^>]*>", head) if "aria-sort" in t]
+    assert sorted_th == [sorted_th[0]] and 'aria-sort="ascending"' in sorted_th[0]
+    assert "hs-sort-margin" in head[head.index(sorted_th[0]):head.index("</th>", head.index(sorted_th[0]))]
+
+
+def test_card_shows_a_dash_for_a_missing_profit_per_day(app_db, factory):
+    rows = [_ok("Blank Hull", TYPE_ID, profit_per_day=None, margin=-0.04)]
+    _run(save_result(factory, USER_ID, rows))
+    html = _result(_authed_client(), "kind=category&ref=10&losers=show")
+    cards = html[html.index('<div class="hs-cards m-only">'):]
+    assert '<span class="hs-big">—</span>' in cards and "— / day" not in cards
+    assert "−4.0%" in html and "-4.0%" not in html
 
 
 # ── start ──────────────────────────────────────────────────────────────────
@@ -453,10 +826,10 @@ def test_result_renders_filters_and_counts(app_db, factory):
     c = _authed_client()
     html = _result(c)
     assert "Sample Hull" in html and "Losing Hull" not in html
-    assert "Showing 1 of 2" in html
+    assert "Showing 1 of 3" in html                             # every row scanned
     assert "1 hidden: lose money or no sales this week" in html
     assert "1 skipped: no recent sales" in html
-    assert "no cost" not in html and "unavailable" not in html
+    assert "no cost" not in html and "unavailable" not in html and "filtered out" not in html
     assert 'href="/market/type/2001?qty=7&amp;cost=100.00#mk-hubs"' in html
     assert "Sample Ships</b> — scanned 2026-11-10 14:05 EVE time · 3 items" in html
     assert "Hide items with no profit per day" in html
@@ -464,7 +837,7 @@ def test_result_renders_filters_and_counts(app_db, factory):
     assert "disabled" in _tag(html, 'id="hs-losers-off"')
     shown = _result(c, "kind=category&ref=10&losers=show")
     assert "Losing Hull" in shown and "hidden:" not in shown
-    assert "Showing 2 of 2" in shown
+    assert "Showing 2 of 3" in shown
     assert "checked" not in _tag(shown, 'id="hs-losers"')
     assert "disabled" not in _tag(shown, 'id="hs-losers-off"')
 
@@ -558,7 +931,9 @@ def test_unavailable_items_offer_a_retry(app_db, factory):
     assert "1 skipped: no cost" in html and "1 unavailable (" in html
     retry = _tag(html, ">retry these<")
     for attr in ('hx-post="/market/hub-scan/start"', 'hx-include="#hs-form"',
-                 'hx-target="#hs-status"', 'hx-swap="outerHTML"', 'data-htmx-no-error="1"'):
+                 'hx-target="#hs-status-box"', 'hx-swap="innerHTML"',
+                 'hx-sync="#hs-status-box:replace"', 'data-msg="hs-retry-msg"',
+                 'data-htmx-no-error="1"'):
         assert attr in retry
     assert '"kind": "category"' in retry and '"ref": 10' in retry
     # Outside the filter form: a POST would send that form too.
@@ -934,8 +1309,8 @@ def test_search_offers_market_items_and_escapes_wildcards(app_db, factory):
     html = c.get(f"/market/watchlists/search?wid={wid}&q=sample").text
     assert "Sample Hull" in html and "Sample Rig" in html and "Sample Relic" not in html
     add = _tag(html, 'aria-label="Add Sample Hull"')
-    for attr in (f'hx-post="/market/watchlists/{wid}/items"', 'hx-target="#hs-watchlists"',
-                 'hx-swap="outerHTML"', 'hx-include="#hs-wl-q"', 'data-htmx-no-error="1"'):
+    for attr in (f'hx-post="/market/watchlists/{wid}/items"', 'hx-target="#hs-wl-box"',
+                 'hx-swap="innerHTML"', 'hx-include="#hs-wl-q"', 'data-htmx-no-error="1"'):
         assert attr in add
     assert '"type_id": 2001' in add
     for q in ("%%", "__", "%_%"):
@@ -982,6 +1357,52 @@ def test_manager_markup(app_db, factory):
         assert f'for="{field}"' in html, field
 
 
+def test_manager_says_its_list_and_item_count(app_db, factory):
+    """The page script re-asks for the status (and so the result) only when
+    data-current changes, or data-count does with no result showing."""
+    c = _authed_client()
+
+    def root(html):
+        tag = _tag(html, 'id="hs-watchlists"')
+        return (re.search(r'data-current="(\d+)"', tag).group(1),
+                re.search(r'data-count="(\d+)"', tag).group(1))
+
+    html = c.post("/market/watchlists", data={"name": "Hulls"}).text
+    wid = str(_run(_first_watchlist_id(factory, USER_ID)))
+    assert root(html) == (wid, "0")
+    assert root(c.post(f"/market/watchlists/{wid}/items", data={"type_id": "2001"}).text) == (wid, "1")
+    # A rename, a refused name, an item already on the list: neither changes.
+    assert root(c.post(f"/market/watchlists/{wid}/rename", data={"name": "Ships"}).text) == (wid, "1")
+    assert root(c.post("/market/watchlists", data={"name": "ships", "current": wid}).text) == (wid, "1")
+    assert root(c.post(f"/market/watchlists/{wid}/items", data={"type_id": "2001"}).text) == (wid, "1")
+    assert root(c.post(f"/market/watchlists/{wid}/items/2001/delete").text) == (wid, "0")
+    assert root(c.get(f"/market/hub-scan?kind=watchlist&ref={wid}").text) == (wid, "0")
+    assert root(c.post(f"/market/watchlists/{wid}/delete").text) == ("0", "0")
+
+
+def test_manager_replies_land_in_the_stable_box(app_db, factory):
+    _run(_add_types(factory, (2002, "Sample Rig", 11)))
+    c = _authed_client()
+    c.post("/market/watchlists", data={"name": "Mine"})
+    wid = _run(_first_watchlist_id(factory, USER_ID))
+    c.post(f"/market/watchlists/{wid}/items", data={"type_id": "2001"})
+    html = (c.get(f"/market/watchlists?id={wid}").text
+            + c.get(f"/market/watchlists/search?wid={wid}&q=sample").text)
+    tags = re.findall(r"<(?:button|input)\b[^>]*hx-(?:get|post)=[^>]*>", html)
+    assert len(tags) == 6          # create, rename, delete, search, remove, add
+    for tag in tags:
+        if 'id="hs-wl-q"' in tag:
+            assert 'hx-target="#hs-wl-found"' in tag
+            continue
+        assert 'hx-target="#hs-wl-box"' in tag and 'hx-swap="innerHTML"' in tag, tag
+        # Each edit syncs on itself: two quick edits are both sent.
+        assert "hx-sync" not in tag, tag
+    for name in ("partials/hub_scan_watchlist.html", "partials/hub_scan_wl_found.html",
+                 "market_hub_scan.html"):
+        assert 'hx-target="#hs-watchlists"' not in source(name), name
+        assert "target: '#hs-watchlists'" not in source(name), name
+
+
 def test_page_in_watchlist_mode_shows_the_manager_for_the_picked_list(app_db, factory):
     alpha = _run(_add_watchlist(factory, USER_ID, "Alpha List"))
     beta = _run(_add_watchlist(factory, USER_ID, "Beta List"))
@@ -1010,8 +1431,20 @@ def test_page_script_keeps_ref_in_step_with_the_manager():
     page = source("market_hub_scan.html")
     i = page.index("document.body.addEventListener('htmx:afterSwap'")
     block = page[i:page.index("});", i)]
-    for needle in ("hs-watchlists", "data-current", "ref.value", "showStatus('watchlist'"):
+    # After a reply lands in the stable box: ref follows the manager, and the
+    # status (with the result) is asked for only when the list changed, or
+    # its count did with no result of it showing.
+    for needle in ("'hs-wl-box'", "managerState()", "ref.value", "now !== was.current",
+                   "shownManager.count !== was.count", "!resultShowing('watchlist', now)",
+                   "showStatus('watchlist'"):
         assert needle in block, needle
+    state = page[page.index("function managerState()"):]
+    state = state[:state.index("}\n", state.index("return"))]
+    for needle in ("'hs-watchlists'", "data-current", "data-count"):
+        assert needle in state, needle
+    showing = page[page.index("function resultShowing("):]
+    showing = showing[:showing.index("}\n")]
+    assert "'hs-done'" in showing and "data-kind" in showing and "data-ref" in showing
     assert "loadManager(t.value)" in page and "'/market/watchlists?id='" in page
 
 

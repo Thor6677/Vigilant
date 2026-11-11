@@ -43,19 +43,68 @@ def test_counts_and_filters():
             {"type_id": 6, "name": "F", "status": "no_cost"}]
     out = v.build(result(rows), F, "profit_day", "")
     assert names(out) == ["Sample Hull", "C"]
-    assert out["counts"] == {"shown": 2, "ok": 3, "hidden": 1, "no_sales": 1,
-                             "no_cost": 1, "unavailable": 1}
+    assert out["counts"] == {"shown": 2, "total": 6, "ok": 3, "hidden": 1, "filtered": 0,
+                             "no_sales": 1, "no_cost": 1, "unavailable": 1}
     assert out["type_ids"] == [2001, 2, 3]
     only_amarr = v.build(result(rows), v.parse_filters("amarr", "", "", ""), "profit_day", "")
     assert names(only_amarr) == ["C"]
     # The loser is at Rens: unticking the box would not show it here, so it
-    # is not counted as hidden by the box.
+    # is not counted as hidden by the box, but as filtered out by the hub.
     assert only_amarr["counts"]["hidden"] == 0
+    assert only_amarr["counts"]["filtered"] == 2
     under = v.build(result(rows), v.parse_filters("", "", "show", "1"), "profit_day", "")
     assert names(under) == ["Sample Hull", "B"]
     assert under["counts"]["hidden"] == 0
     haul = v.build(result(rows), v.parse_filters("", "haul", "", ""), "profit_day", "")
     assert names(haul) == ["Sample Hull"] and haul["counts"]["hidden"] == 1
+
+
+def test_counts_add_up_to_every_row_of_the_scan():
+    """'Showing X of N': N is every row scanned, and shown + hidden +
+    filtered out + skipped + unavailable = N whatever the filters."""
+    rows = [row(), row(type_id=2, name="B", profit_per_day=-1.0, profit_each=-1.0),
+            row(type_id=3, name="C", hub="amarr", source="build", supply=None),
+            row(type_id=7, name="G", hub="amarr", profit_per_day=-3.0, supply=None),
+            row(type_id=8, name="H", profit_per_day=None),
+            {"type_id": 4, "name": "D", "status": "no_sales"},
+            {"type_id": 5, "name": "E", "status": "unavailable"},
+            {"type_id": 6, "name": "F", "status": "no_cost"},
+            {"type_id": 9, "name": "I", "status": "no_cost"}]
+    for hub in ("", "amarr", "rens", "jita"):
+        for source in ("", "build", "haul"):
+            for losers in ("", "show"):
+                for under in ("", "1"):
+                    f = v.parse_filters(hub, source, losers, under)
+                    c = v.build(result(rows), f, "profit_day", "")["counts"]
+                    parts = (c["shown"] + c["hidden"] + c["filtered"] + c["no_sales"]
+                             + c["no_cost"] + c["unavailable"])
+                    assert c["total"] == len(rows) == parts, (f, c)
+                    assert c["ok"] == 5
+
+
+def test_no_profit_per_day_figure_is_treated_as_zero():
+    """A row with profit_per_day None: hidden by the box, shown last when
+    the box is off, and drawn as a dash."""
+    rows = [row(), row(type_id=2, name="Blank Hull", profit_per_day=None)]
+    out = v.build(result(rows), F, "profit_day", "")
+    assert names(out) == ["Sample Hull"] and out["counts"]["hidden"] == 1
+    show = v.parse_filters("", "", "show", "")
+    for sort, direction in (("profit_day", ""), ("profit_day", "asc"), ("item", ""),
+                            ("margin", "")):
+        assert set(names(v.build(result(rows), show, sort, direction))) == {
+            "Sample Hull", "Blank Hull"}
+    assert names(v.build(result(rows), show, "profit_day", "asc"))[-1] == "Blank Hull"
+    d = v.display_row(row(profit_per_day=None), {}, False)
+    assert (d["profit_day"], d["profit_day_sign"], d["has_profit_day"]) == ("—", "", False)
+    assert v.display_row(row(), {}, False)["has_profit_day"] is True
+
+
+def test_margin_uses_the_minus_sign():
+    assert v.fmt_margin(0.485) == "48.5%"
+    assert v.fmt_margin(-0.04) == "−4.0%" and "-" not in v.fmt_margin(-0.04)
+    assert v.fmt_margin(-0.0004) == "0.0%"           # rounds to zero: no sign
+    assert v.fmt_margin(None) == "—"
+    assert v.display_row(row(margin=-0.25), {}, False)["margin"] == "−25.0%"
 
 
 def test_zero_profit_per_day_is_hidden_too():

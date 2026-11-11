@@ -10,12 +10,22 @@
    the page script enables the hidden losers=show input when the box is
    unticked (before htmx reads the form), so a first load, which sends no
    losers parameter, hides them by default. The sort buttons set the hidden
-   sort / dir and fire the form's change.
+   sort / dir and fire the form's change. The form carries
+   hx-sync="#hs-result:replace", as does the status line's loader: the newest
+   request for #hs-result aborts the one in flight, so a second change made
+   while the first is loading is sent (with both in the form) and a slower,
+   older reply never lands on top. Sort buttons and filter controls keep
+   fixed ids, so htmx gives focus back to the same control after the swap.
 
    Rescan and "retry these" sit OUTSIDE #hs-filters (a POST also sends the
    form it is in) and send the page's #hs-form with this result's list
-   pinned by hx-vals. They opt out of the ISS-007 pill, which would replace
-   their labels; the page script says when a start fails.
+   pinned by hx-vals. Like every status requester they target the page's
+   #hs-status-box (innerHTML, newest wins). They opt out of the ISS-007
+   pill, which would replace their labels; the page script writes a failed
+   start into the message beside the button pressed (data-msg).
+
+   #hs-done is the finished line, the status while this result shows; its
+   data-kind / data-ref tell the page script which list's result is showing.
 
    "Add all to watchlist" (under the counts, when the user has a list and the
    result has priced rows) is outside #hs-filters too, whose change would
@@ -39,24 +49,26 @@
 {% macro sort_th(key, label, left=False) -%}
 {% set on = view['sort'] == key %}
 <th scope="col"{% if left %} class="hs-l"{% endif %}
-    {%- if on %} aria-sort="{{ 'descending' if view['direction'] == 'desc' else 'ascending' }}"{% endif %}><button type="button" class="hs-sort{% if on %} is-on{% endif %}" data-sort="{{ key }}">{{ label }}{% if on %} <span aria-hidden="true">{{ '▼' if view['direction'] == 'desc' else '▲' }}</span>{% endif %}</button></th>
+    {%- if on %} aria-sort="{{ 'descending' if view['direction'] == 'desc' else 'ascending' }}"{% endif %}><button type="button" id="hs-sort-{{ key }}" class="hs-sort{% if on %} is-on{% endif %}" data-sort="{{ key }}">{{ label }}{% if on %} <span aria-hidden="true">{{ '▼' if view['direction'] == 'desc' else '▲' }}</span>{% endif %}</button></th>
 {%- endmacro %}
-{% macro start_button(label, cls) -%}
+{% macro start_button(label, cls, msg) -%}
 <button type="button" class="{{ cls }} hs-start" hx-post="/market/hub-scan/start"
-        hx-include="#hs-form" hx-vals='{{ list_vals }}' hx-target="#hs-status"
-        hx-swap="outerHTML" data-htmx-no-error="1">{{ label }}</button>
+        hx-include="#hs-form" hx-vals='{{ list_vals }}' hx-target="#hs-status-box"
+        hx-swap="innerHTML" hx-sync="#hs-status-box:replace" data-msg="{{ msg }}"
+        data-htmx-no-error="1">{{ label }}</button>
 {%- endmacro %}
 
-<div class="hs-done">
+<div id="hs-done" class="hs-done" data-kind="{{ kind }}" data-ref="{{ ref }}">
     <span><b class="hs-label">{{ result['label'] }}</b> — scanned {{ scanned }} EVE time · {{ result['rows']|length }} item{{ '' if result['rows']|length == 1 else 's' }}</span>
     {% if result['status'] == 'incomplete' %}<span class="hs-neg">incomplete: {{ result['item_scanned'] }} of {{ [result['item_total'], scan_cap]|min }} scanned</span>{% endif %}
-    {{ start_button('Rescan', 'b-btn is-ghost') }}
+    {{ start_button('Rescan', 'b-btn is-ghost', 'hs-rescan-msg') }}
+    <span id="hs-rescan-msg" class="hs-neg" role="status"></span>
 </div>
 {% for note in result['notes'] %}<div class="hs-note">{{ note }}</div>{% endfor %}
 {% if view['routes_note'] %}<div class="hs-note">{{ view['routes_note'] }}</div>{% endif %}
 
 <form id="hs-filters" class="hs-filters" hx-get="/market/hub-scan/result" hx-trigger="change"
-      hx-target="#hs-result" hx-swap="innerHTML">
+      hx-target="#hs-result" hx-swap="innerHTML" hx-sync="#hs-result:replace">
     <input type="hidden" name="kind" value="{{ kind }}">
     <input type="hidden" name="ref" value="{{ ref }}">
     <input type="hidden" name="sort" value="{{ view['sort'] }}">
@@ -74,7 +86,7 @@
         </select></label>
     <input type="hidden" id="hs-losers-off" name="losers" value="show"{% if filters['hide_losers'] %} disabled{% endif %}>
     <label class="hs-chk"><input type="checkbox" class="b-check" id="hs-losers"{% if filters['hide_losers'] %} checked{% endif %}> Hide items with no profit per day</label>
-    <label class="hs-chk"><input type="checkbox" class="b-check" name="under" value="1"{% if filters['under_only'] %} checked{% endif %}> Under-supplied only</label>
+    <label class="hs-chk"><input type="checkbox" class="b-check" id="hs-f-under" name="under" value="1"{% if filters['under_only'] %} checked{% endif %}> Under-supplied only</label>
 </form>
 
 {% if view['rows'] %}
@@ -120,7 +132,7 @@
 <div class="hs-cards m-only">
     {% for r in view['rows'] %}
     <div class="hs-card">
-        <div class="hs-ctop"><a class="hs-item" href="{{ r['link'] }}">{{ r['name'] }}</a><span class="hs-big{{ sign(r['profit_day_sign']) }}">{{ r['profit_day'] }} / day</span></div>
+        <div class="hs-ctop"><a class="hs-item" href="{{ r['link'] }}">{{ r['name'] }}</a><span class="hs-big{{ sign(r['profit_day_sign']) }}">{{ r['profit_day'] }}{% if r['has_profit_day'] %} / day{% endif %}</span></div>
         <div class="hs-cline">{{ r['hub'] }} {{ tags(r) }}</div>
         <div class="hs-cline"><span class="hs-src hs-src-{{ r['source'] }}">{{ r['source_text'] }}</span>{{ copy_mark(r) }} {{ r['cost'] }} → sells {{ r['price'] }}{% if r['price_flag'] %} <small class="hs-mut">({{ r['price_flag'] }})</small>{% endif %}</div>
         <div class="hs-grid">
@@ -139,11 +151,13 @@
 <div class="b-empty">{% if c['ok'] %}Nothing to show with these filters.{% else %}No item in this scan has figures to show.{% endif %}</div>
 {% endif %}
 
-<div class="hs-counts">Showing {{ c['shown'] }} of {{ c['ok'] }}
+{# Every row of the scan is in N, and the parts add up to it (scan_view.build). #}
+<div class="hs-counts">Showing {{ c['shown'] }} of {{ c['total'] }}
     {%- if c['hidden'] %} · {{ c['hidden'] }} hidden: lose money or no sales this week{% endif %}
+    {%- if c['filtered'] %} · {{ c['filtered'] }} filtered out{% endif %}
     {%- if c['no_sales'] %} · {{ c['no_sales'] }} skipped: no recent sales{% endif %}
     {%- if c['no_cost'] %} · {{ c['no_cost'] }} skipped: no cost{% endif %}
-    {%- if c['unavailable'] %} · {{ c['unavailable'] }} unavailable ({{ start_button('retry these', 'hs-linkbtn') }}){% endif %}
+    {%- if c['unavailable'] %} · {{ c['unavailable'] }} unavailable ({{ start_button('retry these', 'hs-linkbtn', 'hs-retry-msg') }}) <span id="hs-retry-msg" class="hs-neg" role="status"></span>{% endif %}
 </div>
 {% if watchlists and view['type_ids'] %}
 <div class="hs-addall">

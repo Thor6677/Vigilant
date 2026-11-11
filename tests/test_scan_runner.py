@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.db.models import Base, User
+from app.db.models import Base, MarketWatchlist, User
 from app.esi.market import APPRAISAL_HUBS
 from app.market import hub_cost, hub_route, scan_lists, scan_results, scan_runner
 
@@ -276,6 +276,62 @@ def test_missing_list_fails_without_saving(env, monkeypatch):
     job, result = _run(_scan_and_load(env))
     assert (job.state, job.message) == ("failed", "That list no longer exists.")
     assert result is None
+
+
+async def _add_watchlist(env, user_id, name="Sample List"):
+    async with env.factory() as db:
+        wl = MarketWatchlist(user_id=user_id, name=name, created_at=datetime(2026, 11, 1))
+        db.add(wl)
+        await db.commit()
+        return wl.id
+
+
+def test_a_watchlist_scan_saves_while_the_list_exists(env):
+    """The control for the test below: the check before saving lets a list
+    that is still there (and the user's) through."""
+    async def go():
+        wid = await _add_watchlist(env, 91)
+        return await _scan_and_load(env, kind="watchlist", ref=wid)
+    job, result = _run(go())
+    assert job.state == "done" and result is not None and len(result["rows"]) == 3
+
+
+def test_a_watchlist_deleted_mid_scan_gets_no_result(env):
+    async def go():
+        scan_runner.reset()
+        wid = await _add_watchlist(env, 91)
+        env.hold.clear()
+        job = scan_runner.start(91, "watchlist", wid, S)
+        await until(lambda: env.inflight > 0)          # expanded, now fetching
+        async with env.factory() as db:
+            await db.delete(await db.get(MarketWatchlist, wid))
+            await db.commit()
+        env.hold.set()
+        await wait(job)
+        async with env.factory() as db:
+            return job, await scan_results.load(db, 91, "watchlist", wid)
+    job, result = _run(go())
+    assert (job.state, job.message) == ("failed", "That list no longer exists.")
+    assert result is None
+
+
+def test_a_watchlist_now_someone_elses_gets_no_result(env):
+    """watchlists.get checks the owner as well as the id."""
+    async def go():
+        scan_runner.reset()
+        wid = await _add_watchlist(env, 91)
+        env.hold.clear()
+        job = scan_runner.start(91, "watchlist", wid, S)
+        await until(lambda: env.inflight > 0)
+        async with env.factory() as db:
+            (await db.get(MarketWatchlist, wid)).user_id = 92
+            await db.commit()
+        env.hold.set()
+        await wait(job)
+        async with env.factory() as db:
+            return job, await scan_results.load(db, 91, "watchlist", wid)
+    job, result = _run(go())
+    assert job.state == "failed" and result is None
 
 
 def test_cap_note_when_the_list_was_cut(env):

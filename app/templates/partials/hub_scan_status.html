@@ -1,43 +1,73 @@
-{# Hub Scan status line, swapped in by outerHTML (so it always keeps
-   id="hs-status"). Context from app/routes/market_scan.py: job, active, kind,
-   ref, percent, note, count_text, same_list, interrupted.
+{# Hub Scan status line: the CONTENT of the page's #hs-status-box, which is
+   never replaced. Every request that updates it (the 2 s poll, Cancel, Scan,
+   Rescan, "retry these", and the page script's loads) targets the box with
+   innerHTML, so a reply always has somewhere to land: htmx 1.9.12 drops a
+   reply whose target was replaced while it was in flight. There is always
+   exactly one #hs-status, the root here. Context from
+   app/routes/market_scan.py _status_ctx: job, active, kind, ref, percent,
+   note, start_reply, same_list, has_result, count_text, interrupted.
 
-   While a job is queued or running this element polls itself every 2 s; when
-   the job ends the next response has no polling attributes and loads the
-   count and the result into #hs-result. A poll that fails (the app restarting)
-   must not have base.html's ISS-007 pill written over the line, so the
-   polling element opts out (data-htmx-no-error), as do the Cancel buttons,
-   whose label the pill would otherwise replace; the next poll recovers.
-   was=1 tells the server this page was polling: with no job left, the scan
-   was lost to a restart.
+   Newest request wins: each requester carries hx-sync="#hs-status-box:replace",
+   which aborts whatever is in flight on the box and sends the new one. The
+   poll is the exception, on purpose: it carries ":drop", so a tick that lands
+   while Cancel or a start is in flight is skipped instead of aborting the
+   user's request; the user's request still aborts a poll in flight. hx-sync
+   is set on each requester, never on the box: it is inherited, and the box
+   would make every request inside it cancel the others.
 
-   The hidden result loader opts out too (a pill inside a hidden element
-   would say nothing); the page script writes a visible message into
-   #hs-result when it fails. No inline handlers (CSP); the page script owns
-   all behaviour. #}
-<div id="hs-status" class="hs-status"
+   While a job is queued or running #hs-status polls; when the job ends the
+   next reply has no polling attributes (the old element, and its timer, go
+   with the swap) and loads the result into #hs-result. A poll that fails
+   (the app restarting) must not have base.html's ISS-007 pill written over
+   the line, so the polling element opts out (data-htmx-no-error), as do the
+   Cancel buttons, whose label the pill would otherwise replace; the next poll
+   recovers. A 401 or 403 is the session ending: the page script says so in
+   the box, which also stops the poll. was=1 tells the server this page was
+   polling: with no job left, the scan was lost to a restart.
+
+   One status line at a time: idle, the count line is drawn only when the
+   list has no saved result (count_text is empty otherwise); with one, the
+   result's finished line is the status. The hidden result loader is there
+   in every idle state: it also clears #hs-result for a list with no result,
+   and it takes part in #hs-result's newest-wins order (":replace"). It opts
+   out of the pill too (a pill inside a hidden element would say nothing);
+   the page script writes a visible message into #hs-result when it fails.
+
+   A start's reply (start_reply) carries its notes ("Budget used: 100B.")
+   out of band into the page's #hs-start-note, outside the box, so the first
+   poll does not wipe them; the page draws that element, so it exists only
+   once. No inline handlers (CSP); the page script owns all behaviour. #}
+{% macro cancel_button() -%}
+<button type="button" class="b-btn is-ghost hs-cancel" hx-post="/market/hub-scan/cancel"
+        hx-target="#hs-status-box" hx-swap="innerHTML" hx-sync="#hs-status-box:replace"
+        data-htmx-no-error="1">Cancel</button>
+{%- endmacro %}
+{# Nothing visible (idle, a saved result showing, nothing to report): no margin. #}
+{% set blank = not active and not interrupted and not count_text
+               and not (same_list and job.state in ('failed', 'cancelled')) %}
+<div id="hs-status" class="hs-status{% if blank %} is-blank{% endif %}"
      {%- if active %} hx-get="/market/hub-scan/status?kind={{ kind }}&amp;ref={{ ref }}&amp;was=1"
-     hx-trigger="every 2s" hx-swap="outerHTML" data-htmx-no-error="1"{% endif %}>
-  {% if note %}<span class="hs-note-inline">{{ note }}</span>{% endif %}
+     hx-trigger="every 2s" hx-target="#hs-status-box" hx-swap="innerHTML"
+     hx-sync="#hs-status-box:drop" data-htmx-no-error="1"{% endif %}>
   {% if active and job.state == 'queued' %}
     <span>Queued: two scans are already running. Yours starts when one finishes.</span>
-    <button type="button" class="b-btn is-ghost hs-cancel" hx-post="/market/hub-scan/cancel"
-            hx-target="#hs-status" hx-swap="outerHTML" data-htmx-no-error="1">Cancel</button>
+    {{ cancel_button() }}
   {% elif active %}
+    {% set progress = job.done ~ ' of ' ~ job.total ~ ' items' if job.total else 'Reading the list' %}
     <span>Scanning{% if job.label %} {{ job.label }}{% endif %}</span>
     <div class="hs-bar" role="progressbar" aria-label="Scan progress" aria-valuemin="0"
-         aria-valuemax="100" aria-valuenow="{{ percent }}"><i style="width:{{ percent }}%"></i></div>
-    <span>{% if job.total %}{{ job.done }} of {{ job.total }} items{% else %}Reading the list…{% endif %}</span>
-    <button type="button" class="b-btn is-ghost hs-cancel" hx-post="/market/hub-scan/cancel"
-            hx-target="#hs-status" hx-swap="outerHTML" data-htmx-no-error="1">Cancel</button>
+         aria-valuemax="100" aria-valuenow="{{ percent }}" aria-valuetext="{{ progress }}"><i style="width:{{ percent }}%"></i></div>
+    <span>{% if job.total %}{{ progress }}{% else %}Reading the list…{% endif %}</span>
+    {{ cancel_button() }}
   {% else %}
     {% if interrupted %}<span class="hs-neg">The scan was interrupted. Scan again.</span>
     {% elif same_list and job.state == 'failed' %}<span class="hs-neg">{{ job.message }}</span>
     {% elif same_list and job.state == 'cancelled' %}<span>Scan cancelled.</span>{% endif %}
-    {% if count_text %}<span id="hs-count">{{ count_text }}</span>
-    {% else %}<span id="hs-count" hx-get="/market/hub-scan/count?kind={{ kind }}&amp;ref={{ ref }}"
-          hx-trigger="load" hx-swap="innerHTML"></span>{% endif %}
+    {% if count_text %}<span id="hs-count">{{ count_text }}</span>{% endif %}
     <div hidden class="hs-loader" hx-get="/market/hub-scan/result?kind={{ kind }}&amp;ref={{ ref }}"
-         hx-trigger="load" hx-target="#hs-result" hx-swap="innerHTML" data-htmx-no-error="1"></div>
+         hx-trigger="load" hx-target="#hs-result" hx-swap="innerHTML"
+         hx-sync="#hs-result:replace" data-htmx-no-error="1"></div>
   {% endif %}
 </div>
+{# innerHTML, so the page's live region (role="status") stays the same element. #}
+{% if start_reply %}<div id="hs-start-note" hx-swap-oob="innerHTML">{{ note }}</div>{% endif %}

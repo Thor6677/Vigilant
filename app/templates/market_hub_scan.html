@@ -13,10 +13,25 @@
 {% block content %}
 {# Market → Hub Scan (app/routes/market_scan.py). The form makes no request
    of its own: the Scan button posts it, and the page script asks for a new
-   status line when the list changes. #hs-status (partials/hub_scan_status.html)
-   polls while a scan runs and loads the result (partials/hub_scan_result.html)
-   into #hs-result when it ends. All behaviour is in the script at the foot of
-   this page; the fragments carry none (and no inline handlers: CSP).
+   status line when the list changes. The status line
+   (partials/hub_scan_status.html, root #hs-status) is the content of
+   #hs-status-box; it polls while a scan runs and loads the result
+   (partials/hub_scan_result.html) into #hs-result when it ends. All
+   behaviour is in the script at the foot of this page; the fragments carry
+   none (and no inline handlers: CSP).
+
+   Requests overlap (a pick then Scan at once, two picks, two filter
+   changes), and htmx 1.9.12 drops a reply whose target was replaced while
+   it was in flight. So every update goes into a container that is never
+   replaced: #hs-status-box, #hs-result and #hs-wl-box, all innerHTML. For
+   the status box and #hs-result the newest request wins: requesters carry
+   hx-sync="<box>:replace", which aborts the one in flight (never on the box
+   itself: hx-sync is inherited); the 2 s poll carries ":drop" instead, so a
+   tick never aborts the user's own request. A list picked reloads the
+   manager newest-first too; the manager's own edits are not synced, so two
+   quick edits both go through. The page script's loads come from
+   #hs-status-src and #hs-wl-src, which exist only to carry that hx-sync and
+   the error-pill opt-out (htmx.ajax reads both from its `source`).
 
    The Watchlist kind has a picker in the form (partials/hub_scan_wl_pick.html)
    and the manager below the form (partials/hub_scan_watchlist.html), which
@@ -68,9 +83,14 @@
     .bft-empty { font-size:10px; color:var(--muted); padding:6px; }
 
     .hs-status { display:flex; flex-wrap:wrap; gap:0.6rem 1rem; align-items:center; margin:1rem 0 0.25rem; font-size:12px; color:var(--muted); }
+    /* Long unbroken text (a 64-character system name, a 60-character list
+       name, a deep category path) wraps at 320px instead of widening the page. */
+    .hs-status > *, .hs-done > *, .hs-wl-head > *, .hs-counts, .hs-msg, .hs-start-note { min-width:0; overflow-wrap:anywhere; }
+    .hs-pick .b-input { max-width:100%; }
+    .hs-start-note:empty { padding:0; }
+    .hs-status.is-blank { margin:0; }
     .hs-bar { flex:1 1 180px; max-width:420px; height:6px; background:var(--surface); border:1px solid var(--border); }
     .hs-bar i { display:block; height:100%; background:var(--accent); }
-    .hs-note-inline { color:var(--text); }
     .hs-done { display:flex; flex-wrap:wrap; gap:0.5rem 1rem; align-items:center; margin:0.75rem 0 0.25rem; font-size:12px; color:var(--muted); }
     .hs-label { color:var(--text); font-weight:600; overflow-wrap:anywhere; }
     .hs-note { font-size:11px; color:var(--muted); padding:0.3rem 0 0; }
@@ -219,10 +239,11 @@
             <span class="hs-fld">
                 <button type="button" id="hs-start" class="b-btn is-primary hs-start"
                         hx-post="/market/hub-scan/start" hx-include="#hs-form"
-                        hx-target="#hs-status" hx-swap="outerHTML"
+                        hx-target="#hs-status-box" hx-swap="innerHTML"
+                        hx-sync="#hs-status-box:replace" data-msg="hs-start-msg"
                         data-htmx-no-error="1">Scan</button>
             </span>
-            <span id="hs-start-msg" class="hs-mut" role="status"></span>
+            <span id="hs-start-msg" class="hs-mut hs-msg" role="status"></span>
         </div>
     </form>
     {# The watchlist manager (partials/hub_scan_watchlist.html): outside the
@@ -234,8 +255,17 @@
 </div>
 
 <div class="hs">
+{# A start's notes ("Budget used: 100B.") arrive here out of band, outside
+   the status box, so the first poll does not wipe them. #}
+<div id="hs-start-note" class="hs-note hs-start-note" role="status"></div>
+<div id="hs-status-box" aria-live="polite">
 {% include "partials/hub_scan_status.html" %}
+</div>
 <div id="hs-result"></div>
+{# Sources for the page script's htmx.ajax loads: never swapped, outside
+   every form, and carrying only hx-sync and the pill opt-out. #}
+<span id="hs-status-src" hidden hx-sync="#hs-status-box:replace" data-htmx-no-error="1"></span>
+<span id="hs-wl-src" hidden hx-sync="#hs-wl-box:replace" data-htmx-no-error="1"></span>
 </div>
 
 <script nonce="{{ request.state.csp_nonce }}">
@@ -251,10 +281,25 @@
         var k = form.querySelector('input[name="kind"]:checked');
         return k ? k.value : 'category';
     }
+    function text(id, value) {
+        var el = document.getElementById(id);
+        if (el) el.textContent = value;
+    }
+    /* htmx.ajax's promise rejects when a newer request aborts it (the
+       ":replace" sync): expected, so not an unhandled rejection. */
+    function quiet(promise) {
+        if (promise && promise.catch) promise.catch(function () {});
+    }
+    /* Both loads come from a source element that carries their hx-sync
+       (newest wins on the box) and the pill opt-out; both go into a box
+       that is never replaced. */
     function showStatus(kind, id) {
         if (!window.htmx) return;
-        htmx.ajax('GET', '/market/hub-scan/status?kind=' + encodeURIComponent(kind) +
-                  '&ref=' + encodeURIComponent(id), {target: '#hs-status', swap: 'outerHTML'});
+        text('hs-start-note', '');
+        quiet(htmx.ajax('GET', '/market/hub-scan/status?kind=' + encodeURIComponent(kind) +
+                        '&ref=' + encodeURIComponent(id),
+                        {source: document.getElementById('hs-status-src'),
+                         target: '#hs-status-box', swap: 'innerHTML'}));
     }
     function showPicker(kind) {
         ['category', 'blueprints', 'watchlist'].forEach(function (k) {
@@ -266,8 +311,9 @@
     }
     function loadManager(id) {
         if (!window.htmx) return;
-        htmx.ajax('GET', '/market/watchlists?id=' + encodeURIComponent(id),
-                  {target: '#hs-watchlists', swap: 'outerHTML'});
+        quiet(htmx.ajax('GET', '/market/watchlists?id=' + encodeURIComponent(id),
+                        {source: document.getElementById('hs-wl-src'),
+                         target: '#hs-wl-box', swap: 'innerHTML'}));
     }
 
     /* Enter in a field must not submit the form. */
@@ -277,13 +323,14 @@
 
     /* (a) The category tree (Build Finder's fragments). */
     function nodePath(btn) {
-        /* "Ships › Frigates › …" from the li.bft-node ancestors; a search
-           result is un-nested and carries its full path already. */
+        /* "Ships › Frigates › …" from the li.bft-node ancestors. A search
+           result is un-nested and carries its full path already, joined
+           with " > " by Build Finder: this page writes " › " everywhere. */
         var names = [];
         var li = btn.closest('li.bft-node');
         while (li) {
             var sel = li.querySelector(':scope > .bft-row > .bft-select');
-            if (sel) names.unshift(sel.dataset.mgName);
+            if (sel) names.unshift(sel.dataset.mgName.split(' > ').join(' › '));
             li = li.parentElement ? li.parentElement.closest('li.bft-node') : null;
         }
         return names.join(' › ');
@@ -364,15 +411,37 @@
         if (off) off.disabled = e.target.checked;
     }, true);
 
-    /* (e) The watchlist manager. After it is swapped in (a reply to any of its
-       buttons, or a reload for the picked list) the form scans the list it
-       shows: data-current goes into ref and the status line is asked for
-       again, which also brings the new item count and that list's result. */
+    /* (e) The watchlist manager, after a reply lands in #hs-wl-box (one of
+       its buttons, or a reload for the picked list). The form scans the
+       list the manager shows: data-current goes into ref. The status line
+       (and with it the result) is asked for again only when the list
+       changed (created, the current one deleted, another one picked), or
+       when its item count changed and no result of it is showing, so the
+       count line is the status. A rename, or an edit under a shown result,
+       leaves the result, its filters and its sort alone; its finished line
+       keeps the old name until the next scan. */
+    function managerState() {
+        var m = document.getElementById('hs-watchlists');
+        return {current: m ? (m.getAttribute('data-current') || '0') : '0',
+                count: m ? (m.getAttribute('data-count') || '0') : '0'};
+    }
+    function resultShowing(kind, id) {
+        var done = document.getElementById('hs-done');
+        return !!(done && done.getAttribute('data-kind') === kind &&
+                  done.getAttribute('data-ref') === id);
+    }
+    var shownManager = managerState();
     document.body.addEventListener('htmx:afterSwap', function (e) {
-        var box = e.target;
-        if (!box || box.id !== 'hs-watchlists' || kindValue() !== 'watchlist') return;
-        ref.value = box.getAttribute('data-current') || '0';
-        showStatus('watchlist', ref.value);
+        if (!e.target || e.target.id !== 'hs-wl-box') return;
+        var was = shownManager;
+        shownManager = managerState();
+        if (kindValue() !== 'watchlist') return;
+        var now = shownManager.current;
+        ref.value = now;
+        if (now !== was.current ||
+                (shownManager.count !== was.count && !resultShowing('watchlist', now))) {
+            showStatus('watchlist', now);
+        }
     });
     /* No form around the manager's fields, so Enter submits nothing; in the
        name fields it presses Create or Rename. */
@@ -396,46 +465,93 @@
         }
     });
 
-    /* Failed requests the site's error pill must not handle: a start button
-       (the pill would replace its label) says so beside Scan, and a result
-       that failed to load says so in #hs-result. The manager's controls say
-       so in its message line (the search in its matches box), and "add all"
-       beside its button. */
+    /* Failed requests the site's error pill must not handle (every one here
+       opts out). A start button (Scan, Rescan, "retry these"; the pill would
+       replace its label) says so in the message beside it (its data-msg),
+       and a result that failed to load says so in #hs-result. A 401 or 403
+       on anything aimed at the status box means the session ended (a 403 is
+       a POST's CSRF check with no session left): the box says so, which also
+       ends the poll. The routes answer a bare 401 (no redirect, so no
+       HX-Redirect), and base.html's only handler is the opted-out pill. A
+       failed poll or Cancel otherwise leaves the line as it is: the next
+       poll recovers. The manager's controls say what failed in its message
+       line (the search in its matches box), and "add all" beside its
+       button. Aborted requests (a newer one replaced them) fire none of
+       these events. */
     function startButton(evt) {
         var el = evt.detail && evt.detail.elt;
-        return el && el.classList && el.classList.contains('hs-start');
+        return el && el.classList && el.classList.contains('hs-start') ? el : null;
     }
-    function say(text) {
-        var line = document.getElementById('hs-start-msg');
-        if (line) line.textContent = text;
+    function startMessage(btn, value) {
+        text(btn.getAttribute('data-msg') || 'hs-start-msg', value);
     }
-    function text(id, value) {
-        var el = document.getElementById(id);
-        if (el) el.textContent = value;
+    function statusRequest(evt) {
+        var target = evt.detail && evt.detail.target;
+        return !!(target && target.id === 'hs-status-box');
+    }
+    /* The box's content becomes one #hs-status line (the poll element, if
+       any, goes with the old content, so the poll stops). */
+    function statusLine(message, link) {
+        var box = document.getElementById('hs-status-box');
+        if (!box) return;
+        var line = document.createElement('div');
+        line.id = 'hs-status';
+        line.className = 'hs-status';
+        var span = document.createElement('span');
+        span.className = 'hs-neg';
+        span.textContent = message;
+        line.appendChild(span);
+        if (link) {
+            var a = document.createElement('a');
+            a.href = '/';
+            a.textContent = link;
+            line.appendChild(a);
+        }
+        box.replaceChildren(line);
     }
     function managerRequest(evt) {
         var el = evt.detail && evt.detail.elt, target = evt.detail && evt.detail.target;
-        return !!((el && el.closest && el.closest('#hs-watchlists')) ||
-                  (target && target.id === 'hs-watchlists'));
+        return !!((el && el.closest && el.closest('#hs-wl-box')) ||
+                  (target && target.id === 'hs-wl-box'));
     }
     function addAll(evt) {
         var el = evt.detail && evt.detail.elt;
         return el && el.classList && el.classList.contains('hs-add-all');
     }
+    function httpStatus(evt) {
+        return evt.detail && evt.detail.xhr ? evt.detail.xhr.status : 0;
+    }
     function failure(evt, what) {
-        var status = evt.detail && evt.detail.xhr ? evt.detail.xhr.status : 0;
-        return status === 404 ? 'That list no longer exists. Refresh the page.' : what;
+        return httpStatus(evt) === 404 ? 'That list no longer exists. Refresh the page.' : what;
     }
     document.body.addEventListener('htmx:beforeRequest', function (e) {
-        if (startButton(e)) say('');
+        var start = startButton(e);
+        if (start) {
+            startMessage(start, '');
+            text('hs-start-note', '');
+        }
         if (addAll(e)) text('hs-add-msg', '');
         var el = e.detail && e.detail.elt;
         if (managerRequest(e) && !(el && el.id === 'hs-wl-q')) text('hs-wl-msg', '');
     });
     ['htmx:responseError', 'htmx:sendError', 'htmx:timeout'].forEach(function (name) {
         document.body.addEventListener(name, function (e) {
-            if (startButton(e)) say('Could not start the scan; try again.');
             var el = e.detail && e.detail.elt;
+            var code = name === 'htmx:responseError' ? httpStatus(e) : 0;
+            var start = startButton(e);
+            if (statusRequest(e) && (code === 401 || code === 403)) {
+                statusLine('Your session has ended. ', 'Sign in again.');
+            } else if (start) {
+                startMessage(start, 'Could not start the scan; try again.');
+            } else if (el && el.id === 'hs-status-src' &&
+                       !document.querySelector('#hs-status[hx-get]')) {
+                /* A list's status did not load: say so rather than leave the
+                   last list's line and result under the new pick. (With a
+                   scan running the poll brings its line back by itself.) */
+                statusLine('Could not load that list; pick it again.');
+                var shown = document.getElementById('hs-result');
+                if (shown) shown.replaceChildren();
+            }
             if (el && el.classList && el.classList.contains('hs-loader')) {
                 var box = document.getElementById('hs-result');
                 if (!box) return;
@@ -453,10 +569,7 @@
                 }
                 /* A reload for a newly picked list failed: the status line
                    still follows the picker, which ref already holds. */
-                var target = e.detail && e.detail.target;
-                if (el && !el.closest('#hs-watchlists') && target && target.id === 'hs-watchlists') {
-                    showStatus('watchlist', ref.value);
-                }
+                if (el && el.id === 'hs-wl-src') showStatus('watchlist', ref.value);
             }
         });
     });

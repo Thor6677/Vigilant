@@ -148,6 +148,16 @@ async def load(db: AsyncSession, user_id: int, kind: str, ref: int,
     return result
 
 
+async def exists(db: AsyncSession, user_id: int, kind: str, ref: int) -> bool:
+    """Whether the user has a saved result for the list. Reads one id only
+    and writes nothing (unlike `load`, which may stamp `opened_at`)."""
+    return (await db.execute(
+        select(MarketScanResult.id).where(MarketScanResult.user_id == user_id,
+                                          MarketScanResult.list_kind == kind,
+                                          MarketScanResult.list_ref == ref).limit(1)
+    )).first() is not None
+
+
 async def delete_for(db: AsyncSession, user_id: int, kind: str, ref: int, *,
                      commit: bool = True) -> None:
     """`commit=False` leaves the delete in the caller's transaction (deleting

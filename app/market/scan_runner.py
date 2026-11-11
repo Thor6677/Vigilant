@@ -15,6 +15,8 @@ A job: expand the list -> benchmark each item -> fill the five summaries per
 item -> retry the items that failed, once -> compute rows -> save. Twenty
 item failures in a row stop it early and save what it has as "incomplete".
 Cancelling, or any unexpected error, saves nothing: the previous result stays.
+A watchlist that is gone (or no longer the user's) by save time fails the job
+with nothing saved.
 
 The semaphore and pacer belong to one event loop; `reset()` rebuilds them and
 `start()` creates them on first use.
@@ -28,7 +30,7 @@ from datetime import datetime, timezone
 
 from app.db.models import AsyncSessionLocal
 from app.esi.market import APPRAISAL_HUBS
-from app.market import hub_cost, hub_route, scan_fetch, scan_lists, scan_results
+from app.market import hub_cost, hub_route, scan_fetch, scan_lists, scan_results, watchlists
 from app.market import lp as market_lp
 from app.sde import lookup as sde
 
@@ -38,6 +40,7 @@ MAX_RUNNING = 2
 ITEMS_AT_ONCE = 4            # items worked on together; the Pacer bounds the requests
 STOP_AFTER_FAILURES = 20
 ACTIVE = ("queued", "running")
+LIST_GONE = "That list no longer exists."
 
 
 @dataclass
@@ -213,7 +216,7 @@ async def _run(job: Job) -> None:
                 try:
                     listing = await scan_lists.expand(db, job.user_id, job.kind, job.ref)
                 except scan_lists.ListNotFound:
-                    job.state, job.message = "failed", "That list no longer exists."
+                    job.state, job.message = "failed", LIST_GONE
                     return
                 job.label, job.total = listing.label, len(listing.type_ids)
                 notes = list(listing.notes)
@@ -253,6 +256,14 @@ async def _run(job: Job) -> None:
                 summaries = await scan_results.load_summaries(db, listing.type_ids)
                 rows = scan_results.compute_rows(summaries, listing.type_ids, listing.names,
                                                  benchmarks, job.settings, failed, _now())
+                # A watchlist deleted while it was being scanned gets no
+                # result saved after the fact. (Deleting cancels a running
+                # scan of the list first; this covers a delete that lands
+                # between that and here.) Checked on the saving session.
+                if (job.kind == "watchlist"
+                        and await watchlists.get(db, job.user_id, job.ref) is None):
+                    job.state, job.message = "failed", LIST_GONE
+                    return
                 await scan_results.save(
                     db, job.user_id, job.kind, job.ref, label=listing.label,
                     status="incomplete" if stopped else "complete",

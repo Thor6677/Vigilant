@@ -40,6 +40,7 @@ the list it was asked about.
 from __future__ import annotations
 
 import logging
+import math
 
 from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -72,18 +73,58 @@ def _has_list(kind: str, ref: int) -> bool:
     return kind == "blueprints" or ref > 0
 
 
-def _status_ctx(job: scan_runner.Job | None, kind: str, ref: int, note: str = "") -> dict:
+async def _count_text(db: AsyncSession, user_id: int, kind: str, ref: int) -> str:
+    """The count line: how many items the list holds, or why that is not known."""
+    if not _has_list(kind, ref):
+        return PICK_A_LIST
+    try:
+        n = await scan_lists.count(db, user_id, kind, ref)
+    except scan_lists.ListNotFound:
+        return scan_runner.LIST_GONE
+    if n is None:
+        return "Your blueprints are counted when the scan starts."
+    if n > scan_lists.CAP:
+        return (f"{n:,} items: the first {scan_lists.CAP} by name will be scanned. "
+                "Pick a narrower list to cover the rest.")
+    return f"{n:,} item{'s' if n != 1 else ''}."
+
+
+async def _status_ctx(db: AsyncSession, user_id: int, job: scan_runner.Job | None,
+                      kind: str, ref: int, note: str = "", start_reply: bool = False) -> dict:
     """While the job is active the line is the job's (and polls with its list);
     otherwise it is the asked-for list's, and a failed or cancelled job is only
-    mentioned for the list it was scanning."""
+    mentioned for the list it was scanning.
+
+    One status line at a time: idle, a list with a saved result has that
+    result's finished line (label, time, count, Rescan) as its status, so the
+    count line is drawn only when there is none. Both are known here, with a
+    one-id read for the result and a COUNT for the list, so the line arrives
+    whole; the polls of an active job touch the database not at all.
+    `start_reply` sends the start's notes (`note`) out of band into the
+    page's #hs-start-note, above the status box: the status line itself is
+    replaced by the first poll, which would wipe them."""
     active = job is not None and job.state in scan_runner.ACTIVE
     if active:
         kind, ref = job.kind, job.ref
-    return {"job": job, "active": active, "kind": kind, "ref": ref, "note": note,
+    has_result = (not active and _has_list(kind, ref)
+                  and await scan_results.exists(db, user_id, kind, ref))
+    return {"job": job, "active": active, "kind": kind, "ref": ref,
+            "note": note, "start_reply": start_reply,
             "same_list": job is not None and (job.kind, job.ref) == (kind, ref),
-            # With no list picked there is nothing to count: say so at once.
-            "count_text": "" if _has_list(kind, ref) else PICK_A_LIST,
+            "has_result": has_result,
+            "count_text": ("" if active or has_result
+                           else await _count_text(db, user_id, kind, ref)),
             "percent": int(job.done * 100 / job.total) if active and job.total else 0}
+
+
+def _as_typed(raw: str, used: float) -> bool:
+    """Whether a number field's text was used as typed (read as the clamps
+    read it): False for blank, junk, and anything clamped."""
+    try:
+        typed = float(raw)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(typed) and typed == used
 
 
 async def _category_path(db: AsyncSession, group_id: int) -> str:
@@ -176,29 +217,20 @@ async def hub_scan_page(request: Request, kind: str = "category", ref: str = "0"
         "origin_name": origin_name,
         "watchlists": lists,
         "manager": manager,
-        **_status_ctx(job, kind, number),
+        **(await _status_ctx(db, user_id, job, kind, number)),
     })
 
 
 @router.get("/market/hub-scan/count", response_class=HTMLResponse)
 async def hub_scan_count(request: Request, kind: str = "category", ref: str = "0",
                          db: AsyncSession = Depends(get_db)):
+    """The count line's text on its own. The status line works it out itself
+    (no second request); this answers the same for any other caller."""
     user_id = request.session.get("user_id")
     if not user_id:
         return HTMLResponse("", status_code=401)
     kind, number = _kind_ref(kind, ref)
-    if not _has_list(kind, number):
-        return HTMLResponse(PICK_A_LIST)
-    try:
-        n = await scan_lists.count(db, user_id, kind, number)
-    except scan_lists.ListNotFound:
-        return HTMLResponse("That list no longer exists.")
-    if n is None:
-        return HTMLResponse("Your blueprints are counted when the scan starts.")
-    if n > scan_lists.CAP:
-        return HTMLResponse(f"{n:,} items: the first {scan_lists.CAP} by name will be "
-                            "scanned. Pick a narrower list to cover the rest.")
-    return HTMLResponse(f"{n:,} item{'s' if n != 1 else ''}.")
+    return HTMLResponse(await _count_text(db, user_id, kind, number))
 
 
 @router.post("/market/hub-scan/start", response_class=HTMLResponse)
@@ -206,37 +238,54 @@ async def hub_scan_start(request: Request, kind: str = Form("category"), ref: st
                          budget: str = Form(""), share: str = Form(""),
                          sales_tax: str = Form(""), broker_fee: str = Form(""),
                          origin: str = Form(""), db: AsyncSession = Depends(get_db)):
+    """A number field not used as typed (blank, unreadable, or clamped) is
+    named in the reply with the value used, as phase 1 does: "Budget used:
+    100B." A blank field falls back to the saved value, so it is named too
+    (FastAPI reads a blank form field as absent; the page always sends
+    every field). The notes go above the status line (see _status_ctx)."""
     user_id = request.session.get("user_id")
     if not user_id:
         return HTMLResponse("", status_code=401)
     kind, number = _kind_ref(kind, ref)
     if not _has_list(kind, number):
         # Nothing starts; the status line says to pick a list (count_text).
-        return templates.TemplateResponse(request, "partials/hub_scan_status.html",
-                                          _status_ctx(scan_runner.get(user_id), kind, number))
+        return templates.TemplateResponse(
+            request, "partials/hub_scan_status.html",
+            await _status_ctx(db, user_id, scan_runner.get(user_id), kind, number,
+                              start_reply=True))
     prefs = await hub_prefs.get_prefs(db, user_id)
-    tax, _ = _fee(sales_tax, prefs.sales_tax_pct)
-    broker, _ = _fee(broker_fee, prefs.broker_fee_pct)
+    tax, tax_adjusted = _fee(sales_tax, prefs.sales_tax_pct)
+    broker, broker_adjusted = _fee(broker_fee, prefs.broker_fee_pct)
     origin_id, origin_name, error = await _resolve_origin(db, origin, None)
-    note = ""
+    typed_budget = hub_view.parse_isk(budget)
+    budget_isk = hub_prefs.clamp_budget(typed_budget, prefs.scan_budget_isk)
+    share_pct = hub_prefs.clamp_share(share, prefs.market_share_pct)
+    notes = []
+    if budget_isk != typed_budget:
+        notes.append(f"Budget used: {scan_view.fmt_budget(budget_isk)}.")
+    if not _as_typed(share, share_pct):
+        notes.append(f"Market share used: {scan_view.fmt_pct(share_pct)}%.")
+    if tax_adjusted:
+        notes.append(hub_view.fee_note("Sales tax", tax))
+    if broker_adjusted:
+        notes.append(hub_view.fee_note("Broker fee", broker))
     if error:
         # Keep the saved system rather than clearing it on a typo, as phase 1 does.
         origin_id, origin_name, _ = await _resolve_origin(db, None, prefs.origin_system_id)
-        note = f"{error} Using your saved starting system." if origin_id else error
-    budget_isk = hub_prefs.clamp_budget(hub_view.parse_isk(budget), prefs.scan_budget_isk)
-    share_pct = hub_prefs.clamp_share(share, prefs.market_share_pct)
+        notes.append(f"{error} Using your saved starting system." if origin_id else error)
     await hub_prefs.save_prefs(db, user_id, tax, broker, origin_id)
     await hub_prefs.save_scan_prefs(db, user_id, budget_isk, share_pct)
     job = scan_runner.start(user_id, kind, number, scan_results.Settings(
         budget_isk, share_pct, tax, broker, origin_id, origin_name))
     if (job.kind, job.ref) != (kind, number):
-        note = "Your other scan is still running; start this one when it ends."
-    return templates.TemplateResponse(request, "partials/hub_scan_status.html",
-                                      _status_ctx(job, kind, number, note))
+        notes = ["Your other scan is still running; start this one when it ends."]
+    return templates.TemplateResponse(
+        request, "partials/hub_scan_status.html",
+        await _status_ctx(db, user_id, job, kind, number, " ".join(notes), start_reply=True))
 
 
 @router.post("/market/hub-scan/cancel", response_class=HTMLResponse)
-async def hub_scan_cancel(request: Request):
+async def hub_scan_cancel(request: Request, db: AsyncSession = Depends(get_db)):
     """Cancelling is asynchronous: the job says "cancelled" once its task
     stops, which the next poll shows."""
     user_id = request.session.get("user_id")
@@ -246,12 +295,12 @@ async def hub_scan_cancel(request: Request):
     job = scan_runner.get(user_id)
     kind, ref = (job.kind, job.ref) if job else ("category", 0)
     return templates.TemplateResponse(request, "partials/hub_scan_status.html",
-                                      _status_ctx(job, kind, ref))
+                                      await _status_ctx(db, user_id, job, kind, ref))
 
 
 @router.get("/market/hub-scan/status", response_class=HTMLResponse)
 async def hub_scan_status(request: Request, kind: str = "category", ref: str = "0",
-                          was: str = ""):
+                          was: str = "", db: AsyncSession = Depends(get_db)):
     """Polled every 2 s while a job is active. `was=1` is sent by a page that
     was polling: with no job left (a restart), it is told the scan was lost."""
     user_id = request.session.get("user_id")
@@ -259,7 +308,7 @@ async def hub_scan_status(request: Request, kind: str = "category", ref: str = "
         return HTMLResponse("", status_code=401)
     kind, number = _kind_ref(kind, ref)
     job = scan_runner.get(user_id)
-    ctx = _status_ctx(job, kind, number)
+    ctx = await _status_ctx(db, user_id, job, kind, number)
     ctx["interrupted"] = job is None and was == "1"
     return templates.TemplateResponse(request, "partials/hub_scan_status.html", ctx)
 

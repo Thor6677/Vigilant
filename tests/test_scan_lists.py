@@ -162,6 +162,42 @@ def test_count_is_none_for_blueprints(factory):
     assert _run(go("category", 10)) == 2
 
 
+def test_category_count_is_a_count_query_matching_expand(factory, monkeypatch):
+    """The same subtree and filters as the expansion, without loading rows;
+    an unknown category still raises."""
+    async def count(ref):
+        async with factory() as db:
+            return await scan_lists.count(db, USER_ID, "category", ref)
+
+    async def expanded_total(ref):
+        async with factory() as db:
+            return (await scan_lists.expand(db, USER_ID, "category", ref)).total
+
+    for ref in (10, 11, 12):
+        assert _run(count(ref)) == _run(expanded_total(ref)), ref
+    assert _run(count(12)) == 1                      # the unpublished type is not counted
+    with pytest.raises(scan_lists.ListNotFound):
+        _run(count(4040))
+
+    # The count never expands the list.
+    async def no_expand(*args, **kwargs):
+        raise AssertionError("count expanded the category")
+    monkeypatch.setattr(scan_lists, "_category", no_expand)
+    assert _run(count(10)) == 2
+    # The cap does not cut the count.
+    monkeypatch.setattr(scan_lists, "CAP", 1)
+    assert _run(count(10)) == 2
+
+
+def test_watchlist_count_still_follows_the_list(factory):
+    async def go(user_id, ref):
+        async with factory() as db:
+            return await scan_lists.count(db, user_id, "watchlist", ref)
+    assert _run(go(USER_ID, 1)) == 1                 # 2004 has no market group
+    with pytest.raises(scan_lists.ListNotFound):
+        _run(go(OTHER_ID, 1))
+
+
 def _add_second_pilot(factory):
     async def go():
         async with factory() as db:

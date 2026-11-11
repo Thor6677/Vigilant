@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import scopes as perms, status as perm_status
@@ -189,9 +189,23 @@ async def expand(db: AsyncSession, user_id: int, kind: str, ref: int) -> Expande
     raise ListNotFound()
 
 
+async def _category_count(db: AsyncSession, group_id: int) -> int:
+    """`_category(...).total` without loading the rows: a COUNT over the same
+    subtree and the same filters."""
+    if not await sde.get_market_group_path(db, group_id):
+        raise ListNotFound()
+    groups = await sde.get_market_group_descendants(db, group_id)
+    return (await db.execute(
+        select(func.count()).select_from(SDEType).where(
+            SDEType.market_group_id.in_(groups), SDEType.published.is_(True))
+    )).scalar() or 0
+
+
 async def count(db: AsyncSession, user_id: int, kind: str, ref: int) -> int | None:
     """Items in the list before the cap, or None for blueprints (only known
-    after asking ESI, which a scan does)."""
+    after asking ESI, which a scan does). Raises ListNotFound as `expand`."""
     if kind == "blueprints":
         return None
+    if kind == "category":
+        return await _category_count(db, ref)
     return (await expand(db, user_id, kind, ref)).total
