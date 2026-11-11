@@ -39,14 +39,16 @@ class Benchmark(NamedTuple):
     copy_only: bool = False     # the blueprint is only obtainable as a copy
 
 
-async def benchmark(db: AsyncSession, product_type_id: int) -> Benchmark:
+async def benchmark(db: AsyncSession, product_type_id: int,
+                    price_map: dict | None = None) -> Benchmark:
     """The benchmark cost per unit and the ME assumed. No cost when the
     product has no manufacturing blueprint (`missing` NO_BLUEPRINT) or a
     material has no price, including when the price list could not be loaded
     and is empty (UNPRICED). With several blueprints for one product, the
     lowest blueprint_type_id that actually has manufacturing materials is
     used. `copy_only` is set when that blueprint has no market group and the
-    product is not invented."""
+    product is not invented. `price_map` is the price list when the caller has
+    already fetched it (a scan fetches it once); None fetches it here."""
     blueprints = (await db.execute(
         select(SDEBlueprintInfo.blueprint_type_id, SDEBlueprintInfo.product_quantity)
         .where(SDEBlueprintInfo.product_type_id == product_type_id)
@@ -71,6 +73,7 @@ async def benchmark(db: AsyncSession, product_type_id: int) -> Benchmark:
         select(SDEType.market_group_id).where(SDEType.type_id == bp.blueprint_type_id)
     )).scalar_one_or_none()
     copy_only = not invented and on_market is None
-    price_map = await market_lp.get_price_map(db)
+    if price_map is None:
+        price_map = await market_lp.get_price_map(db)
     cost = build_cost_per_unit(materials, bp.product_quantity or 1, me, 1.0, 0.0, 1.0, price_map)
     return Benchmark(cost, me, UNPRICED if cost is None else None, copy_only)

@@ -319,3 +319,18 @@ def test_history_fetched_at_reads_the_meta_stamp(session_factory, monkeypatch):
 
     before, after = _run(go())
     assert before is None and after is not None
+
+
+def test_benchmark_with_a_given_price_map_skips_the_fetch(session_factory, monkeypatch):
+    _patch_cost_sources(monkeypatch, {34: 5.0, 35: 20.0})
+    fetched = _benchmark(session_factory)
+
+    async def must_not_fetch(db):
+        raise AssertionError("the price list was fetched")
+    monkeypatch.setattr(hub_cost.market_lp, "get_price_map", must_not_fetch)
+
+    async def go():
+        async with session_factory() as db:
+            return await hub_cost.benchmark(db, PRODUCT, price_map={34: 5.0, 35: 20.0})
+    given = _run(go())
+    assert given.cost == pytest.approx(fetched.cost) == pytest.approx(315.0)

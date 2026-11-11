@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from app.db.models import AsyncSessionLocal
 from app.esi.market import APPRAISAL_HUBS
 from app.market import hub_cost, hub_route, scan_fetch, scan_lists, scan_results
+from app.market import lp as market_lp
 from app.sde import lookup as sde
 
 logger = logging.getLogger(__name__)
@@ -64,7 +65,9 @@ def _now() -> datetime:
 
 
 def reset() -> None:
-    """Forget all jobs and rebuild the shared limits (tests; also safe at startup)."""
+    """Forget all jobs and rebuild the shared limits (tests; also safe at
+    startup). Only call with no jobs running: a running job would keep the old
+    limits and the new ones would not know about it."""
     global _slots, _pacer
     _jobs.clear()
     _slots = asyncio.Semaphore(MAX_RUNNING)
@@ -76,9 +79,13 @@ def get(user_id: int) -> Job | None:
 
 
 def _on_done(job: Job, task: asyncio.Task) -> None:
-    # A task cancelled before its first step never runs its own handler.
-    if task.cancelled() and job.state in ACTIVE:
-        job.state = "cancelled"
+    """Fallback for a task that ended without setting a final state (e.g.
+    cancelled before its first step, so its own handler never ran)."""
+    if job.state in ACTIVE:
+        if task.cancelled():
+            job.state = "cancelled"
+        else:
+            job.state, job.message = "failed", "The scan failed. Scan again."
 
 
 def start(user_id: int, kind: str, ref: int, settings: scan_results.Settings) -> Job:
@@ -93,9 +100,15 @@ def start(user_id: int, kind: str, ref: int, settings: scan_results.Settings) ->
     if _pacer is None:
         _pacer = scan_fetch.Pacer()
     job = Job(user_id, kind, ref, settings)
+    coro = _run(job)
+    try:
+        task = asyncio.create_task(coro)
+    except BaseException:
+        coro.close()
+        raise                       # nothing registered: no job stuck queued
+    job.task = task
+    task.add_done_callback(lambda t: _on_done(job, t))
     _jobs[user_id] = job
-    job.task = asyncio.create_task(_run(job))
-    job.task.add_done_callback(lambda t: _on_done(job, t))
     return job
 
 
@@ -108,19 +121,21 @@ def cancel(user_id: int) -> bool:
 
 
 async def _wait_all(coros) -> list[asyncio.Task]:
-    """Run coroutines together and return the finished tasks. If this task is
-    cancelled the children are cancelled and awaited before it propagates, so
-    none is left running (a bare gather(return_exceptions=True) does not
-    promise that)."""
+    """Run coroutines together and return the finished tasks. Every child is
+    finished, and its exception retrieved, before this returns or propagates:
+    if this task is cancelled the unfinished children are cancelled and
+    awaited, and children that had already failed are read so Python does not
+    log "Task exception was never retrieved". (A plain gather also waits for
+    cancelled children on current Python; the point here is retrieval and the
+    guarantee that no child outlives the job.)"""
     tasks = [asyncio.ensure_future(c) for c in coros]
     try:
         await asyncio.wait(tasks)
     finally:
-        pending = [t for t in tasks if not t.done()]
-        for t in pending:
-            t.cancel()
-        if pending:
-            await asyncio.gather(*pending, return_exceptions=True)
+        for t in tasks:
+            if not t.done():
+                t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
     if any(t.cancelled() for t in tasks):
         raise asyncio.CancelledError()
     return tasks
@@ -144,6 +159,7 @@ async def _fill(job: Job | None, type_ids: list[int]) -> tuple[set[int], bool]:
     `job` is given (the main pass; the retry pass passes None)."""
     failed: set[int] = set()
     streak = 0
+    stop = False
 
     async def item(type_id: int) -> None:
         try:
@@ -163,7 +179,9 @@ async def _fill(job: Job | None, type_ids: list[int]) -> tuple[set[int], bool]:
                 logger.info("hub scan: item %s failed: %s", type_id, err)
                 failed.add(type_id)
                 streak += 1
-        if streak >= STOP_AFTER_FAILURES:
+                if streak >= STOP_AFTER_FAILURES:
+                    stop = True      # consecutive in list order, checked per item
+        if stop:
             failed.update(type_ids[i + ITEMS_AT_ONCE:])
             return failed, True
     return failed, False
@@ -194,29 +212,34 @@ async def _run(job: Job) -> None:
                 if listing.total > len(listing.type_ids):
                     notes.append(f"{len(listing.type_ids)} of {listing.total} scanned; "
                                  "pick a narrower list to cover the rest.")
+                # Once per scan; {} when EVE's list could not be fetched.
+                price_map = await market_lp.get_price_map(db)
+                if not price_map:
+                    notes.append("EVE's price list was unavailable, so build costs are missing.")
                 benchmarks = {}
                 for type_id in listing.type_ids:
                     try:
-                        benchmarks[type_id] = await hub_cost.benchmark(db, type_id)
+                        benchmarks[type_id] = await hub_cost.benchmark(
+                            db, type_id, price_map=price_map)
                     except Exception:
                         # One bad lookup is one item without a build cost.
                         logger.warning("hub scan: benchmark failed for %s", type_id,
                                        exc_info=True)
                         await db.rollback()
-                if benchmarks and all(b.missing == hub_cost.UNPRICED
-                                      for b in benchmarks.values()):
-                    notes.append("EVE's price list was unavailable, so build costs are missing.")
                 try:
                     routes = await _routes(db, job.settings)
                 except Exception:
                     logger.warning("hub scan: routes failed", exc_info=True)
                     await db.rollback()
-                    routes = {}
+                    # {} means no starting system; with one set, say it failed.
+                    routes = ({} if job.settings.origin_system_id is None else
+                              {k: hub_route.UNAVAILABLE for k in APPRAISAL_HUBS})
 
             failed, stopped = await _fill(job, listing.type_ids)
             if failed and not stopped:
                 # One more try for the ones that failed, without advancing progress.
-                failed, _ = await _fill(None, [t for t in listing.type_ids if t in failed])
+                failed, stopped = await _fill(
+                    None, [t for t in listing.type_ids if t in failed])
 
             async with AsyncSessionLocal() as db:
                 summaries = await scan_results.load_summaries(db, listing.type_ids)
@@ -229,9 +252,10 @@ async def _run(job: Job) -> None:
                     item_scanned=len(listing.type_ids) - len(failed),
                     settings=job.settings, notes=notes, routes=routes, rows=rows,
                     now=_now())
-            job.state = "done"
+                job.state = "done"      # saved: a cancel after this keeps the result
     except asyncio.CancelledError:
-        job.state = "cancelled"
+        if job.state != "done":
+            job.state = "cancelled"
         raise
     except Exception:
         logger.exception("hub scan: job for user %s failed", job.user_id)

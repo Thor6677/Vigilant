@@ -1,13 +1,17 @@
 """Hub Scan runner: queueing, retry, early stop, cancel, failure handling."""
 import asyncio
+import gc
 import tempfile
+from collections import Counter
+from dataclasses import replace
 from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db.models import Base, User
-from app.market import hub_cost, scan_lists, scan_results, scan_runner
+from app.esi.market import APPRAISAL_HUBS
+from app.market import hub_cost, hub_route, scan_lists, scan_results, scan_runner
 
 NOW = datetime(2026, 11, 11, 12, 0, tzinfo=timezone.utc)
 S = scan_results.Settings(5e8, 20, 3.37, 1.5)
@@ -49,6 +53,13 @@ class Env:
         self.seen = set()
         self.fail_once = set()
         self.fail_always = set()
+        self.fail_now_region = None      # one hub's call raises at once, ignoring `hold`
+        self.per_item = Counter()
+        self.pacers = []
+        self.price_map = {34: 1.0}
+        self.price_calls = 0
+        self.bench = hub_cost.Benchmark(100.0, 10)
+        self.bench_maps = []
         self.bench_raises = set()
         self._failed = set()
         self._hold = None
@@ -87,16 +98,25 @@ def env(monkeypatch):
         return scan_lists.Expanded("Sample", ids, {i: f"Item {i}" for i in ids},
                                    e.total if e.total is not None else len(ids))
 
-    async def benchmark(db, type_id):
+    async def get_price_map(db):
+        e.price_calls += 1
+        return e.price_map
+
+    async def benchmark(db, type_id, price_map=None):
+        e.bench_maps.append(price_map)
         if type_id in e.bench_raises:
             raise RuntimeError("bad lookup")
-        return hub_cost.Benchmark(100.0, 10)
+        return e.bench
 
     async def ensure_summary(db, region_id, station_id, type_id, now, pacer):
         e.calls += 1
         e.seen.add(type_id)
+        e.per_item[type_id] += 1
+        e.pacers.append(pacer)
         e.inflight += 1
         try:
+            if region_id == e.fail_now_region:
+                raise RuntimeError("fast failure")
             await e.hold.wait()
             if type_id in e.fail_always:
                 raise RuntimeError("upstream down")
@@ -105,11 +125,13 @@ def env(monkeypatch):
                 raise RuntimeError("blip")
             return 0
         finally:
+            await asyncio.sleep(0)       # a suspension point, so cleanup ordering is real
             e.inflight -= 1
 
     monkeypatch.setattr(scan_runner, "AsyncSessionLocal", factory)
     monkeypatch.setattr(scan_runner.scan_lists, "expand", expand)
     monkeypatch.setattr(scan_runner.hub_cost, "benchmark", benchmark)
+    monkeypatch.setattr(scan_runner.market_lp, "get_price_map", get_price_map)
     monkeypatch.setattr(scan_runner.scan_fetch, "ensure_summary", ensure_summary)
     monkeypatch.setattr(scan_runner, "_now", lambda: NOW)
     # No limits from an earlier loop; start() rebuilds them on this one.
@@ -141,12 +163,31 @@ def test_start_returns_the_running_job(env):
         scan_runner.reset()
         env.hold.clear()
         first = scan_runner.start(91, "category", 10, S)
-        second = scan_runner.start(91, "blueprints", 0, S)
+        queued_same = scan_runner.start(91, "blueprints", 0, S)       # still queued
+        await until(lambda: first.state == "running")
+        running_same = scan_runner.start(91, "blueprints", 0, S)      # actually running
         env.hold.set()
         await wait(first)
-        return first, second
-    first, second = _run(go())
-    assert first is second
+        return first, queued_same, running_same
+    first, queued_same, running_same = _run(go())
+    assert first is queued_same and first is running_same
+
+
+def test_start_returns_the_queued_job(env):
+    async def go():
+        scan_runner.reset()
+        env.hold.clear()
+        a = scan_runner.start(91, "category", 10, S)
+        b = scan_runner.start(92, "category", 10, S)
+        c = scan_runner.start(93, "category", 10, S)
+        await until(lambda: (a.state, b.state, c.state) == ("running", "running", "queued"))
+        again = scan_runner.start(93, "blueprints", 0, S)
+        env.hold.set()
+        for j in (a, b, c):
+            await wait(j)
+        return c, again
+    c, again = _run(go())
+    assert c is again
 
 
 def test_third_job_queues_until_a_slot_frees(env):
@@ -171,6 +212,8 @@ def test_failed_item_is_retried_once(env):
     assert all(r["status"] != "unavailable" for r in result["rows"])
     assert result["item_scanned"] == 3
     assert job.done == 3                            # the retry pass adds no progress
+    assert env.calls == 3 * 5 + 5                   # the failed item's five hubs again
+    assert env.per_item[2002] == 10 and env.per_item[2001] == 5
 
 
 def test_item_that_keeps_failing_is_unavailable(env):
@@ -178,6 +221,8 @@ def test_item_that_keeps_failing_is_unavailable(env):
     job, result = _run(_scan_and_load(env))
     assert [r["status"] for r in result["rows"]].count("unavailable") == 1
     assert result["status"] == "complete" and result["item_scanned"] == 2
+    assert env.per_item[2002] == 2 * 5              # attempted exactly twice
+    assert env.calls == 2 * 5 + 2 * 5
 
 
 def test_twenty_failures_in_a_row_stop_the_scan(env):
@@ -245,3 +290,249 @@ def test_a_benchmark_error_costs_only_that_item(env):
     assert job.state == "done" and result["status"] == "complete"
     assert len(result["rows"]) == 3
     assert result["item_scanned"] == 3
+
+
+# ---- price list: once per scan ----
+
+def test_the_price_list_is_fetched_once_per_scan(env):
+    env.ids = [2001, 2002, 2003, 2004]
+    job, result = _run(_scan_and_load(env))
+    assert env.price_calls == 1
+    assert len(env.bench_maps) == 4 and all(m is env.price_map for m in env.bench_maps)
+    assert not any("price list" in n for n in result["notes"])
+
+
+def test_an_empty_price_list_adds_the_note(env):
+    env.price_map = {}
+    job, result = _run(_scan_and_load(env))
+    assert "EVE's price list was unavailable, so build costs are missing." in result["notes"]
+    assert env.price_calls == 1
+
+
+def test_items_without_blueprints_do_not_add_the_price_note(env):
+    env.bench = hub_cost.Benchmark(None, 10, hub_cost.NO_BLUEPRINT)
+    job, result = _run(_scan_and_load(env))
+    assert not any("price list" in n for n in result["notes"])
+
+
+# ---- failure streak ----
+
+def test_a_run_of_twenty_inside_one_chunk_is_not_reset_by_a_later_success(env, monkeypatch):
+    monkeypatch.setattr(scan_runner, "ITEMS_AT_ONCE", 6)     # items 19-24 share a chunk
+    env.ids = list(range(3000, 3024))
+    env.fail_always = set(env.ids[:20])                     # 21st succeeds, in the 20th's chunk
+    job, result = _run(_scan_and_load(env))
+    assert result["status"] == "incomplete"
+    assert env.items_attempted == 24                        # the chunk finished; no retry pass
+    assert env.per_item[3000] == 5
+
+
+def test_successes_then_twenty_failures_keep_the_successful_rows(env):
+    env.ids = list(range(3000, 3040))
+    env.fail_always = set(env.ids[8:])                      # 8 ok, then 32 failing
+    job, result = _run(_scan_and_load(env))
+    assert result["status"] == "incomplete"
+    assert result["item_total"] == 40 and result["item_scanned"] == 8
+    by_id = {r["type_id"]: r["status"] for r in result["rows"]}
+    assert all(by_id[i] != "unavailable" for i in env.ids[:8])
+    assert all(by_id[i] == "unavailable" for i in env.ids[8:])
+    assert env.items_attempted == 28                        # 8 ok + 20 failing, in chunks of 4
+
+
+def test_nineteen_failures_then_a_success_never_stop_the_scan(env):
+    env.ids = list(range(3000, 3030))
+    env.fail_once = set(env.ids[:19]) | set(env.ids[20:25])  # 19 fail, one ok, then more fail
+    job, result = _run(_scan_and_load(env))
+    assert result["status"] == "complete"
+    assert result["item_scanned"] == 30
+    assert all(r["status"] != "unavailable" for r in result["rows"])
+
+
+def test_the_retry_pass_can_stop_early_too(env):
+    env.ids = list(range(3000, 3040))
+    # 19 failing, one ok, 19 failing, one ok: never 20 in a row in the main pass,
+    # but the 38 retried items fail again and are 20+ in a row.
+    ok = {env.ids[19], env.ids[39]}
+    env.fail_always = set(env.ids) - ok
+    job, result = _run(_scan_and_load(env))
+    assert result["status"] == "incomplete"
+    assert result["item_scanned"] == 2
+
+
+# ---- routes ----
+
+def test_a_routes_failure_marks_every_hub_unavailable_with_a_start_system(env, monkeypatch):
+    async def boom(db, settings):
+        raise RuntimeError("planner down")
+    monkeypatch.setattr(scan_runner, "_routes", boom)
+    scan_runner.reset()
+    with_origin = replace(S, origin_system_id=30000142, origin_name="Somewhere")
+    async def go():
+        job = scan_runner.start(91, "category", 10, with_origin)
+        await wait(job)
+        async with env.factory() as db:
+            return await scan_results.load(db, 91, "category", 10)
+    result = _run(go())
+    assert result["routes"] == {k: hub_route.UNAVAILABLE for k in APPRAISAL_HUBS}
+
+
+def test_a_routes_failure_with_no_start_system_stays_empty(env, monkeypatch):
+    async def boom(db, settings):
+        raise RuntimeError("planner down")
+    monkeypatch.setattr(scan_runner, "_routes", boom)
+    job, result = _run(_scan_and_load(env))
+    assert result["routes"] == {}
+
+
+# ---- cancel, errors, bookkeeping ----
+
+def test_a_cancel_right_after_the_save_keeps_the_job_done(env, monkeypatch):
+    real_save = scan_results.save
+
+    async def save_then_cancel(*a, **kw):
+        await real_save(*a, **kw)
+        assert scan_runner.cancel(91) is True      # lands at the next suspension
+    monkeypatch.setattr(scan_runner.scan_results, "save", save_then_cancel)
+    job, result = _run(_scan_and_load(env))
+    assert job.state == "done"
+    assert result is not None and result["status"] == "complete"
+
+
+def test_a_failed_child_is_retrieved_when_the_job_is_cancelled(env):
+    async def go():
+        loop = asyncio.get_running_loop()
+        contexts = []
+        loop.set_exception_handler(lambda lp, ctx: contexts.append(ctx))
+        scan_runner.reset()
+        env.hold.clear()
+        env.fail_now_region = next(iter(APPRAISAL_HUBS.values()))["region_id"]
+        job = scan_runner.start(91, "category", 10, S)
+        await until(lambda: env.calls == 15 and env.inflight == 12)   # 3 items: 1 failed, 4 held each
+        assert scan_runner.cancel(91) is True
+        await wait(job)
+        state = job.state
+        scan_runner._jobs.clear()       # the job's task keeps its traceback, so the children
+        job.task = None                 # stay reachable until the job is let go
+        del job
+        gc.collect()
+        return state, contexts
+    state, contexts = _run(go())
+    assert state == "cancelled"
+    assert contexts == []
+    assert env.inflight == 0
+
+
+def test_an_unexpected_error_fails_the_job_and_frees_the_slot(env, monkeypatch):
+    real_save = scan_results.save
+    calls = {"n": 0}
+
+    async def flaky(*a, **kw):
+        calls["n"] += 1
+        if calls["n"] in (2, 3):
+            raise RuntimeError("disk full")
+        return await real_save(*a, **kw)
+    monkeypatch.setattr(scan_runner.scan_results, "save", flaky)
+
+    async def go():
+        scan_runner.reset()
+        first = scan_runner.start(91, "category", 10, S)
+        await wait(first)                           # save #1: a good result
+        async with env.factory() as db:
+            before = await scan_results.load(db, 91, "category", 10)
+        bad_a = scan_runner.start(91, "category", 10, S)
+        await wait(bad_a)                           # save #2 raises
+        bad_b = scan_runner.start(92, "category", 10, S)
+        await wait(bad_b)                           # save #3 raises
+        good = scan_runner.start(93, "category", 10, S)
+        await wait(good)                            # both slots were freed
+        async with env.factory() as db:
+            after = await scan_results.load(db, 91, "category", 10)
+        return bad_a, bad_b, good, before, after
+    bad_a, bad_b, good, before, after = _run(go())
+    for bad in (bad_a, bad_b):
+        assert (bad.state, bad.message) == ("failed", "The scan failed. Scan again.")
+    assert good.state == "done"
+    assert after == before                          # the previous result is untouched
+
+
+def test_cancelling_a_queued_job_lets_a_later_one_run(env):
+    async def go():
+        scan_runner.reset()
+        env.hold.clear()
+        a = scan_runner.start(91, "category", 10, S)
+        b = scan_runner.start(92, "category", 10, S)
+        c = scan_runner.start(93, "category", 10, S)
+        await until(lambda: (a.state, b.state, c.state) == ("running", "running", "queued"))
+        assert scan_runner.cancel(93) is True
+        await wait(c)
+        cancelled = c.state
+        env.hold.set()
+        await wait(a)
+        await wait(b)
+        d = scan_runner.start(93, "category", 10, S)
+        await wait(d)
+        return cancelled, a.state, b.state, d.state
+    assert _run(go()) == ("cancelled", "done", "done", "done")
+
+
+def test_cancelling_before_the_task_starts_marks_it_cancelled(env):
+    async def go():
+        scan_runner.reset()
+        job = scan_runner.start(91, "category", 10, S)
+        assert scan_runner.cancel(91) is True       # the task has not taken a step
+        await wait(job)
+        return job.state
+    assert _run(go()) == "cancelled"
+
+
+def test_cancel_on_a_finished_job_returns_false(env):
+    async def go():
+        scan_runner.reset()
+        job = scan_runner.start(91, "category", 10, S)
+        await wait(job)
+        return job.state, scan_runner.cancel(91), scan_runner.cancel(12345)
+    assert _run(go()) == ("done", False, False)
+
+
+def test_two_jobs_share_one_pacer(env):
+    async def go():
+        scan_runner.reset()
+        a = scan_runner.start(91, "category", 10, S)
+        b = scan_runner.start(92, "category", 10, S)
+        await wait(a)
+        await wait(b)
+    _run(go())
+    assert env.pacers and all(p is env.pacers[0] for p in env.pacers)
+
+
+def test_on_done_is_a_fallback_for_a_job_left_unfinished(env):
+    async def go():
+        ok = asyncio.ensure_future(asyncio.sleep(0))
+        await ok
+        stuck = scan_runner.Job(91, "category", 10, S, state="running")
+        scan_runner._on_done(stuck, ok)
+        gone = asyncio.ensure_future(asyncio.sleep(10))
+        gone.cancel()
+        await asyncio.gather(gone, return_exceptions=True)
+        queued = scan_runner.Job(92, "category", 10, S)
+        scan_runner._on_done(queued, gone)
+        finished = scan_runner.Job(93, "category", 10, S, state="done")
+        scan_runner._on_done(finished, gone)
+        return stuck, queued, finished
+    stuck, queued, finished = _run(go())
+    assert (stuck.state, stuck.message) == ("failed", "The scan failed. Scan again.")
+    assert queued.state == "cancelled"
+    assert finished.state == "done"
+
+
+def test_a_task_that_cannot_be_created_leaves_no_job(env):
+    async def go():
+        scan_runner.reset()
+        with pytest.MonkeyPatch.context() as mp:
+            def boom(coro):
+                raise RuntimeError("no task")
+            mp.setattr(scan_runner.asyncio, "create_task", boom)
+            with pytest.raises(RuntimeError):
+                scan_runner.start(91, "category", 10, S)
+        return scan_runner.get(91)
+    assert _run(go()) is None
