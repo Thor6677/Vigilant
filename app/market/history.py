@@ -96,6 +96,19 @@ async def _meta_fresh(db: AsyncSession, region_id: int, type_id: int) -> bool:
     return fetched is not None and (_now() - fetched) < HISTORY_TTL
 
 
+async def fetched_at(db: AsyncSession, region_id: int, type_id: int) -> datetime | None:
+    """When history for this (region, type) was last fetched successfully, or
+    None if it never has been. `get_history` stamps the meta row even when ESI
+    returns zero rows, so None means "could not load", not "never traded"."""
+    stamp = (await db.execute(
+        select(MarketHistoryMeta.fetched_at).where(
+            MarketHistoryMeta.region_id == region_id,
+            MarketHistoryMeta.type_id == type_id,
+        )
+    )).scalar_one_or_none()
+    return _aware(stamp)
+
+
 async def _upsert(db: AsyncSession, region_id: int, type_id: int, raw: list[dict]) -> None:
     """Idempotent upsert of history rows + a fresh meta stamp.
 

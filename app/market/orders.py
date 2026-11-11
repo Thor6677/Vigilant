@@ -102,6 +102,14 @@ async def get_orders(region_id: int, type_id: int) -> list[dict]:
         return data
 
 
+def fetched_at(region_id: int, type_id: int) -> datetime | None:
+    """When this (region, type) was last fetched successfully, or None if it
+    never has been. `get_orders` returns [] both for "no orders" and for "the
+    fetch failed with nothing cached"; this tells the two apart."""
+    cached = _cache.get((region_id, type_id))
+    return cached[0] if cached is not None else None
+
+
 def build_order_book(orders: list[dict]) -> dict:
     """Pure transform: raw ESI orders → the depth-capped book + spread stats.
 
