@@ -16,7 +16,20 @@ sell levels within the 10% stock band, for the Jita haul walk).
 
 `ensure_summary` refreshes whichever part is stale. It reuses fresh rows from
 `market_history` when the item has been viewed, and NEVER writes that table.
-Fetch errors propagate: the runner counts them.
+Fetch errors propagate: the runner counts them. The history part is committed
+before the orders fetch starts, so a failed orders fetch does not throw away a
+good history fetch.
+
+Writes are SQLite upserts touching only the columns of the part just fetched,
+and `ensure_summary` is single-flight per (region, type) within the process: an
+`asyncio.Lock` per key, held across the freshness check, the fetches and the
+write, with the row re-read after the lock is taken so a second caller finds the
+parts fresh. The lock table holds an entry only while someone uses or waits on
+it, so it cannot grow.
+
+Known limits: `outliers` counts merged price levels, not orders. Freshness
+stamps are the caller's `now`, so pass the current time on each call rather than
+a time captured at the start of a long scan.
 
 `Pacer` is the project's bulk-fetch rule (three in flight, batches of ten, a
 second between batches), shared by every running scan.
@@ -25,8 +38,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
 
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import MarketScanSummary
@@ -51,13 +66,45 @@ class Pacer:
 
     async def __aenter__(self):
         await self._sem.acquire()
-        async with self._lock:
-            self._count += 1
-            if self._pause and self._count % self._batch == 0:
-                await asyncio.sleep(self._pause)
+        try:
+            async with self._lock:
+                self._count += 1
+                if self._pause and self._count % self._batch == 0:
+                    await asyncio.sleep(self._pause)
+        except BaseException:
+            self._sem.release()     # cancelled while waiting or pausing
+            raise
 
     async def __aexit__(self, *exc):
         self._sem.release()
+
+
+# {(region_id, type_id): [lock, users]}; an entry lives only while in use.
+_locks: dict[tuple[int, int], list] = {}
+
+
+@asynccontextmanager
+async def _single_flight(key: tuple[int, int]):
+    entry = _locks.get(key)
+    if entry is None:
+        entry = _locks[key] = [asyncio.Lock(), 0]
+    entry[1] += 1
+    try:
+        async with entry[0]:
+            yield
+    finally:
+        entry[1] -= 1
+        if entry[1] == 0 and _locks.get(key) is entry:
+            del _locks[key]
+
+
+async def _upsert(db: AsyncSession, region_id: int, type_id: int, values: dict) -> None:
+    """Insert the row or update only `values`' columns, then commit."""
+    stmt = sqlite_insert(MarketScanSummary).values(
+        region_id=region_id, type_id=type_id, **values)
+    await db.execute(stmt.on_conflict_do_update(
+        index_elements=["region_id", "type_id"], set_=values))
+    await db.commit()
 
 
 def _aware(dt: datetime | None) -> datetime | None:
@@ -96,6 +143,7 @@ def figures(row: MarketScanSummary | None, station_id: int, now: datetime) -> di
     far behind to treat as current (phase 1's "stale")."""
     if row is None or row.days_json is None or row.ladder_json is None:
         return None
+    now = now.astimezone(timezone.utc) if now.tzinfo else now.replace(tzinfo=timezone.utc)
     fetched = _aware(row.history_fetched_at)
     if fetched is None or row.orders_fetched_at is None:
         return None
@@ -120,6 +168,7 @@ def figures(row: MarketScanSummary | None, station_id: int, now: datetime) -> di
                       if lowest <= o["price"] <= lowest * STOCK_BAND]
                      if lowest is not None else [])
     fig["behind"] = state == "behind"
+    fig["ladder_truncated"] = bool(row.ladder_truncated)
     return fig
 
 
@@ -129,39 +178,34 @@ async def ensure_summary(db: AsyncSession, region_id: int, station_id: int, type
     requests it made (0–2). Raises whatever the fetch raises. `db` must be the
     caller's own session: concurrent callers each need their own."""
     now = now.astimezone(timezone.utc) if now.tzinfo else now.replace(tzinfo=timezone.utc)
-    row = await db.get(MarketScanSummary, (region_id, type_id))
-    h_at = _aware(row.history_fetched_at) if row else None
-    o_at = _aware(row.orders_fetched_at) if row else None
-    need_history = h_at is None or now - h_at >= HISTORY_TTL
-    need_orders = o_at is None or now - o_at >= ORDERS_TTL
-    if not (need_history or need_orders):
-        return 0
-    requests = 0
-    days = fetched = levels = truncated = None
-    if need_history:
-        stored_at = await market_history.fetched_at(db, region_id, type_id)
-        if stored_at is not None and now - stored_at < market_history.HISTORY_TTL:
-            stored = await market_history.get_history(region_id, type_id, db, fetch=False)
-            fetched = stored_at
-            days = [[r.date.isoformat(), r.volume or 0, r.average, r.highest]
-                    for r in stored][-KEEP_DAYS:]
-        else:
+    async with _single_flight((region_id, type_id)):
+        # Re-read after the lock: a concurrent caller may just have written it.
+        row = await db.get(MarketScanSummary, (region_id, type_id), populate_existing=True)
+        h_at = _aware(row.history_fetched_at) if row else None
+        o_at = _aware(row.orders_fetched_at) if row else None
+        need_history = h_at is None or now - h_at >= HISTORY_TTL
+        need_orders = o_at is None or now - o_at >= ORDERS_TTL
+        requests = 0
+        if need_history:
+            stored_at = await market_history.fetched_at(db, region_id, type_id)
+            if stored_at is not None and now - stored_at < market_history.HISTORY_TTL:
+                stored = await market_history.get_history(region_id, type_id, db, fetch=False)
+                fetched = stored_at
+                days = [[r.date.isoformat(), r.volume or 0, r.average, r.highest]
+                        for r in stored][-KEEP_DAYS:]
+            else:
+                async with pacer:
+                    raw = await market_history._fetch_history_esi(region_id, type_id)
+                requests += 1
+                days, fetched = compact_days(raw), now
+            await _upsert(db, region_id, type_id,
+                          {"days_json": json.dumps(days), "history_fetched_at": fetched})
+        if need_orders:
             async with pacer:
-                raw = await market_history._fetch_history_esi(region_id, type_id)
+                raw = await market_orders._fetch_orders_esi(region_id, type_id)
             requests += 1
-            days, fetched = compact_days(raw), now
-    if need_orders:
-        async with pacer:
-            raw = await market_orders._fetch_orders_esi(region_id, type_id)
-        requests += 1
-        levels, truncated = ladder_from_orders(raw, station_id)
-    if row is None:
-        row = MarketScanSummary(region_id=region_id, type_id=type_id)
-        db.add(row)
-    if need_history:
-        row.days_json, row.history_fetched_at = json.dumps(days), fetched
-    if need_orders:
-        row.ladder_json, row.ladder_truncated, row.orders_fetched_at = (
-            json.dumps(levels), truncated, now)
-    await db.commit()
-    return requests
+            levels, truncated = ladder_from_orders(raw, station_id)
+            await _upsert(db, region_id, type_id,
+                          {"ladder_json": json.dumps(levels), "ladder_truncated": truncated,
+                           "orders_fetched_at": now})
+        return requests

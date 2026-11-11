@@ -164,8 +164,10 @@ def test_figures_agree_with_phase_one(factory, stubs):
                                             scan_fetch.Pacer(pause=0))
         async with factory() as db:     # fresh session: naive stamps from SQLite
             row = await db.get(MarketScanSummary, (REGION, TYPE))
-            return scan_fetch.figures(row, STATION, NOW)
-    fig = _run(go())
+            return scan_fetch.figures(row, STATION, NOW), row, scan_fetch.figures(
+                row, STATION, NOW.replace(tzinfo=None))
+    fig, row, naive = _run(go())
+    assert naive == fig
     days = [{"date": date.fromisoformat(d["date"]), "volume": d["volume"],
              "average": d["average"]} for d in raw_history()]
     # At 14:00 UTC the game has published through yesterday, the history covers
@@ -177,6 +179,8 @@ def test_figures_agree_with_phase_one(factory, stubs):
     assert fig["high_30"] == 340.0
     assert fig["ladder"] == [(331.0, 20)]          # 400 is outside the 10% band
     assert fig["behind"] is False
+    assert fig["ladder_truncated"] is False
+    # A naive `now` is read as UTC, same as ensure_summary.
 
 
 def test_figures_none_when_a_part_is_missing_or_history_is_stale(factory, stubs):
@@ -193,16 +197,95 @@ def test_figures_none_when_a_part_is_missing_or_history_is_stale(factory, stubs)
     assert scan_fetch.figures(None, STATION, NOW) is None
 
 
-def test_a_failed_fetch_raises_and_stores_nothing(factory, stubs, monkeypatch):
+def test_a_failed_orders_fetch_keeps_the_history_part(factory, stubs, monkeypatch):
     async def boom(region_id, type_id):
         raise RuntimeError("down")
+    real = scan_fetch.market_orders._fetch_orders_esi
     monkeypatch.setattr(scan_fetch.market_orders, "_fetch_orders_esi", boom)
 
     async def go():
+        pacer = scan_fetch.Pacer(pause=0)
         async with factory() as db:
             with pytest.raises(RuntimeError):
-                await scan_fetch.ensure_summary(db, REGION, STATION, TYPE, NOW,
-                                                scan_fetch.Pacer(pause=0))
+                await scan_fetch.ensure_summary(db, REGION, STATION, TYPE, NOW, pacer)
             await db.rollback()
-            return await db.get(MarketScanSummary, (REGION, TYPE))
-    assert _run(go()) is None
+        async with factory() as db:
+            row = await db.get(MarketScanSummary, (REGION, TYPE))
+            state = (row is not None and row.history_fetched_at is not None
+                     and row.days_json is not None and row.ladder_json is None
+                     and row.orders_fetched_at is None,
+                     scan_fetch.figures(row, STATION, NOW))
+            stubs.clear()
+            monkeypatch.setattr(scan_fetch.market_orders, "_fetch_orders_esi", real)
+            n = await scan_fetch.ensure_summary(db, REGION, STATION, TYPE, NOW, pacer)
+            return state, n
+    state, n = _run(go())
+    assert state == (True, None)
+    assert n == 1 and stubs == ["orders"]
+
+
+def test_figures_reports_truncation(factory, stubs, monkeypatch):
+    async def many(region_id, type_id):
+        return [{"is_buy_order": False, "price": 331.0 + i, "volume_remain": 1,
+                 "location_id": STATION} for i in range(scan_fetch.MAX_LEVELS + 5)]
+    monkeypatch.setattr(scan_fetch.market_orders, "_fetch_orders_esi", many)
+
+    async def go():
+        async with factory() as db:
+            await scan_fetch.ensure_summary(db, REGION, STATION, TYPE, NOW,
+                                            scan_fetch.Pacer(pause=0))
+        async with factory() as db:
+            row = await db.get(MarketScanSummary, (REGION, TYPE))
+            return scan_fetch.figures(row, STATION, NOW)
+    assert _run(go())["ladder_truncated"] is True
+
+
+def test_concurrent_callers_for_one_new_key_fetch_once(factory, stubs, monkeypatch):
+    async def slow_history(region_id, type_id):
+        stubs.append("history")
+        await asyncio.sleep(0.02)
+        return raw_history()
+
+    async def slow_orders(region_id, type_id):
+        stubs.append("orders")
+        await asyncio.sleep(0.02)
+        return raw_orders()
+    monkeypatch.setattr(scan_fetch.market_history, "_fetch_history_esi", slow_history)
+    monkeypatch.setattr(scan_fetch.market_orders, "_fetch_orders_esi", slow_orders)
+
+    async def go():
+        pacer = scan_fetch.Pacer(pause=0)
+
+        async def one():
+            async with factory() as db:
+                return await scan_fetch.ensure_summary(db, REGION, STATION, TYPE, NOW, pacer)
+        results = await asyncio.gather(one(), one())
+        async with factory() as db:
+            count = (await db.execute(
+                select(func.count()).select_from(MarketScanSummary))).scalar()
+        return results, count
+    results, count = _run(go())
+    assert sorted(results) == [0, 2] and count == 1
+    assert stubs.count("history") == 1 and stubs.count("orders") == 1
+    assert scan_fetch._locks == {}
+
+
+def test_pacer_cancelled_during_the_pause_releases_its_slot():
+    async def go():
+        pacer = scan_fetch.Pacer(concurrent=1, batch=1, pause=5)
+
+        async def enter():
+            async with pacer:
+                pass
+        task = asyncio.ensure_future(enter())
+        await asyncio.sleep(0.05)           # inside the pause sleep
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        pacer._pause = 0
+
+        async def again():
+            async with pacer:
+                pass
+        await asyncio.wait_for(again(), timeout=1)
+    _run(go())
