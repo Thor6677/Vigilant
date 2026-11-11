@@ -5,6 +5,7 @@ from datetime import date, timedelta
 import pytest
 
 from app.market import hub_analysis as ha
+from app.market import hub_format as hf
 
 TODAY = date(2026, 11, 10)
 STATION = 60008494
@@ -364,39 +365,41 @@ def test_best_picks_fastest_skips_thin_hubs():
     picks = ha.best_picks({"jita": _res("steady", 8.0, 25.0),
                            "amarr": _res("fast", 4.0, 43.0),
                            "rens": _res("thin", 1.0, 56.0)}, ORDER)
-    assert picks == {"fastest": "amarr", "fastest_thin": False, "margin": "rens"}
+    assert picks == {"fastest": "amarr", "margin": "rens"}
 
 
 def test_best_picks_when_every_hub_is_thin():
     picks = ha.best_picks({"jita": _res("thin", 8.0, None),
                            "amarr": _res("thin", 4.0, None)}, ORDER)
-    assert picks == {"fastest": "amarr", "fastest_thin": True, "margin": None}
+    assert picks == {"fastest": "amarr", "margin": None}
 
 
 def test_best_picks_skips_unavailable_hubs_and_breaks_ties_by_order():
     picks = ha.best_picks({"jita": _res("fast", 2.0, 10.0),
                            "amarr": _res("fast", 2.0, 10.0),
                            "rens": None}, ORDER)
-    assert picks == {"fastest": "jita", "fastest_thin": False, "margin": "jita"}
+    assert picks == {"fastest": "jita", "margin": "jita"}
 
 
 def test_best_picks_with_nothing_usable():
-    assert ha.best_picks({"jita": None}, ORDER) == {
-        "fastest": None, "fastest_thin": False, "margin": None}
+    assert ha.best_picks({"jita": None}, ORDER) == {"fastest": None, "margin": None}
 
 
 # ── review fixes ────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("best, typical, expected", [
-    (0.5, 0.9, "under a day"),
-    (0.5, 1.0, "up to 1 day"),
-    (0.5, 3.0, "up to 3 days"),
+    # Sub-day means "rounds half up to 0" (under 0.5), as in the table's "<1".
+    (0.4, 0.45, "under a day"),
+    (0.4, 1.0, "up to 1 day"),
+    (0.4, 3.0, "up to 3 days"),
+    (0.5, 0.9, "roughly 1 day"),
     (1.0, 1.2, "roughly 1 day"),
     (3.0, 3.2, "roughly 3 days"),
     (2.0, 4.8, "roughly 2 \u2013 5 days"),
+    (2.5, 4.5, "roughly 3 \u2013 5 days"),
 ])
 def test_days_phrase(best, typical, expected):
-    assert ha._days_phrase(best, typical) == expected
+    assert hf.days_phrase(best, typical) == expected
 
 
 def test_verdict_for_one_unit_reads_naturally():

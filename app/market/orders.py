@@ -166,6 +166,13 @@ def fetched_at(region_id: int, type_id: int) -> datetime | None:
     return cached[0] if cached is not None else None
 
 
+def age(region_id: int, type_id: int) -> timedelta | None:
+    """How long ago this (region, type) was last fetched successfully, or
+    None if it never has been (see `fetched_at`)."""
+    stamp = fetched_at(region_id, type_id)
+    return _now() - stamp if stamp is not None else None
+
+
 def build_order_book(orders: list[dict]) -> dict:
     """Pure transform: raw ESI orders → the depth-capped book + spread stats.
 

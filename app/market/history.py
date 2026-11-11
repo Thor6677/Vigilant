@@ -23,9 +23,19 @@ fresh or stale (possibly none), and remembers nothing. The hub comparison
 uses it for the hubs after one whose fetch has just failed in the same
 request, so an outage costs one slow attempt per request without marking
 hubs that were never tried.
+
+Fetches are single-flight per (region, type), the idiom of
+`app.market.orders`: an `asyncio.Lock` per key, held across the fetch, the
+upsert and its commit. On a cold item page the price chart's `history.json`
+and the hub comparison both want The Forge's history at once; the second
+caller waits, then re-checks freshness (and a just-remembered failure) on ITS
+OWN session before fetching, so it reads what the first stored instead of
+fetching again. Each caller still passes its own session; only the lock is
+shared.
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import date as date_cls, datetime, timedelta, timezone
 
 from sqlalchemy import select
@@ -48,11 +58,31 @@ FAILURE_TTL = timedelta(seconds=90)
 
 # {(region_id, type_id): when the last fetch failed}
 _failed: dict[tuple[int, int], datetime] = {}
+# {(region_id, type_id): the lock a fetch for that key holds}
+_locks: dict[tuple[int, int], asyncio.Lock] = {}
 
 
 def _now() -> datetime:
     """Clock seam — monkeypatched in tests to exercise TTL expiry."""
     return datetime.now(timezone.utc)
+
+
+def _get_lock(key: tuple[int, int]) -> asyncio.Lock:
+    lock = _locks.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _locks[key] = lock
+    return lock
+
+
+def _remember_failure(key: tuple[int, int]) -> None:
+    """Stamp a failed fetch, dropping stamps that have already expired so
+    the dict holds only failures still inside FAILURE_TTL."""
+    now = _now()
+    for k, stamp in list(_failed.items()):
+        if now - stamp >= FAILURE_TTL:
+            del _failed[k]
+    _failed[key] = now
 
 
 def recently_failed(region_id: int, type_id: int) -> bool:
@@ -195,7 +225,8 @@ async def get_history(
     """Return daily history rows for (region, type), cache-first.
 
     Fresh meta (< 24h) → rows are read straight from the DB, no network.
-    Stale/missing meta → one ESI fetch, upsert, re-read. If the fetch raises
+    Stale/missing meta → one ESI fetch (single-flight per key, see the
+    module docstring), upsert, re-read. If the fetch raises
     (ESI down), we fall back to whatever rows are already stored
     (stale-on-error) rather than surfacing the error to the page, and remember
     the failure: for FAILURE_TTL the stored rows are served without a fetch.
@@ -209,15 +240,22 @@ async def get_history(
     if not fetch or recently_failed(region_id, type_id):
         return await _read_rows(db, region_id, type_id)
 
-    try:
-        raw = await _fetch_history_esi(region_id, type_id)
-    except Exception:
-        # Stale-on-error: never fail the page over an ESI hiccup — serve what
-        # we have (possibly empty) and leave the meta stamp stale so a view
-        # after FAILURE_TTL retries.
-        _failed[(region_id, type_id)] = _now()
-        return await _read_rows(db, region_id, type_id)
+    key = (region_id, type_id)
+    async with _get_lock(key):
+        # Re-check after acquiring the lock, on this caller's own session:
+        # another caller may have stored fresh rows meanwhile, or failed (in
+        # which case don't repeat its attempt).
+        if await is_fresh(db, region_id, type_id) or recently_failed(region_id, type_id):
+            return await _read_rows(db, region_id, type_id)
+        try:
+            raw = await _fetch_history_esi(region_id, type_id)
+        except Exception:
+            # Stale-on-error: never fail the page over an ESI hiccup — serve
+            # what we have (possibly empty) and leave the meta stamp stale so
+            # a view after FAILURE_TTL retries.
+            _remember_failure(key)
+            return await _read_rows(db, region_id, type_id)
 
-    _failed.pop((region_id, type_id), None)
-    await _upsert(db, region_id, type_id, raw)
+        _failed.pop(key, None)
+        await _upsert(db, region_id, type_id, raw)
     return await _read_rows(db, region_id, type_id)

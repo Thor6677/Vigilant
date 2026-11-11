@@ -12,13 +12,19 @@ error handler writes into the element that made the request, lands in the
 results, not over the inputs.
 
 All maths is in `app.market.hub_analysis`; all strings in
-`app.market.hub_view`. This module only gathers data: regional history and
-hub orders through the existing cached fetchers, at most ten upstream requests
-for a first view and none while the caches are warm.
+`app.market.hub_view` (numbers through `app.market.hub_format`). This module
+only gathers data: regional history and hub orders through the existing
+cached fetchers, plus the global price list for the benchmark cost — at most
+eleven upstream requests for a first view and none while the caches are warm.
+A refresh of the results (`HX-Target: hc-results`, sent by the refresh and the
+retry button) with a readable cost typed skips the benchmark entirely: the
+form, whose placeholder is the only other place it shows, is not redrawn then.
 
 History is read on the request's own session, one hub after another, because
 `get_history` writes — sharing a session across concurrent writers is unsafe.
-Orders have no database side and are fetched concurrently.
+A database error while loading one hub's history rolls the session back and
+shows that hub as unavailable; the others still render. Orders have no
+database side and are fetched concurrently.
 
 Upstream failures: both fetchers remember a failure for 90 seconds and do not
 retry that (region, type) meanwhile. Within one request, once a history fetch
@@ -49,12 +55,14 @@ back; the cost is labelled "from your build" only while it still equals it
 from __future__ import annotations
 
 import asyncio
+import logging
 import math
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import get_db
@@ -66,6 +74,8 @@ from app.market.hub_analysis import analyse_hub, best_picks, coverage_end, histo
 from app.routes.market import _is_market_type
 from app.sde import lookup as sde
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(tags=["market"])
 # MUST be named `templates` — see the note in app/routes/market.py.
 templates = Jinja2Templates(directory="app/templates")
@@ -74,6 +84,8 @@ HUB_ORDER = ("jita", "amarr", "dodixie", "hek", "rens")
 HUB_NAMES = {"jita": "Jita", "amarr": "Amarr", "dodixie": "Dodixie",
              "hek": "Hek", "rens": "Rens"}
 MAX_QTY = 1_000_000
+# The id htmx sends as HX-Target when only the results are being redrawn.
+RESULTS_TARGET = "hc-results"
 
 
 def _today() -> date:
@@ -94,6 +106,32 @@ def _parse_qty(raw) -> int:
     if v >= MAX_QTY:
         return MAX_QTY
     return int(v)
+
+
+def _qty_as_typed(raw, quantity: int) -> bool:
+    """Whether `_parse_qty` used `raw` as typed (thousands commas and
+    surrounding spaces aside): False for blank, junk, and anything clamped
+    or truncated ('2.7' is used as 2)."""
+    try:
+        typed = float(str(raw).replace(",", "").strip())
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(typed) and typed == quantity
+
+
+def _fee(raw: str | None, saved: float) -> tuple[float, bool]:
+    """(percentage used, whether to say so). `raw` None means the field was
+    not submitted (the first load), so the saved value is simply used; a
+    submitted value that is blank, junk or out of range falls back to the
+    saved value or is clamped, and that is worth a note."""
+    pct = hub_prefs.clamp_pct(raw, saved)
+    if raw is None:
+        return pct, False
+    try:
+        typed = float(raw)          # read exactly as clamp_pct reads it
+    except (TypeError, ValueError):
+        return pct, True
+    return pct, not (math.isfinite(typed) and typed == pct)
 
 
 async def _resolve_origin(db: AsyncSession, raw: str | None, saved_id: int | None):
@@ -131,12 +169,11 @@ def _age_str(type_id: int, oldest_cover: date | None) -> str:
     """'Orders 4 min old · history to 2026-11-09': the OLDEST order book and
     the oldest history coverage among the hubs shown, so neither overstates
     how current the figures are."""
-    stamps = [market_orders.fetched_at(APPRAISAL_HUBS[k]["region_id"], type_id)
-              for k in HUB_ORDER]
-    stamps = [s for s in stamps if s is not None]
+    ages = [market_orders.age(APPRAISAL_HUBS[k]["region_id"], type_id) for k in HUB_ORDER]
+    ages = [a for a in ages if a is not None]
     parts = []
-    if stamps:
-        minutes = int((market_orders._now() - min(stamps)).total_seconds() // 60)
+    if ages:
+        minutes = int(max(ages).total_seconds() // 60)
         parts.append(f"Orders {minutes} min old" if minutes >= 1 else "Orders just fetched")
     if oldest_cover is not None:
         parts.append(f"history to {oldest_cover.isoformat()}")
@@ -166,27 +203,41 @@ async def market_type_hubs(
 
     prefs = await hub_prefs.get_prefs(db, user_id)
     quantity = _parse_qty(qty)
-    tax_pct = hub_prefs.clamp_pct(sales_tax, prefs.sales_tax_pct)
-    broker_pct = hub_prefs.clamp_pct(broker_fee, prefs.broker_fee_pct)
+    tax_pct, tax_adjusted = _fee(sales_tax, prefs.sales_tax_pct)
+    broker_pct, broker_adjusted = _fee(broker_fee, prefs.broker_fee_pct)
     origin_id, origin_name, origin_error = await _resolve_origin(
         db, origin, prefs.origin_system_id)
 
     # One cost field: a readable figure is used as given (to the 0.01 ISK the
     # game prices in, so the echoed field value is exactly the cost used);
-    # blank or unreadable falls back to the benchmark, if there is one.
-    bench, bench_me = await hub_cost.benchmark(db, type_id)
+    # blank or unreadable falls back to the benchmark, if there is one. A
+    # results-only refresh with a readable figure never shows the benchmark
+    # (only the form's placeholder would, and the form is not redrawn), so it
+    # is not worked out: it can cost a database scan and the price list.
     typed_cost = hub_view.parse_isk(cost)
+    refresh = request.headers.get("HX-Target") == RESULTS_TARGET
+    if refresh and typed_cost is not None:
+        bench = hub_cost.Benchmark(None, hub_cost.BENCHMARK_ME)   # not needed
+    else:
+        bench = await hub_cost.benchmark(db, type_id)
     if typed_cost is not None:
         unit_cost = round(typed_cost, 2)
         source = "build" if _is_build_cost(cost_mode, unit_cost, build_cost) else "typed"
-    elif bench is not None:
-        unit_cost, source = bench, "benchmark"
+    elif bench.cost is not None:
+        unit_cost, source = bench.cost, "benchmark"
     else:
         unit_cost, source = None, None
-    notes = [hub_view.cost_note(unit_cost, source, bench_me)]
+    notes = [hub_view.cost_note(unit_cost, source, bench.me, bench.missing)]
     if typed_cost is None and cost.strip():
-        notes.append(hub_view.UNREADABLE_COST_BENCHMARK if bench is not None
+        notes.append(hub_view.UNREADABLE_COST_BENCHMARK if bench.cost is not None
                      else hub_view.UNREADABLE_COST_NONE)
+    # The fields keep what was typed, so say what was used instead.
+    if not _qty_as_typed(qty, quantity):
+        notes.append(hub_view.qty_note(quantity))
+    if tax_adjusted:
+        notes.append(hub_view.fee_note("Sales tax", tax_pct))
+    if broker_adjusted:
+        notes.append(hub_view.fee_note("Broker fee", broker_pct))
     if origin_error:
         notes.append(origin_error)
 
@@ -210,11 +261,18 @@ async def market_type_hubs(
         # Once a fetch has failed in this request, the rest are served from
         # what is stored (if anything) without another slow attempt. Nothing
         # is remembered for them, so the next request tries them as usual.
-        rows = await market_history.get_history(region, type_id, db,
-                                                fetch=not history_down)
+        try:
+            rows = await market_history.get_history(region, type_id, db,
+                                                    fetch=not history_down)
+            fetched = await market_history.fetched_at(db, region, type_id)
+        except SQLAlchemyError:
+            # This hub only: roll back so the session works for the rest.
+            logger.warning("hub comparison: history for region %s type %s failed to load",
+                           region, type_id, exc_info=True)
+            await db.rollback()
+            rows, fetched = [], None
         if not failing_before and market_history.recently_failed(region, type_id):
             history_down = True  # this request's fetch for this hub just failed
-        fetched = await market_history.fetched_at(db, region, type_id)
         orders_ok = market_orders.fetched_at(region, type_id) is not None
         if fetched is None or not orders_ok:
             results[key] = None
@@ -252,7 +310,7 @@ async def market_type_hubs(
         "cost_mode": "build" if cost_mode == "build" else "",
         "cost_value": hub_view.fmt_cost_input(unit_cost) if typed_cost is not None else "",
         "build_cost": hub_view.fmt_cost_input(unit_cost) if source == "build" else "",
-        "cost_placeholder": hub_view.cost_placeholder(bench),
+        "cost_placeholder": hub_view.cost_placeholder(bench.cost),
         "notes": notes,
         "origin_name": origin_name,
         "sales_tax_pct": tax_pct,
@@ -267,6 +325,9 @@ async def market_type_hubs(
     })
 
 
+SAVE_FAILED = "Not saved; try again."
+
+
 @router.post("/market/hub-prefs", response_class=HTMLResponse)
 async def market_hub_prefs_save(
     request: Request,
@@ -276,19 +337,28 @@ async def market_hub_prefs_save(
     db: AsyncSession = Depends(get_db),
 ):
     """Save fees and starting system. Returns a short status line that htmx
-    swaps in beside the button."""
+    swaps in beside the button, including when the database refuses the
+    write. Errors htmx does not swap (401, 403, 5xx, no response) leave the
+    line as it was."""
     user_id = request.session.get("user_id")
     if not user_id:
         return HTMLResponse("", status_code=401)
-    prefs = await hub_prefs.get_prefs(db, user_id)
-    origin_id, _name, error = await _resolve_origin(db, origin, None)
-    if error:
-        # Keep the previously saved system rather than clearing it on a typo.
-        origin_id = prefs.origin_system_id
-    await hub_prefs.save_prefs(
-        db, user_id,
-        hub_prefs.clamp_pct(sales_tax, prefs.sales_tax_pct),
-        hub_prefs.clamp_pct(broker_fee, prefs.broker_fee_pct),
-        origin_id,
-    )
+    try:
+        prefs = await hub_prefs.get_prefs(db, user_id)
+        origin_id, _name, error = await _resolve_origin(db, origin, None)
+        if error:
+            # Keep the previously saved system rather than clearing it on a typo.
+            origin_id = prefs.origin_system_id
+        await hub_prefs.save_prefs(
+            db, user_id,
+            hub_prefs.clamp_pct(sales_tax, prefs.sales_tax_pct),
+            hub_prefs.clamp_pct(broker_fee, prefs.broker_fee_pct),
+            origin_id,
+        )
+    except SQLAlchemyError:
+        # Said beside the button (a 200, so htmx swaps it in; the button opts
+        # out of the site's error pill, which would otherwise replace its label).
+        logger.warning("hub comparison: saving preferences failed", exc_info=True)
+        await db.rollback()
+        return HTMLResponse(SAVE_FAILED)
     return HTMLResponse("Fees saved; starting system not recognised." if error else "Saved.")

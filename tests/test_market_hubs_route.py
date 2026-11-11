@@ -18,7 +18,7 @@ import app.market.orders as orders
 from app.db.models import Base, MarketHistory, MarketHistoryMeta, User, get_db
 from app.db.sde_models import SDEStation, SDESystem, SDEType
 from app.esi.market import APPRAISAL_HUBS
-from app.market import hub_prefs
+from app.market import hub_cost, hub_prefs
 from app.routes import market_hubs
 from tests._mobile import render_page, source
 from tests.conftest import ensure_user
@@ -130,7 +130,7 @@ def app_db(factory, monkeypatch):
                 for i in range(30)]
 
     async def fake_benchmark(db, type_id):
-        return 268e6, 10
+        return hub_cost.Benchmark(268e6, 10)
 
     monkeypatch.setattr(orders, "_fetch_orders_esi", fake_orders)
     monkeypatch.setattr(history, "_fetch_history_esi", fake_history)
@@ -149,6 +149,7 @@ def _clear_market_state():
     orders._locks.clear()
     orders._failed.clear()
     history._failed.clear()
+    history._locks.clear()
 
 
 def test_hubs_401_when_unauthenticated():
@@ -244,7 +245,7 @@ def test_fees_fall_back_to_saved_preferences(app_db):
 
 def test_no_cost_leaves_profit_blank(app_db, monkeypatch):
     async def none_benchmark(db, type_id):
-        return None, 10
+        return hub_cost.Benchmark(None, 10, hub_cost.NO_BLUEPRINT)
     monkeypatch.setattr(market_hubs.hub_cost, "benchmark", none_benchmark)
     body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?qty=10").text
     assert '<div class="hc-pick-k">Fastest sale</div>' in body
@@ -967,7 +968,7 @@ def test_one_cost_field_with_a_benchmark_placeholder(app_db):
 
 def test_without_a_benchmark_the_placeholder_asks_for_a_cost(app_db, monkeypatch):
     async def none_benchmark(db, type_id):
-        return None, 10
+        return hub_cost.Benchmark(None, 10, hub_cost.NO_BLUEPRINT)
     monkeypatch.setattr(market_hubs.hub_cost, "benchmark", none_benchmark)
     body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?qty=10").text
     assert 'placeholder="enter a cost"' in _tag(body, 'id="hc-cost"')
@@ -1055,7 +1056,7 @@ def test_unreadable_cost_falls_back_to_the_benchmark_and_says_so(app_db):
 
 def test_unreadable_cost_without_a_benchmark_asks_for_a_number(app_db, monkeypatch):
     async def none_benchmark(db, type_id):
-        return None, 10
+        return hub_cost.Benchmark(None, 10, hub_cost.NO_BLUEPRINT)
     monkeypatch.setattr(market_hubs.hub_cost, "benchmark", none_benchmark)
     body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?qty=10&cost=lots").text
     assert "Could not read that cost; enter a number such as 180m." in _notes(body)
@@ -1247,3 +1248,176 @@ def test_calculator_has_no_link_without_a_product(monkeypatch):
 def test_calc_results_tolerates_a_missing_hub_link():
     from tests.test_mobile_r3_manufacturing import _render_calc
     assert "Compare hubs" not in _render_calc()
+
+
+# ── benchmark: why there is none, and when it is not needed ─────────────
+
+def test_an_unpriced_material_has_its_own_no_cost_note(app_db, monkeypatch):
+    async def unpriced(db, type_id):
+        return hub_cost.Benchmark(None, 10, hub_cost.UNPRICED)
+    monkeypatch.setattr(market_hubs.hub_cost, "benchmark", unpriced)
+    body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?qty=10").text
+    assert _notes(body)[0] == ("No benchmark cost right now (a material has no price) — "
+                               "enter a cost per unit to see profit and margin.")
+    assert 'placeholder="enter a cost"' in _tag(body, 'id="hc-cost"')
+
+
+def _counting_benchmark(monkeypatch):
+    calls = []
+
+    async def counting(db, type_id):
+        calls.append(type_id)
+        return hub_cost.Benchmark(268e6, 10)
+
+    monkeypatch.setattr(market_hubs.hub_cost, "benchmark", counting)
+    return calls
+
+
+REFRESH = {"HX-Request": "true", "HX-Target": "hc-results"}
+
+
+def test_a_refresh_with_a_readable_cost_skips_the_benchmark(app_db, monkeypatch):
+    calls = _counting_benchmark(monkeypatch)
+    client = _authed_client()
+    # First load (into #mk-hubs): the placeholder needs the benchmark.
+    body = client.get(f"/market/type/{TYPE_ID}/hubs?qty=10&cost=300m",
+                      headers={"HX-Request": "true", "HX-Target": "mk-hubs"}).text
+    assert len(calls) == 1
+    assert 'placeholder="benchmark 268.0M"' in _tag(body, 'id="hc-cost"')
+    # A refresh of the results with a cost typed: not computed, same figures.
+    body = client.get(f"/market/type/{TYPE_ID}/hubs?qty=10&cost=300m", headers=REFRESH).text
+    assert len(calls) == 1
+    assert "+14.9M" in body
+    assert _notes(_element(body, "hc-results"))[0] == "Cost used: 300.0M each — your figure."
+
+
+@pytest.mark.parametrize("cost", ["", "lots"])
+def test_a_refresh_without_a_readable_cost_still_uses_the_benchmark(app_db, monkeypatch,
+                                                                    cost):
+    calls = _counting_benchmark(monkeypatch)
+    body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs",
+                                params={"qty": "10", "cost": cost}, headers=REFRESH).text
+    assert len(calls) == 1
+    assert "+46.9M" in body                        # 331M * 0.9513 - 268M
+
+
+def test_a_first_load_without_htmx_headers_computes_the_benchmark(app_db, monkeypatch):
+    calls = _counting_benchmark(monkeypatch)
+    _authed_client().get(f"/market/type/{TYPE_ID}/hubs?qty=10&cost=300m")
+    assert len(calls) == 1
+
+
+# ── notes for inputs that were adjusted ─────────────────────────────────
+
+@pytest.mark.parametrize("raw, note", [
+    ("5000000", "Quantity used: 1000000."), ("0", "Quantity used: 1."),
+    ("-4", "Quantity used: 1."), ("lots", "Quantity used: 1."), ("", "Quantity used: 1."),
+    ("2.7", "Quantity used: 2."), ("1e999", "Quantity used: 1000000."),
+])
+def test_an_adjusted_quantity_is_noted(app_db, raw, note):
+    body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs",
+                                params={"qty": raw}).text
+    assert note in _notes(_element(body, "hc-results"))
+
+
+@pytest.mark.parametrize("raw", ["10", "1,500", "1000000", "3.0"])
+def test_a_quantity_used_as_typed_has_no_note(app_db, raw):
+    body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs", params={"qty": raw}).text
+    assert not any(n.startswith("Quantity used") for n in _notes(body))
+
+
+@pytest.mark.parametrize("params, note", [
+    ({"sales_tax": "150"}, "Sales tax used: 100%."),
+    ({"sales_tax": "-2"}, "Sales tax used: 0%."),
+    ({"sales_tax": "abc"}, "Sales tax used: 8%."),            # the saved value
+    ({"sales_tax": ""}, "Sales tax used: 8%."),
+    ({"broker_fee": "x"}, "Broker fee used: 2%."),
+    ({"broker_fee": "nan"}, "Broker fee used: 2%."),
+    ({"broker_fee": "101"}, "Broker fee used: 100%."),
+])
+def test_an_adjusted_fee_is_noted(app_db, params, note):
+    body = _authed_client(PREFS_USER_ID).get(f"/market/type/{TYPE_ID}/hubs",
+                                             params={"qty": "10", **params}).text
+    assert note in _notes(_element(body, "hc-results"))
+
+
+@pytest.mark.parametrize("params", [
+    {}, {"sales_tax": "5", "broker_fee": "2.5"}, {"sales_tax": "0", "broker_fee": "100"},
+    {"sales_tax": " 3.37 ", "broker_fee": "-0"},
+])
+def test_fees_used_as_typed_or_not_sent_have_no_note(app_db, params):
+    body = _authed_client(PREFS_USER_ID).get(f"/market/type/{TYPE_ID}/hubs",
+                                             params={"qty": "10", **params}).text
+    assert not any(n.startswith(("Sales tax used", "Broker fee used")) for n in _notes(body))
+
+
+# ── cost parsing at the edges ───────────────────────────────────────────
+
+@pytest.mark.parametrize("query", ["cost=1.7e308&qty=1000000", "cost=1e300",
+                                   "cost=1e300&qty=1000000", "cost=12%2C50"])
+def test_an_absurd_or_ambiguous_cost_is_unreadable(app_db, query):
+    body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?{query}").text
+    assert "Could not read that cost; using the benchmark." in _notes(body)
+    assert "inf" not in body.lower() and "nan" not in body.lower()
+    assert 'name="cost" value=""' in _tag(body, 'id="hc-cost"')
+
+
+def test_negative_zero_cost_reads_as_zero(app_db):
+    body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?qty=10&cost=-0").text
+    assert 'name="cost" value="0"' in _tag(body, 'id="hc-cost"')
+    assert _notes(body)[0] == "Cost used: 0.00 each — your figure."
+
+
+def test_cost_field_takes_letters_on_phones_fee_fields_stay_numeric():
+    html = _render()
+    assert "inputmode" not in _tag(html, 'id="hc-cost"')
+    assert 'inputmode="decimal"' in _tag(html, 'id="hc-tax"')
+    assert 'inputmode="decimal"' in _tag(html, 'id="hc-broker"')
+
+
+# ── failed button requests ──────────────────────────────────────────────
+
+def test_save_and_retry_buttons_opt_out_of_the_error_pill():
+    """base.html's ISS-007 handler writes its pill into the element that made
+    the request (evt.detail.elt): the button itself. Both opt out there."""
+    html = _render()
+    assert 'data-htmx-no-error="1"' in _tag(html, 'hx-post="/market/hub-prefs"')
+    for m in re.finditer(r'<button\b[^>]*class="hc-retry"[^>]*>', html):
+        assert 'data-htmx-no-error="1"' in m.group()
+    assert html.count('class="hc-retry"') == 2     # Hek: table and card
+    # The results keep the pill: a failed refresh says so in place.
+    assert "data-htmx-no-error" not in _tag(html, '<div id="hc-results"')
+
+
+def test_a_database_error_on_save_says_not_saved(app_db, monkeypatch):
+    from sqlalchemy.exc import OperationalError
+
+    async def locked(*args, **kwargs):
+        raise OperationalError("UPDATE market_hub_prefs", {}, Exception("database is locked"))
+
+    monkeypatch.setattr(market_hubs.hub_prefs, "save_prefs", locked)
+    resp = _authed_client().post("/market/hub-prefs",
+                                 data={"sales_tax": "5", "broker_fee": "2.5", "origin": ""})
+    assert resp.status_code == 200
+    assert resp.text == "Not saved; try again."
+
+
+def test_a_database_error_at_one_hub_leaves_the_others(app_db, monkeypatch):
+    """Amarr's history load fails inside the database and leaves the session
+    needing a rollback; without one, every later hub would fail too."""
+    real = history.get_history
+
+    async def broken_at_amarr(region_id, type_id, db, **kwargs):
+        if region_id == AMARR["region_id"]:
+            db.add(User(id=USER_ID))               # already exists
+            await db.flush()                       # IntegrityError
+        return await real(region_id, type_id, db, **kwargs)
+
+    monkeypatch.setattr(history, "get_history", broken_at_amarr)
+    resp = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?qty=10")
+    assert resp.status_code == 200
+    body = resp.text
+    assert re.search(r'Amarr</span></td>\s*<td colspan="\d+" class="hc-unavail">Unavailable',
+                     body)
+    assert body.count("Unavailable") == 4          # Amarr and Hek (orders)
+    assert body.count('<tr class="hc-s">') == 3    # Jita, Dodixie, Rens

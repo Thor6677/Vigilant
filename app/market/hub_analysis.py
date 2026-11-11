@@ -23,6 +23,8 @@ from collections.abc import Iterable
 from datetime import date, timedelta
 from statistics import median
 
+from app.market.hub_format import days_phrase, fmt_rate
+
 WINDOW_DAYS = 30
 SHORT_WINDOW_DAYS = 7
 
@@ -217,31 +219,10 @@ def tags(fig: dict, days_typical: float | None) -> tuple[str, str | None]:
     return speed, supply
 
 
-def _n(x: float) -> str:
-    """Compact rate: 42, 6, 1.2, 0.6."""
-    if x >= 10:
-        return f"{x:.0f}"
-    return f"{x:.1f}".rstrip("0").rstrip(".")
-
-
-def _d(x: float) -> str:
-    return "under 1" if x < 1 else str(round(x))
-
-
-def _days_phrase(best: float, typical: float) -> str:
-    """The whole phrase, hedge word included: 'under a day', 'roughly 2 – 5 days'."""
-    lo, hi = _d(best), _d(typical)
-    if lo == "under 1" and hi == "under 1":
-        return "under a day"
-    if lo == "under 1":
-        return "up to 1 day" if hi == "1" else f"up to {hi} days"
-    if lo == hi:
-        return "roughly 1 day" if lo == "1" else f"roughly {lo} days"
-    return f"roughly {lo} – {hi} days"
-
-
 def verdict(result: dict, qty: int, has_cost: bool) -> str:
-    """One plain sentence, plus a second clause when selling now is a problem."""
+    """One plain sentence, plus a second clause when selling now is a problem.
+    Numbers are formatted by `hub_format`, as the table's are, so the
+    sentence and the columns always agree."""
     demand, stock = result["demand_30"], result["stock"]
     lw, now = result["list"], result["now"]
 
@@ -251,15 +232,15 @@ def verdict(result: dict, qty: int, has_cost: bool) -> str:
         first = (f"Traded on {result['trade_days']} of the last 30 days. "
                  "Treat these figures as rough.")
     elif result["nothing_listed"]:
-        first = f"Sells about {_n(demand)} a day and nothing is listed."
+        first = f"Sells about {fmt_rate(demand)} a day and nothing is listed."
     elif result["supply"] == "saturated":
-        first = (f"{stock} listed against about {_n(demand)} a day: "
-                 f"{_n(result['days_of_stock'])} days of stock ahead of you.")
+        first = (f"{stock} listed against about {fmt_rate(demand)} a day: "
+                 f"{fmt_rate(result['days_of_stock'])} days of stock ahead of you.")
     else:
         scarce = "only " if result["supply"] == "under" else ""
-        first = (f"Sells about {_n(demand)} a day with {scarce}{stock} listed. "
+        first = (f"Sells about {fmt_rate(demand)} a day with {scarce}{stock} listed. "
                  f"Your {qty} would take "
-                 f"{_days_phrase(lw['days_best'], lw['days_typical'])}.")
+                 f"{days_phrase(lw['days_best'], lw['days_typical'])}.")
 
     loses = has_cost and now["profit_each"] is not None and now["profit_each"] < 0
     if now["fillable"] == 0:
@@ -306,6 +287,4 @@ def best_picks(results: dict[str, dict | None], order: tuple[str, ...]) -> dict:
     # as percentage margin, since the cost is the same at every hub.
     margin = max(priced, key=lambda kr: kr[1]["list"]["profit_each"])[0] if priced else None
 
-    return {"fastest": fastest,
-            "fastest_thin": bool(pool) and not steady,
-            "margin": margin}
+    return {"fastest": fastest, "margin": margin}

@@ -1,6 +1,9 @@
 """Hub comparison display strings. Pure functions."""
+import math
+
 import pytest
 
+from app.market import hub_cost
 from app.market import hub_view as hv
 
 
@@ -35,6 +38,28 @@ def test_parse_isk(raw, expected):
     assert hv.parse_isk(raw) == expected
 
 
+@pytest.mark.parametrize("raw, expected", [
+    # Thousands-style commas still read.
+    ("1,500", 1500.0), ("180,000,000", 180e6), ("1,500.5", 1500.5), ("2,500m", 2.5e9),
+    # A comma followed by one or two digits at the end may be a decimal comma.
+    ("1,5", None), ("12,50", None), ("1,5m", None), ("180,00", None), ("1, 5", None),
+    # Above a quadrillion ISK is not a cost anyone means.
+    ("1e15", 1e15), ("1000000000000001", None), ("1e300", None), ("1.7e308", None),
+    ("2000000b", None),
+    # Nothing but separators.
+    (",", None), (",,", None), (" , ", None), ("m", None),
+])
+def test_parse_isk_edges(raw, expected):
+    assert hv.parse_isk(raw) == expected
+
+
+@pytest.mark.parametrize("raw", ["-0", "-0.0", "-0m"])
+def test_parse_isk_negative_zero_is_plain_zero(raw):
+    v = hv.parse_isk(raw)
+    assert v == 0.0 and math.copysign(1.0, v) == 1.0
+    assert hv.fmt_cost_input(v) == "0"
+
+
 @pytest.mark.parametrize("v, expected", [
     (4.35, "4.35"), (0.4, "0.4"), (268_000_000.0, "268000000"), (1.0, "1"), (0.05, "0.05"),
     (180e6, "180000000"),
@@ -52,6 +77,26 @@ def test_cost_note_names_the_source():
     assert hv.cost_note(181.2e6, "build", 2) == "Cost used: 181.2M each — from your build."
     assert hv.cost_note(None, None, 10) == (
         "No blueprint for this item — enter a cost per unit to see profit and margin.")
+
+
+def test_no_cost_note_says_why_there_is_no_benchmark():
+    assert hv.cost_note(None, None, 10, hub_cost.NO_BLUEPRINT) == (
+        "No blueprint for this item — enter a cost per unit to see profit and margin.")
+    assert hv.cost_note(None, None, 10, hub_cost.UNPRICED) == (
+        "No benchmark cost right now (a material has no price) — enter a cost per unit "
+        "to see profit and margin.")
+    # A cost in use is named as before, whatever the benchmark's state.
+    assert hv.cost_note(180e6, "typed", 10, hub_cost.UNPRICED) == (
+        "Cost used: 180.0M each — your figure.")
+
+
+def test_adjusted_input_notes():
+    assert hv.qty_note(1_000_000) == "Quantity used: 1000000."
+    assert hv.qty_note(1) == "Quantity used: 1."
+    assert hv.fee_note("Sales tax", 3.37) == "Sales tax used: 3.37%."
+    assert hv.fee_note("Broker fee", 100.0) == "Broker fee used: 100%."
+    assert hv.fee_note("Broker fee", 0.0) == "Broker fee used: 0%."
+    assert hv.fee_note("Sales tax", 2.5) == "Sales tax used: 2.5%."
 
 
 def test_cost_placeholder():
@@ -141,7 +186,7 @@ def test_pick_boxes_two_hubs():
                                list={"price": 345e6, "profit_each": 56.3e6, "margin": 0.21,
                                      "days_best": 16.7, "days_typical": 21.7,
                                      "batch_profit": 563e6})}
-    boxes = hv.pick_boxes({"fastest": "amarr", "fastest_thin": False, "margin": "rens"},
+    boxes = hv.pick_boxes({"fastest": "amarr", "margin": "rens"},
                           results, NAMES)
     assert [b["k"] for b in boxes] == ["Fastest sale", "Best margin"]
     assert boxes[0]["v"] == "Amarr — about 2 – 5 days"
@@ -150,16 +195,16 @@ def test_pick_boxes_two_hubs():
 
 
 def test_pick_boxes_same_hub_collapse_to_one():
-    boxes = hv.pick_boxes({"fastest": "amarr", "fastest_thin": False, "margin": "amarr"},
+    boxes = hv.pick_boxes({"fastest": "amarr", "margin": "amarr"},
                           {"amarr": _result()}, NAMES)
     assert [b["k"] for b in boxes] == ["Fastest sale and best margin"]
 
 
 def test_pick_boxes_without_a_cost_or_any_data():
-    boxes = hv.pick_boxes({"fastest": "amarr", "fastest_thin": False, "margin": None},
+    boxes = hv.pick_boxes({"fastest": "amarr", "margin": None},
                           {"amarr": _result()}, NAMES)
     assert [b["k"] for b in boxes] == ["Fastest sale"]
-    assert hv.pick_boxes({"fastest": None, "fastest_thin": False, "margin": None},
+    assert hv.pick_boxes({"fastest": None, "margin": None},
                          {}, NAMES) == []
 
 
@@ -182,9 +227,21 @@ def test_fmt_rate_small(v, expected):
     assert hv.fmt_rate(v) == expected
 
 
-@pytest.mark.parametrize("v, expected", [(2.5, "3"), (3.5, "4"), (0.96, "1"), (0.4, "<1")])
-def test_day_rounds_half_up(v, expected):
-    assert hv._day(v) == expected
+# Day rounding itself (half up, "<1" below 0.5) is tested in test_hub_format.py.
+
+def test_pick_box_for_one_day_is_singular():
+    boxes = hv.pick_boxes({"fastest": "amarr", "margin": None},
+                          {"amarr": _mixed(0.8, 1.2)}, NAMES)
+    assert boxes[0]["v"] == "Amarr — about 1 day"
+
+
+@pytest.mark.parametrize("best, typical", [(2.5, 4.5), (0.5, 0.9), (0.4, 4.5), (0.2, 0.4)])
+def test_pick_box_days_match_the_days_column(best, typical):
+    import re
+    boxes = hv.pick_boxes({"fastest": "amarr", "margin": None},
+                          {"amarr": _mixed(best, typical)}, NAMES)
+    column = hv.fmt_days_range(best, typical)
+    assert re.findall(r"\d+", boxes[0]["v"]) == re.findall(r"(?<!<)\b\d+", column)
 
 
 def _subday():
@@ -194,12 +251,12 @@ def _subday():
 
 def test_pick_boxes_sub_day_fastest_and_margin():
     results = {"amarr": _subday(), "rens": _subday()}
-    boxes = hv.pick_boxes({"fastest": "amarr", "fastest_thin": False, "margin": "rens"},
+    boxes = hv.pick_boxes({"fastest": "amarr", "margin": "rens"},
                           results, NAMES)
     assert boxes[0]["v"] == "Amarr \u2014 under a day"
     assert boxes[1]["d"].endswith("Under a day.")
     assert "<1" not in boxes[0]["v"] + boxes[1]["d"]
-    one = hv.pick_boxes({"fastest": "amarr", "fastest_thin": False, "margin": "amarr"},
+    one = hv.pick_boxes({"fastest": "amarr", "margin": "amarr"},
                         {"amarr": _subday()}, NAMES)
     assert one[0]["v"] == "Amarr \u2014 under a day"
 
@@ -212,7 +269,7 @@ def _mixed(best, typical):
 
 def test_pick_boxes_mixed_sub_day_range_reads_up_to():
     results = {"amarr": _mixed(0.2, 7.6), "rens": _mixed(0.3, 4.4)}
-    boxes = hv.pick_boxes({"fastest": "amarr", "fastest_thin": False, "margin": "rens"},
+    boxes = hv.pick_boxes({"fastest": "amarr", "margin": "rens"},
                           results, NAMES)
     assert boxes[0]["v"] == "Amarr — up to 8 days"
     assert boxes[1]["d"].endswith("Up to 4 days.")
@@ -222,14 +279,14 @@ def test_pick_boxes_mixed_sub_day_range_reads_up_to():
 
 def test_pick_boxes_mixed_sub_day_range_up_to_one_day():
     results = {"amarr": _mixed(0.2, 0.6), "rens": _mixed(0.3, 0.7)}
-    boxes = hv.pick_boxes({"fastest": "amarr", "fastest_thin": False, "margin": "rens"},
+    boxes = hv.pick_boxes({"fastest": "amarr", "margin": "rens"},
                           results, NAMES)
     assert boxes[0]["v"] == "Amarr — up to 1 day"
     assert boxes[1]["d"].endswith("Up to 1 day.")
 
 
 def test_pick_boxes_combined_mixed_sub_day_range():
-    one = hv.pick_boxes({"fastest": "amarr", "fastest_thin": False, "margin": "amarr"},
+    one = hv.pick_boxes({"fastest": "amarr", "margin": "amarr"},
                         {"amarr": _mixed(0.2, 7.6)}, NAMES)
     assert one[0]["v"] == "Amarr — up to 8 days"
 
@@ -237,7 +294,7 @@ def test_pick_boxes_combined_mixed_sub_day_range():
 def test_pick_boxes_margin_hub_without_a_days_estimate_has_no_days_sentence():
     results = {"amarr": _result(),
                "rens": _result(speed="thin", supply=None, list=_mixed(None, None)["list"])}
-    boxes = hv.pick_boxes({"fastest": "amarr", "fastest_thin": False, "margin": "rens"},
+    boxes = hv.pick_boxes({"fastest": "amarr", "margin": "rens"},
                           results, NAMES)
     assert boxes[1]["d"] == "Thin market."
     assert "days" not in boxes[1]["d"]

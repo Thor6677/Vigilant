@@ -63,25 +63,36 @@ def _patch_cost_sources(monkeypatch, prices, invented=False):
 def _benchmark(session_factory, type_id=PRODUCT):
     async def go():
         async with session_factory() as db:
-            return await hub_cost.benchmark_cost(db, type_id)
+            return await hub_cost.benchmark(db, type_id)
     return _run(go())
 
 
 def test_benchmark_cost_at_me_10(session_factory, monkeypatch):
     _patch_cost_sources(monkeypatch, {34: 5.0, 35: 20.0})
     # ME 10: 100 -> 90, 10 -> 9. (90*5 + 9*20) / 2 units = 315
-    assert _benchmark(session_factory) == pytest.approx(315.0)
+    bench = _benchmark(session_factory)
+    assert bench.cost == pytest.approx(315.0)
+    assert bench.me == 10 and bench.missing is None
 
 
 def test_benchmark_cost_uses_me_2_for_invented_products(session_factory, monkeypatch):
     _patch_cost_sources(monkeypatch, {34: 5.0, 35: 20.0}, invented=True)
     # ME 2: 100 -> 98, 10 -> 10 (9.8 rounds up). (98*5 + 10*20) / 2 = 345
-    assert _benchmark(session_factory) == pytest.approx(345.0)
+    bench = _benchmark(session_factory)
+    assert bench.cost == pytest.approx(345.0)
+    assert bench.me == 2
 
 
 def test_benchmark_cost_none_when_a_material_is_unpriced(session_factory, monkeypatch):
     _patch_cost_sources(monkeypatch, {34: 5.0})
-    assert _benchmark(session_factory) is None
+    bench = _benchmark(session_factory)
+    assert bench.cost is None and bench.missing == hub_cost.UNPRICED
+
+
+def test_benchmark_cost_none_when_the_price_list_is_empty(session_factory, monkeypatch):
+    _patch_cost_sources(monkeypatch, {})        # get_price_map's answer when ESI fails
+    bench = _benchmark(session_factory)
+    assert bench.cost is None and bench.missing == hub_cost.UNPRICED
 
 
 def test_benchmark_cost_skips_a_lower_blueprint_with_no_materials(session_factory,
@@ -94,12 +105,13 @@ def test_benchmark_cost_skips_a_lower_blueprint_with_no_materials(session_factor
 
     _run(add_empty_blueprint())
     _patch_cost_sources(monkeypatch, {34: 5.0, 35: 20.0})
-    assert _benchmark(session_factory) == pytest.approx(315.0)
+    assert _benchmark(session_factory).cost == pytest.approx(315.0)
 
 
 def test_benchmark_cost_none_without_a_blueprint(session_factory, monkeypatch):
     _patch_cost_sources(monkeypatch, {34: 5.0, 35: 20.0})
-    assert _benchmark(session_factory, type_id=9999) is None
+    bench = _benchmark(session_factory, type_id=9999)
+    assert bench.cost is None and bench.missing == hub_cost.NO_BLUEPRINT
 
 
 # ── routes ──────────────────────────────────────────────────────────────

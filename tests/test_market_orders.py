@@ -125,6 +125,15 @@ def test_location_name_npc_station_vs_player_structure():
 
 # ── cache TTL ────────────────────────────────────────────────────────────────
 
+def test_orders_age_is_time_since_the_last_successful_fetch(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    now = datetime(2026, 11, 10, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(orders, "_now", lambda: now)
+    assert orders.age(REGION, TYPE_ID) is None                  # never fetched
+    orders._cache[(REGION, TYPE_ID)] = (now - timedelta(minutes=7), [])
+    assert orders.age(REGION, TYPE_ID) == timedelta(minutes=7)
+
+
 def test_orders_fetch_once_then_served_from_cache(monkeypatch):
     calls = {"n": 0}
 

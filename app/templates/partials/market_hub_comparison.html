@@ -23,6 +23,13 @@
    whichever starts second aborts the first, and nothing swaps into a
    #hc-results that has already been replaced.
 
+   The retry and save buttons carry data-htmx-no-error="1": that handler
+   checks its opt-out on the requesting element and would otherwise write
+   its "couldn't load" pill INSIDE the button, replacing its label. A failed
+   retry leaves the row saying unavailable; a failed save leaves #hc-saved as
+   it was (the endpoint answers a database error with a 200 "Not saved"
+   line, which is swapped in like "Saved.").
+
    Desktop: one table, a row per hub with its verdict underneath (m-hide on
    phones). Phones: one card per hub (m-only). No inline handlers (CSP). #}
 {% set span = 9 if show_route else 8 %}
@@ -41,7 +48,7 @@
 <button type="button" class="hc-retry" hx-get="/market/type/{{ type_id }}/hubs"
         hx-include="#hc-form" hx-vals='{"retry": "1"}' hx-target="#hc-results"
         hx-select="#hc-results" hx-swap="outerHTML"
-        hx-sync="#hc-results:replace">retry</button>
+        hx-sync="#hc-results:replace" data-htmx-no-error="1">retry</button>
 {%- endmacro %}
 
 <div class="b-section hc">
@@ -52,8 +59,10 @@
     <form id="hc-form" class="hc-inputs">
         <label class="hc-fld" for="hc-qty"><span>Quantity</span>
             <input class="b-input" id="hc-qty" type="text" inputmode="numeric" name="qty" value="{{ qty }}" style="width:6rem;"></label>
+        {# No inputmode on the cost: a decimal keypad has no letters, so a
+           phone could not type "180m". #}
         <label class="hc-fld" for="hc-cost"><span>Cost per unit</span>
-            <input class="b-input" id="hc-cost" type="text" inputmode="decimal" name="cost" value="{{ cost_value }}"
+            <input class="b-input" id="hc-cost" type="text" name="cost" value="{{ cost_value }}"
                    placeholder="{{ cost_placeholder }}" style="width:10rem;"></label>
         {# "build" only when an entry link said the cost is the user's own build;
            build_cost keeps that link's cost, and the cost-used note says
@@ -72,7 +81,7 @@
                and would filter the "Saved." reply down to nothing). #}
             <button type="button" class="b-btn is-ghost" hx-post="/market/hub-prefs"
                     hx-include="#hc-form" hx-target="#hc-saved"
-                    hx-swap="innerHTML">Save fees and start</button>
+                    hx-swap="innerHTML" data-htmx-no-error="1">Save fees and start</button>
         </span>
         <span id="hc-saved" class="hc-mut" role="status"></span>
     </form>

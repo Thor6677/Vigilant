@@ -9,6 +9,8 @@ overhead are NOT included — the page labels the figure with these assumptions
 """
 from __future__ import annotations
 
+from typing import NamedTuple
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,12 +22,24 @@ from app.sde import lookup as sde
 BENCHMARK_ME = 10
 INVENTED_ME = 2
 
+# Why a benchmark has no cost (Benchmark.missing); hub_view words each.
+NO_BLUEPRINT = "no_blueprint"   # nothing manufactures this item
+UNPRICED = "unpriced"           # a material has no price (or the price list is empty)
 
-async def benchmark(db: AsyncSession, product_type_id: int) -> tuple[float | None, int]:
-    """(cost per unit | None, ME assumed). None when the product has no
-    manufacturing blueprint or any material is unpriced. With several
-    blueprints for one product, the lowest blueprint_type_id that actually
-    has manufacturing materials is used."""
+
+class Benchmark(NamedTuple):
+    cost: float | None          # per unit, or None (see `missing`)
+    me: int                     # the ME assumed
+    missing: str | None = None  # NO_BLUEPRINT or UNPRICED when cost is None
+
+
+async def benchmark(db: AsyncSession, product_type_id: int) -> Benchmark:
+    """The benchmark cost per unit and the ME assumed. No cost when the
+    product has no manufacturing blueprint (`missing` NO_BLUEPRINT) or a
+    material has no price, including when the price list could not be loaded
+    and is empty (UNPRICED). With several blueprints for one product, the
+    lowest blueprint_type_id that actually has manufacturing materials is
+    used."""
     blueprints = (await db.execute(
         select(SDEBlueprintInfo.blueprint_type_id, SDEBlueprintInfo.product_quantity)
         .where(SDEBlueprintInfo.product_type_id == product_type_id)
@@ -42,14 +56,10 @@ async def benchmark(db: AsyncSession, product_type_id: int) -> tuple[float | Non
             bp = candidate
             break
     if bp is None:
-        return None, BENCHMARK_ME
+        return Benchmark(None, BENCHMARK_ME, NO_BLUEPRINT)
     materials = [{"type_id": tid, "quantity": qty} for tid, qty in rows]
     invented = await sde.get_invention_data(db, [product_type_id])
     me = INVENTED_ME if invented else BENCHMARK_ME
     price_map = await market_lp.get_price_map(db)
     cost = build_cost_per_unit(materials, bp.product_quantity or 1, me, 1.0, 0.0, 1.0, price_map)
-    return cost, me
-
-
-async def benchmark_cost(db: AsyncSession, product_type_id: int) -> float | None:
-    return (await benchmark(db, product_type_id))[0]
+    return Benchmark(cost, me, UNPRICED if cost is None else None)

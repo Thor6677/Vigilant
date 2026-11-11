@@ -1,12 +1,22 @@
-"""Hub comparison display strings. Pure: results in, template-ready dicts out."""
+"""Hub comparison display strings. Pure: results in, template-ready dicts out.
+
+Rates and day counts are formatted by `hub_format`, which the verdict
+sentence (`hub_analysis`) uses too."""
 from __future__ import annotations
 
 import math
+import re
 from datetime import date
+
+from app.market.hub_format import days_phrase, fmt_days_range, fmt_rate
 
 SPEED_LABELS = {"fast": "Fast", "steady": "Steady", "slow": "Slow", "thin": "Thin market"}
 SUPPLY_LABELS = {"under": "Under-supplied", "saturated": "Saturated"}
 _SUFFIX = {"k": 1e3, "m": 1e6, "b": 1e9}
+# A typed cost above this (a quadrillion ISK) is not one anyone means; it is
+# treated as unreadable, which also keeps every product with a quantity finite.
+MAX_ISK = 1e15
+_DECIMAL_COMMA = re.compile(r",\d{1,2}[kmb]?$")
 
 # Where the cost per unit came from → how the first note names it.
 _COST_SOURCES = {
@@ -16,6 +26,10 @@ _COST_SOURCES = {
     "build": "from your build",
 }
 NO_COST_NOTE = "No blueprint for this item — enter a cost per unit to see profit and margin."
+NO_PRICE_NOTE = ("No benchmark cost right now (a material has no price) — enter a cost per "
+                 "unit to see profit and margin.")
+# Why there is no benchmark (hub_cost.Benchmark.missing) → the note that says so.
+_NO_COST_NOTES = {"no_blueprint": NO_COST_NOTE, "unpriced": NO_PRICE_NOTE}
 UNREADABLE_COST_BENCHMARK = "Could not read that cost; using the benchmark."
 UNREADABLE_COST_NONE = "Could not read that cost; enter a number such as 180m."
 
@@ -58,30 +72,16 @@ def _sign(v: float | None) -> str:
     return "neg" if _negative(v) else "pos"
 
 
-def fmt_rate(v: float) -> str:
-    if v >= 10:
-        return f"{v:.0f}"
-    if 0 < v < 0.05:
-        return "<0.1"
-    return f"{v:.1f}".rstrip("0").rstrip(".")
-
-
-def _day(v: float) -> str:
-    n = math.floor(v + 0.5)  # round half up, not banker's rounding
-    return "<1" if n < 1 else str(n)
-
-
-def fmt_days_range(best: float | None, typical: float | None) -> str:
-    if best is None or typical is None:
-        return "—"
-    lo, hi = _day(best), _day(typical)
-    return lo if lo == hi else f"{lo} – {hi}"
-
-
 def parse_isk(raw) -> float | None:
     """'180000000', '180,000,000', '180m', '1.2B' → float. None when blank,
-    unparseable, negative or not finite."""
-    s = str(raw or "").replace(",", "").replace(" ", "").lower()
+    unparseable, negative, not finite or above MAX_ISK, and when a comma is
+    followed by only one or two digits at the end ('1,5', '12,50', '1,5m'),
+    which may be a decimal comma; thousands commas ('1,500') read as usual.
+    '-0' reads as 0."""
+    s = str(raw or "").replace(" ", "").lower()
+    if _DECIMAL_COMMA.search(s):
+        return None
+    s = s.replace(",", "")
     if not s:
         return None
     mult = 1.0
@@ -91,9 +91,9 @@ def parse_isk(raw) -> float | None:
         v = float(s) * mult
     except ValueError:
         return None
-    if not math.isfinite(v) or v < 0:
+    if not math.isfinite(v) or v < 0 or v > MAX_ISK:
         return None
-    return v
+    return 0.0 if v == 0 else v   # no negative zero
 
 
 def fmt_cost_input(v: float) -> str:
@@ -108,11 +108,29 @@ def cost_placeholder(benchmark: float | None) -> str:
     return f"benchmark {fmt_isk(benchmark)}" if benchmark is not None else "enter a cost"
 
 
-def cost_note(cost: float | None, source: str | None, me: int) -> str:
-    """The first note under the inputs: which cost per unit the figures use."""
+def cost_note(cost: float | None, source: str | None, me: int,
+              missing: str | None = None) -> str:
+    """The first note under the inputs: which cost per unit the figures use,
+    or, with none, why there is no benchmark (`missing`, as in
+    hub_cost.Benchmark: 'no_blueprint' or 'unpriced')."""
     if cost is None or source is None:
-        return NO_COST_NOTE
+        return _NO_COST_NOTES.get(missing, NO_COST_NOTE)
     return f"Cost used: {fmt_isk(cost)} each — {_COST_SOURCES[source].format(me=me)}."
+
+
+def _pct(v: float) -> str:
+    """A percentage as the fields show it: 3.37, 2.5, 8, 100."""
+    return f"{v:.4f}".rstrip("0").rstrip(".")
+
+
+def qty_note(qty: int) -> str:
+    """For a quantity that could not be used as typed (the field keeps it)."""
+    return f"Quantity used: {qty}."
+
+
+def fee_note(label: str, pct: float) -> str:
+    """For a fee that could not be used as typed: 'Sales tax used: 3.37%.'"""
+    return f"{label} used: {_pct(pct)}%."
 
 
 def hub_row(key: str, name: str, result: dict | None, route: dict | None, qty: int,
@@ -171,20 +189,13 @@ def pick_boxes(picks: dict, results: dict[str, dict | None], names: dict[str, st
     fastest, margin = picks["fastest"], picks["margin"]
     boxes = []
 
-    def _days(r):
-        return fmt_days_range(r["list"]["days_best"], r["list"]["days_typical"])
-
     def _when(r):
-        """'under a day', 'up to 8 days', 'about 2 – 5 days'."""
-        d = _days(r)
-        if d == "—":  # no sales in the window: no estimate to phrase
+        """'under a day', 'up to 8 days', 'about 2 – 5 days': the same
+        numbers as the table's days column (hub_format)."""
+        best, typical = r["list"]["days_best"], r["list"]["days_typical"]
+        if best is None or typical is None:  # no sales in the window: no estimate
             return ""
-        if d == "<1":
-            return "under a day"
-        if d.startswith("<1 – "):
-            hi = d[len("<1 – "):]
-            return "up to 1 day" if hi == "1" else f"up to {hi} days"
-        return f"about {d} days"
+        return days_phrase(best, typical, approx="about")
 
     def _profit(r):
         lw = r["list"]
