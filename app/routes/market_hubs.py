@@ -4,9 +4,12 @@
     compared for one item, quantity and cost.
   * `POST /market/hub-prefs`           — save fees and starting system.
 
-The item page loads the whole partial once; after that the form's own
-requests (and the retry button) ask for the same partial but swap in only its
-`#hc-results` block, so the inputs are never re-rendered under the user.
+The item page loads the whole partial once. After that `#hc-results` itself
+asks for the same partial when a form field changes (and the retry button
+does too), swapping in only the new `#hc-results` block, so the inputs are
+never re-rendered under the user — and an HTTP error, which the site's htmx
+error handler writes into the element that made the request, lands in the
+results, not over the inputs.
 
 All maths is in `app.market.hub_analysis`; all strings in
 `app.market.hub_view`. This module only gathers data: regional history and
@@ -18,13 +21,23 @@ History is read on the request's own session, one hub after another, because
 Orders have no database side and are fetched concurrently.
 
 Upstream failures: both fetchers remember a failure for 90 seconds and do not
-retry that (region, type) meanwhile, so input changes during an ESI outage
-cost nothing upstream. Within one request, once a history fetch fails the
-remaining hubs that would need the network are not attempted (they are marked
-failed and show as unavailable); hubs with fresh stored history still render.
-So an outage costs at most one slow history attempt per request, not five.
+retry that (region, type) meanwhile. Within one request, once a history fetch
+fails the remaining hubs that would need the network are not attempted for
+THIS request only: they are served from stored history if there is any (and
+show as unavailable if there is none), but no failure is remembered for them.
+So an outage costs at most one slow history attempt per request, not five,
+and a hub that keeps failing cannot keep the hubs after it from ever loading:
+on the next request it is inside its own failure window and is not tried, so
+the others are. During a full outage that is one attempt per request until
+every hub is inside its window: at most five attempts per 90 seconds.
 The retry button sends `retry=1`, which forgets this type's remembered
 failures at all five hubs first; ordinary input changes never send it.
+
+Cost label: an entry link (Build Finder, manufacturing calculator) sends
+`cost_mode=build` with the cost of the user's own build. The first load
+echoes that cost into a hidden `build_cost`, which every later request sends
+back; the cost is labelled "from your build" only while it still equals it
+(to 0.01 ISK), so a figure typed later is "your figure".
 """
 from __future__ import annotations
 
@@ -94,6 +107,19 @@ async def _resolve_origin(db: AsyncSession, raw: str | None, saved_id: int | Non
     return system_id, names.get(system_id, name), ""
 
 
+def _is_build_cost(cost_mode: str, unit_cost: float, build_cost: str | None) -> bool:
+    """Whether a typed `unit_cost` (already rounded to 0.01) is the entry
+    link's build cost. `build_cost` None means it was not submitted — the
+    first load, whose cost IS the entry link's; afterwards it is the hidden
+    field's value, and only an equal cost (to 0.01 ISK) still counts."""
+    if cost_mode != "build":
+        return False
+    if build_cost is None:
+        return True
+    reference = hub_view.parse_isk(build_cost)
+    return reference is not None and abs(round(reference, 2) - unit_cost) < 0.005
+
+
 def _age_str(type_id: int, latest_day: date | None) -> str:
     stamps = [market_orders.fetched_at(APPRAISAL_HUBS[k]["region_id"], type_id)
               for k in HUB_ORDER]
@@ -114,6 +140,7 @@ async def market_type_hubs(
     qty: str = "1",
     cost_mode: str = "",
     cost: str = "",
+    build_cost: str | None = None,
     origin: str | None = None,
     sales_tax: str | None = None,
     broker_fee: str | None = None,
@@ -141,7 +168,7 @@ async def market_type_hubs(
     typed_cost = hub_view.parse_isk(cost)
     if typed_cost is not None:
         unit_cost = round(typed_cost, 2)
-        source = "build" if cost_mode == "build" else "typed"
+        source = "build" if _is_build_cost(cost_mode, unit_cost, build_cost) else "typed"
     elif bench is not None:
         unit_cost, source = bench, "benchmark"
     else:
@@ -167,12 +194,12 @@ async def market_type_hubs(
     history_down = False
     for key, hub, raw_orders in zip(HUB_ORDER, hubs, order_lists):
         region = hub["region_id"]
-        if history_down and not await market_history.is_fresh(db, region, type_id):
-            # ESI failed for another hub a moment ago: don't spend another slow
-            # attempt on this one now; stored rows (if any) are still served.
-            market_history.mark_failed(region, type_id)
         failing_before = market_history.recently_failed(region, type_id)
-        rows = await market_history.get_history(region, type_id, db)
+        # Once a fetch has failed in this request, the rest are served from
+        # what is stored (if anything) without another slow attempt. Nothing
+        # is remembered for them, so the next request tries them as usual.
+        rows = await market_history.get_history(region, type_id, db,
+                                                fetch=not history_down)
         if not failing_before and market_history.recently_failed(region, type_id):
             history_down = True  # this request's fetch for this hub just failed
         history_ok = await market_history.fetched_at(db, region, type_id) is not None
@@ -205,6 +232,7 @@ async def market_type_hubs(
         # #hc-results), so these echo what an entry link carried.
         "cost_mode": "build" if cost_mode == "build" else "",
         "cost_value": hub_view.fmt_cost_input(unit_cost) if typed_cost is not None else "",
+        "build_cost": hub_view.fmt_cost_input(unit_cost) if source == "build" else "",
         "cost_placeholder": hub_view.cost_placeholder(bench),
         "notes": notes,
         "origin_name": origin_name,

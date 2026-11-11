@@ -5,11 +5,12 @@ import json
 import re
 from datetime import date, datetime, timedelta, timezone
 from html import unescape
+from html.parser import HTMLParser
 
 import itsdangerous
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete
+from sqlalchemy import delete, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.market.history as history
@@ -31,6 +32,7 @@ JITA = APPRAISAL_HUBS["jita"]
 AMARR = APPRAISAL_HUBS["amarr"]
 HEK = APPRAISAL_HUBS["hek"]
 DODIXIE = APPRAISAL_HUBS["dodixie"]
+RENS = APPRAISAL_HUBS["rens"]
 ORIGIN_ID = 30099001    # invented system id
 CSRF = "test-csrf-token-hub-comparison-0001"
 
@@ -321,12 +323,19 @@ def test_retry_clears_remembered_history_failures_too(app_db, monkeypatch):
 
     monkeypatch.setattr(history, "_fetch_history_esi", flaky_history)
     client = _authed_client()
-    client.get(f"/market/type/{TYPE_ID}/hubs?qty=10")
+    client.get(f"/market/type/{TYPE_ID}/hubs?qty=10")   # Jita fails; the rest are skipped
     state["down"] = False
-    client.get(f"/market/type/{TYPE_ID}/hubs?qty=10")
-    assert [c for c in app_db if c[0] == "history"] == [("history", JITA["region_id"])]
+    body = client.get(f"/market/type/{TYPE_ID}/hubs?qty=10").text
+    # Jita's failure is remembered, so it is not attempted and stays
+    # unavailable; the hubs skipped last time were not, and load now.
+    assert [c for c in app_db if c[0] == "history"] == (
+        [("history", JITA["region_id"])] + [("history", h["region_id"])
+                                            for h in (AMARR, DODIXIE, HEK, RENS)])
+    assert re.search(r'Jita</span></td>\s*<td colspan="\d+" class="hc-unavail">Unavailable',
+                     body)
     body = client.get(f"/market/type/{TYPE_ID}/hubs?qty=10&retry=1").text
-    assert len([c for c in app_db if c[0] == "history"]) == 6     # one more for each hub
+    # The retry forgets Jita's failure and fetches it; the rest are fresh.
+    assert [c for c in app_db if c[0] == "history"][5:] == [("history", JITA["region_id"])]
     assert body.count("Unavailable") == 2                          # only Hek's orders
 
 
@@ -371,12 +380,127 @@ def test_history_failure_mid_request_skips_only_hubs_that_need_the_network(
     before = len(app_db)
     body = client.get(f"/market/type/{TYPE_ID}/hubs?qty=10").text
     assert app_db[before:] == [("history", JITA["region_id"])]   # Dodixie not attempted
-    assert history.recently_failed(DODIXIE["region_id"], TYPE_ID)
+    # Skipped for this request only: Dodixie is not remembered as failed.
+    assert not history.recently_failed(DODIXIE["region_id"], TYPE_ID)
     assert not history.recently_failed(AMARR["region_id"], TYPE_ID)
     # Jita and Dodixie (no history) and Hek (orders) are unavailable; Amarr
     # and Rens render from their stored history.
     assert body.count("Unavailable") == 6
     assert body.count('<tr class="hc-s">') == 2
+    # The next request leaves Jita alone (inside its failure window) and
+    # makes its one attempt at Dodixie instead.
+    before = len(app_db)
+    client.get(f"/market/type/{TYPE_ID}/hubs?qty=11")
+    assert app_db[before:] == [("history", DODIXIE["region_id"])]
+
+
+def _history_rows():
+    return [{"date": (TODAY - timedelta(days=i + 1)).isoformat(), "average": 330e6,
+             "highest": 340e6, "lowest": 320e6, "volume": 5, "order_count": 3}
+            for i in range(30)]
+
+
+def _jita_history_always_down(calls, monkeypatch):
+    """Jita's history fetch fails every time; every other fetch works (Hek's
+    orders too, so Jita's failure is the only one in play)."""
+    async def all_orders(region_id, type_id):
+        calls.append(("orders", region_id))
+        station = next(h["station_id"] for h in APPRAISAL_HUBS.values()
+                       if h["region_id"] == region_id)
+        return [
+            {"is_buy_order": False, "price": 331e6, "volume_remain": 14,
+             "location_id": station, "min_volume": 1},
+            {"is_buy_order": True, "price": 284e6, "volume_remain": 6,
+             "location_id": station, "min_volume": 1},
+        ]
+
+    async def jita_down(region_id, type_id):
+        calls.append(("history", region_id))
+        if region_id == JITA["region_id"]:
+            raise RuntimeError("down")
+        return _history_rows()
+
+    monkeypatch.setattr(orders, "_fetch_orders_esi", all_orders)
+    monkeypatch.setattr(history, "_fetch_history_esi", jita_down)
+
+
+LATER = [("history", h["region_id"]) for h in (AMARR, DODIXIE, HEK, RENS)]
+JITA_UNAVAILABLE = r'Jita</span></td>\s*<td colspan="\d+" class="hc-unavail">Unavailable'
+
+
+def test_a_hub_that_keeps_failing_does_not_keep_later_hubs_from_loading(
+        app_db, monkeypatch):
+    _jita_history_always_down(app_db, monkeypatch)
+    client = _authed_client()
+    body = client.get(f"/market/type/{TYPE_ID}/hubs?qty=10").text
+    # Request 1: five order books, then Jita's history fails and the four
+    # later hubs (no stored history) are skipped — one history attempt.
+    assert sorted(app_db) == sorted([("orders", h["region_id"]) for h in APPRAISAL_HUBS.values()]
+                                    + [("history", JITA["region_id"])])
+    assert body.count("Unavailable") == 10         # all five, table and cards
+    assert history.recently_failed(JITA["region_id"], TYPE_ID)
+    for _kind, region in LATER:                    # skipped, not stamped
+        assert not history.recently_failed(region, TYPE_ID)
+    # Request 2, straight after, an ordinary input change: Jita is inside
+    # its failure window and not attempted; the four later hubs load.
+    before = len(app_db)
+    body = client.get(f"/market/type/{TYPE_ID}/hubs?qty=11").text
+    assert app_db[before:] == LATER
+    assert body.count("Unavailable") == 2          # Jita only
+    assert re.search(JITA_UNAVAILABLE, body)
+    assert body.count('<tr class="hc-s">') == 4
+    assert "Days to sell 11" in body and "+46.9M" in body
+
+
+def test_a_retry_tries_the_failing_hub_again_and_the_next_change_loads_the_rest(
+        app_db, monkeypatch):
+    _jita_history_always_down(app_db, monkeypatch)
+    client = _authed_client()
+    client.get(f"/market/type/{TYPE_ID}/hubs?qty=10")
+    # Request 2 is a retry: Jita's failure is forgotten, Jita is tried and
+    # fails again, so the later hubs are skipped for this request again.
+    before = len(app_db)
+    body = client.get(f"/market/type/{TYPE_ID}/hubs?qty=11&retry=1").text
+    assert app_db[before:] == [("history", JITA["region_id"])]
+    assert body.count("Unavailable") == 10
+    for _kind, region in LATER:
+        assert not history.recently_failed(region, TYPE_ID)
+    # Request 3, no retry: they load.
+    before = len(app_db)
+    body = client.get(f"/market/type/{TYPE_ID}/hubs?qty=12").text
+    assert app_db[before:] == LATER
+    assert body.count("Unavailable") == 2
+    assert re.search(JITA_UNAVAILABLE, body)
+    assert body.count('<tr class="hc-s">') == 4
+
+
+def test_a_skipped_hub_still_shows_its_stale_stored_history(app_db, factory, monkeypatch):
+    client = _authed_client()
+    client.get(f"/market/type/{TYPE_ID}/hubs?qty=10")        # all five histories stored
+
+    async def age(region_ids):
+        two_days_ago = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=2)
+        async with factory() as db:
+            await db.execute(update(MarketHistoryMeta)
+                             .where(MarketHistoryMeta.region_id.in_(region_ids))
+                             .values(fetched_at=two_days_ago))
+            await db.commit()
+
+    # Jita and Dodixie are stale (rows kept, stamp two days old).
+    _run(age([JITA["region_id"], DODIXIE["region_id"]]))
+
+    async def history_down(region_id, type_id):
+        app_db.append(("history", region_id))
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(history, "_fetch_history_esi", history_down)
+    before = len(app_db)
+    body = client.get(f"/market/type/{TYPE_ID}/hubs?qty=10").text
+    assert app_db[before:] == [("history", JITA["region_id"])]   # Dodixie not attempted
+    assert not history.recently_failed(DODIXIE["region_id"], TYPE_ID)
+    # Both still render from their stored rows; only Hek (orders) is unavailable.
+    assert body.count("Unavailable") == 2
+    assert body.count('<tr class="hc-s">') == 4
 
 
 def test_a_stale_order_book_still_renders_with_its_age(app_db, monkeypatch):
@@ -454,7 +578,7 @@ def _row(name, **over):
 
 
 def _render(**over):
-    ctx = dict(type_id=TYPE_ID, qty=10, cost_mode="", cost_value="",
+    ctx = dict(type_id=TYPE_ID, qty=10, cost_mode="", cost_value="", build_cost="",
                cost_placeholder="benchmark 268.0M",
                notes=["Benchmark: sample note."], origin_name="Sample System",
                sales_tax_pct=3.37, broker_fee_pct=1.5, age_str="Orders 4 min old",
@@ -493,6 +617,7 @@ def test_only_the_retry_button_asks_for_a_retry():
     html = _render()
     assert """hx-vals='{"retry": "1"}'""" in _tag(html, 'class="hc-retry"')
     assert "retry" not in _tag(html, "<form")
+    assert "retry" not in _tag(html, '<div id="hc-results"')    # the ordinary refresh
     assert 'name="retry"' not in html
 
 
@@ -570,21 +695,95 @@ def test_partial_puts_everything_that_depends_on_the_inputs_in_hc_results():
         assert marker in results and marker not in before
 
 
-def test_form_and_retry_replace_only_the_results():
+def test_results_own_the_refresh_and_the_form_makes_no_request():
+    """#hc-results makes the request on a change in the form, so the site's
+    error handler (base.html, ISS-007), which writes into the element that
+    made the request, lands in the results and leaves the inputs alone."""
     html = _render()
+    results = _tag(html, '<div id="hc-results"')
+    for attr in (f'hx-get="/market/type/{TYPE_ID}/hubs"', 'hx-trigger="change from:#hc-form"',
+                 'hx-include="#hc-form"', 'hx-target="this"', 'hx-select="#hc-results"',
+                 'hx-swap="outerHTML"', 'hx-sync="this:replace"'):
+        assert attr in results
+    assert "load" not in results                   # no request of its own when inserted
+    assert "data-htmx-no-error" not in results
     form = _tag(html, "<form")
-    for attr in ('hx-target="#hc-results"', 'hx-select="#hc-results"',
-                 'hx-swap="outerHTML"', 'hx-trigger="change, submit"',
-                 f'hx-get="/market/type/{TYPE_ID}/hubs"'):
-        assert attr in form
+    assert "hx-" not in form
     retry = _tag(html, 'class="hc-retry"')
-    for attr in ('hx-target="#hc-results"', 'hx-select="#hc-results"',
-                 'hx-swap="outerHTML"', 'hx-include="#hc-form"'):
+    for attr in (f'hx-get="/market/type/{TYPE_ID}/hubs"', 'hx-include="#hc-form"',
+                 'hx-target="#hc-results"', 'hx-select="#hc-results"',
+                 'hx-swap="outerHTML"', 'hx-sync="#hc-results:replace"'):
         assert attr in retry
-    # The save button sits inside the form: it must not inherit hx-select,
-    # or its "Saved." reply would be filtered down to nothing.
     save = _tag(html, 'hx-post="/market/hub-prefs"')
-    assert 'hx-select="unset"' in save and 'hx-target="#hc-saved"' in save
+    for attr in ('hx-include="#hc-form"', 'hx-target="#hc-saved"', 'hx-swap="innerHTML"'):
+        assert attr in save
+    assert "hx-select" not in save
+
+
+class _Ancestry(HTMLParser):
+    """The attributes of every element enclosing the first start tag that
+    `match(tag, attrs)` accepts, outermost first."""
+    VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link",
+            "meta", "source", "track", "wbr"}
+
+    def __init__(self, match):
+        super().__init__()
+        self.match, self.stack, self.found = match, [], None
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if self.found is None and self.match(tag, attrs):
+            self.found = [a for _t, a in self.stack]
+        if tag not in self.VOID:
+            self.stack.append((tag, attrs))
+
+    def handle_endtag(self, tag):
+        for i in range(len(self.stack) - 1, -1, -1):
+            if self.stack[i][0] == tag:
+                del self.stack[i:]
+                return
+
+
+def _ancestors(html, match):
+    parser = _Ancestry(match)
+    parser.feed(html)
+    assert parser.found is not None, "no element matched"
+    return parser.found
+
+
+def _hx(attrs):
+    return {k for k in attrs if k.startswith(("hx-", "data-hx-"))}
+
+
+def test_the_save_button_inherits_nothing_that_filters_or_redirects_its_reply(app_db):
+    # Within the partial, nothing above the save button carries an htmx
+    # attribute (hx-select there would filter "Saved." down to nothing).
+    above = _ancestors(_render(), lambda tag, a: a.get("hx-post") == "/market/hub-prefs")
+    assert "hc-form" in [a.get("id") for a in above]
+    assert all(not _hx(a) for a in above), above
+    # On the item page the partial sits in #mk-hubs, which only loads it,
+    # and nothing above #mk-hubs carries an htmx attribute.
+    page = _authed_client().get(f"/market/type/{TYPE_ID}").text
+    above = _ancestors(page, lambda tag, a: a.get("id") == "mk-hubs")
+    assert above and all(not _hx(a) for a in above), above
+    mk = _tag(page, 'id="mk-hubs"')
+    assert set(re.findall(r"\b(hx-[a-z-]+)=", mk)) == {"hx-get", "hx-trigger", "hx-swap"}
+    # The error handler checks its opt-out on the requesting element only,
+    # never its ancestors; neither element carries it.
+    assert "data-htmx-no-error" not in mk
+
+
+def test_enter_in_a_field_cannot_submit_the_form_natively():
+    """No submit button and several text fields: under the HTML spec's
+    implicit-submission rules, Enter in a field submits nothing, so the page
+    never navigates. (The form makes no request of its own; a change in a
+    field is what refreshes the results.)"""
+    html = _render()
+    form = html[html.index("<form"):html.index("</form>")]
+    buttons = re.findall(r"<button\b[^>]*>", form)
+    assert buttons and all('type="button"' in b for b in buttons)
+    assert 'type="submit"' not in html and 'type="image"' not in html
+    assert len(re.findall(r'<input\b[^>]*type="text"', form)) > 1
 
 
 def test_item_page_first_load_swaps_the_whole_partial(app_db):
@@ -597,7 +796,7 @@ def test_item_page_first_load_swaps_the_whole_partial(app_db):
 def test_every_input_has_an_id_and_a_bound_label():
     html = _render()
     inputs = re.findall(r"<input\b[^>]*>", html)
-    assert len(inputs) == 6
+    assert len(inputs) == 7                        # five fields, cost_mode, build_cost
     for tag in inputs:
         found = re.search(r'\bid="([^"]+)"', tag)
         assert found, tag
@@ -644,6 +843,55 @@ def test_cost_mode_build_is_echoed_and_nothing_else(app_db):
     for mode, echoed in (("build", "build"), ("typed", ""), ("benchmark", ""), ("x", "")):
         body = client.get(f"/market/type/{TYPE_ID}/hubs?cost=1m&cost_mode={mode}").text
         assert f'value="{echoed}"' in _tag(body, 'id="hc-cost-mode"'), mode
+
+
+@pytest.mark.parametrize("query, label", [
+    # First load from an entry link (no build_cost yet): its cost is the build.
+    ("cost=300m&cost_mode=build", "from your build"),
+    # Later requests carry the entry link's cost as build_cost.
+    ("cost=300000000&cost_mode=build&build_cost=300000000", "from your build"),
+    ("cost=300m&cost_mode=build&build_cost=300000000", "from your build"),
+    ("cost=300000000.004&cost_mode=build&build_cost=300000000", "from your build"),
+    ("cost=250m&cost_mode=build&build_cost=300000000", "your figure"),
+    ("cost=300000000.01&cost_mode=build&build_cost=300000000", "your figure"),
+    ("cost=300m&cost_mode=build&build_cost=", "your figure"),
+    ("cost=300m&cost_mode=build&build_cost=lots", "your figure"),
+    ("cost=300m&build_cost=300000000", "your figure"),
+    ("cost=300m&cost_mode=typed&build_cost=300000000", "your figure"),
+])
+def test_build_label_only_while_the_cost_is_the_entry_links(app_db, query, label):
+    body = _authed_client().get(f"/market/type/{TYPE_ID}/hubs?qty=10&{query}").text
+    assert _notes(_element(body, "hc-results"))[0].endswith(f" each — {label}.")
+
+
+def test_build_cost_is_echoed_only_for_an_entry_links_build_cost(app_db):
+    client = _authed_client()
+    body = client.get(f"/market/type/{TYPE_ID}/hubs?cost=300m&cost_mode=build").text
+    assert 'name="build_cost" value="300000000"' in _tag(body, 'id="hc-build-cost"')
+    assert 'type="hidden"' in _tag(body, 'id="hc-build-cost"')
+    for query in ("cost=300m", "cost=300m&cost_mode=typed", "cost_mode=build",
+                  "cost=lots&cost_mode=build"):
+        body = client.get(f"/market/type/{TYPE_ID}/hubs?{query}").text
+        assert 'value=""' in _tag(body, 'id="hc-build-cost"'), query
+
+
+def test_a_cost_typed_after_a_build_link_is_the_users_figure(app_db):
+    """Round trip as the page does it: the first load's form values are sent
+    back with the cost changed, then with it restored."""
+    client = _authed_client()
+    first = client.get(f"/market/type/{TYPE_ID}/hubs?qty=10&cost=300m&cost_mode=build").text
+    form = dict(re.findall(r'<input\b[^>]*name="([^"]+)" value="([^"]*)"', first))
+    assert (form["cost"], form["cost_mode"], form["build_cost"]) == (
+        "300000000", "build", "300000000")
+
+    def label(body):
+        return _notes(_element(body, "hc-results"))[0]
+
+    assert label(first) == "Cost used: 300.0M each — from your build."
+    changed = client.get(f"/market/type/{TYPE_ID}/hubs", params={**form, "cost": "250m"}).text
+    assert label(changed) == "Cost used: 250.0M each — your figure."
+    restored = client.get(f"/market/type/{TYPE_ID}/hubs", params=form).text
+    assert label(restored) == "Cost used: 300.0M each — from your build."
 
 
 def test_unreadable_cost_falls_back_to_the_benchmark_and_says_so(app_db):

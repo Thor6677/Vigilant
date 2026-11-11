@@ -14,10 +14,15 @@ shared session, so there are no asyncio.gather write hazards to worry about.
 Failed fetches are remembered in memory per (region, type) for `FAILURE_TTL`
 (90 s): within that window a stale/absent stamp does not trigger another ESI
 call — stored rows (possibly none) are served and the meta stamp is left as
-it was. A success clears the stamp; `clear_failure` clears it early and
-`mark_failed` sets it without a fetch (the hub comparison uses both: its
-retry button, and skipping further fetches once ESI has failed mid-request).
-The stamps are per process and lost on restart, which only costs one retry.
+it was. A success clears the stamp; `clear_failure` clears it early (the hub
+comparison's retry button). The stamps are per process and lost on restart,
+which only costs one retry.
+
+`get_history(..., fetch=False)` never calls ESI: it serves stored rows,
+fresh or stale (possibly none), and remembers nothing. The hub comparison
+uses it for the hubs after one whose fetch has just failed in the same
+request, so an outage costs one slow attempt per request without marking
+hubs that were never tried.
 """
 from __future__ import annotations
 
@@ -54,11 +59,6 @@ def recently_failed(region_id: int, type_id: int) -> bool:
     """True when a fetch for this key failed less than FAILURE_TTL ago."""
     stamp = _failed.get((region_id, type_id))
     return stamp is not None and (_now() - stamp) < FAILURE_TTL
-
-
-def mark_failed(region_id: int, type_id: int) -> None:
-    """Record a failure for this key without attempting a fetch."""
-    _failed[(region_id, type_id)] = _now()
 
 
 def clear_failure(region_id: int, type_id: int) -> None:
@@ -190,7 +190,7 @@ async def _upsert(db: AsyncSession, region_id: int, type_id: int, raw: list[dict
 
 
 async def get_history(
-    region_id: int, type_id: int, db: AsyncSession
+    region_id: int, type_id: int, db: AsyncSession, *, fetch: bool = True
 ) -> list[MarketHistory]:
     """Return daily history rows for (region, type), cache-first.
 
@@ -199,12 +199,14 @@ async def get_history(
     (ESI down), we fall back to whatever rows are already stored
     (stale-on-error) rather than surfacing the error to the page, and remember
     the failure: for FAILURE_TTL the stored rows are served without a fetch.
+    `fetch=False` serves the stored rows without a fetch and without
+    remembering anything (see the module docstring).
 
     Rows are ordered by date ascending.
     """
     if await is_fresh(db, region_id, type_id):
         return await _read_rows(db, region_id, type_id)
-    if recently_failed(region_id, type_id):
+    if not fetch or recently_failed(region_id, type_id):
         return await _read_rows(db, region_id, type_id)
 
     try:

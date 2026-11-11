@@ -358,7 +358,7 @@ def test_history_clear_failure_allows_an_immediate_retry(monkeypatch):
     _run(scenario())
 
 
-def test_history_mark_failed_skips_the_fetch_but_not_fresh_rows(monkeypatch):
+def test_history_without_fetch_serves_stored_rows_and_remembers_nothing(monkeypatch):
     engine, SessionLocal = _temp_engine()
     state = {"n": 0}
 
@@ -367,22 +367,33 @@ def test_history_mark_failed_skips_the_fetch_but_not_fresh_rows(monkeypatch):
         return _sample_rows()
 
     monkeypatch.setattr(history, "_fetch_history_esi", fake_fetch)
+    t0 = datetime(2026, 6, 3, 12, 0, 0, tzinfo=timezone.utc)
+    clock = {"t": t0}
+    monkeypatch.setattr(history, "_now", lambda: clock["t"])
 
     async def scenario():
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         async with SessionLocal() as db:
-            # Never fetched and marked failed: no fetch, nothing stored.
-            history.mark_failed(REGION, 35)
+            # Never fetched: no fetch, nothing stored, no failure remembered.
             assert not await history.is_fresh(db, REGION, 35)
-            assert await history.get_history(REGION, 35, db) == []
+            assert await history.get_history(REGION, 35, db, fetch=False) == []
             assert state["n"] == 0
-            # Fresh rows are served whatever the stamp says.
+            assert not history.recently_failed(REGION, 35)
+            assert await history.fetched_at(db, REGION, 35) is None
+            # Fresh rows are served.
             await history.get_history(REGION, TYPE_ID, db)
             assert await history.is_fresh(db, REGION, TYPE_ID)
-            history.mark_failed(REGION, TYPE_ID)
-            assert len(await history.get_history(REGION, TYPE_ID, db)) == 3
+            assert len(await history.get_history(REGION, TYPE_ID, db, fetch=False)) == 3
             assert state["n"] == 1
+            # Stale rows are served too, without a fetch, and the next
+            # ordinary call fetches as usual.
+            clock["t"] = t0 + history.HISTORY_TTL + timedelta(hours=1)
+            assert len(await history.get_history(REGION, TYPE_ID, db, fetch=False)) == 3
+            assert state["n"] == 1
+            assert not history.recently_failed(REGION, TYPE_ID)
+            await history.get_history(REGION, TYPE_ID, db)
+            assert state["n"] == 2
 
     _run(scenario())
 
