@@ -54,6 +54,7 @@ class Env:
         self.factory = factory
         self.ids = [2001, 2002, 2003]
         self.total = None
+        self.blueprints = None
         self.calls = 0
         self.inflight = 0
         self.seen = set()
@@ -103,7 +104,8 @@ def env(monkeypatch):
     async def expand(db, user_id, kind, ref):
         ids = list(e.ids)
         return scan_lists.Expanded("Sample", ids, {i: f"Item {i}" for i in ids},
-                                   e.total if e.total is not None else len(ids))
+                                   e.total if e.total is not None else len(ids),
+                                   blueprints=e.blueprints)
 
     async def get_price_map(db):
         e.price_calls += 1
@@ -376,6 +378,21 @@ def test_cap_note_when_the_list_was_cut(env):
     env.total = 412
     job, result = _run(_scan_and_load(env))
     assert any("3 of 412 scanned" in n for n in result["notes"])
+
+
+def test_the_blueprint_record_is_saved_with_the_other_notes(env):
+    record = {"kind": "blueprints_unread", "characters": 3, "corporations": 1,
+              "reasons": {"failed": ["Sample Pilot A"], "corporation": ["Sample Corp"]}}
+    env.blueprints = record
+    env.total = 412
+    job, result = _run(_scan_and_load(env))
+    assert result["notes"][0] == record          # a dict, round-tripped through JSON
+    assert any(isinstance(n, str) and "3 of 412 scanned" in n for n in result["notes"])
+
+
+def test_no_blueprint_record_means_only_plain_notes(env):
+    job, result = _run(_scan_and_load(env))
+    assert all(isinstance(n, str) for n in result["notes"])
 
 
 def test_a_benchmark_error_costs_only_that_item(env):

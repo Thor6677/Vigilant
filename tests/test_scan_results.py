@@ -151,6 +151,21 @@ def test_save_replaces_and_load_is_per_user(factory):
     assert first["scanned_at"] == NOW and first["notes"] == ["n"]
 
 
+def test_structured_and_plain_notes_both_survive_save_and_load(factory):
+    record = {"kind": "blueprints_unread", "characters": 2, "corporations": 0,
+              "reasons": {"no_scope": ["Sample Pilot A"]}}
+
+    async def go():
+        async with factory() as db:
+            await scan_results.save(
+                db, 91, "blueprints", 0, label="My blueprints", status="complete",
+                item_total=1, item_scanned=1, settings=SETTINGS, routes={}, now=NOW,
+                notes=[record, "plain note"], rows=[])
+        async with factory() as db:
+            return await scan_results.load(db, 91, "blueprints", 0, NOW)
+    assert _run(go())["notes"] == [record, "plain note"]
+
+
 def test_save_refuses_nan_and_infinity(factory):
     async def go(bad):
         async with factory() as db:

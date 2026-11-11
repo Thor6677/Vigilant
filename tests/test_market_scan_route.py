@@ -967,6 +967,79 @@ def test_result_names_are_escaped(app_db, factory):
     assert "<img src=x>" not in html
 
 
+def _unread(chars, corps, **reasons):
+    return {"kind": "blueprints_unread", "characters": chars, "corporations": corps,
+            "reasons": reasons}
+
+
+def test_unread_blueprint_owners_are_one_folded_summary(app_db, factory):
+    names = [f"Sample Pilot {i:02d}" for i in range(17)]
+    notes = [_unread(25, 6, failed=names, dead_token=["Sample Pilot X"],
+                     corporation=["Sample Corp A", "Sample Corp B", "Sample Corp C",
+                                  "Sample Corp D"]),
+             "300 of 412 scanned; pick a narrower list to cover the rest.",
+             "EVE's price list was unavailable, so build costs are missing."]
+    _run(save_result(factory, USER_ID, [_ok("Sample Hull", TYPE_ID)], kind="blueprints",
+                     ref=0, label="My blueprints", notes=notes))
+    html = _result(_authed_client(), "kind=blueprints&ref=0")
+    assert html.count("<details") == 1
+    assert ("Blueprints from 18 of 25 characters and 4 of 6 corporations couldn&#39;t be "
+            "read, so this list may be missing items.") in html
+    assert "Show which" in html
+    assert "Need to sign in again: Sample Pilot X" in html
+    assert "Couldn&#39;t be loaded: Sample Pilot 00, Sample Pilot 01" in html
+    assert "Corporations that couldn&#39;t be read: Sample Corp A, Sample Corp B" in html
+    assert "Couldn&#39;t load" not in html
+    # The other notes stay plain lines; the 22 old lines are gone.
+    assert html.count('class="hs-note"') == 2      # the cap and price-list lines
+    assert "300 of 412 scanned" in html and "price list was unavailable" in html
+
+
+def test_unread_owner_names_are_escaped(app_db, factory):
+    evil = "<script>alert(1)</script>"
+    _run(save_result(factory, USER_ID, [_ok("Sample Hull", TYPE_ID)], kind="blueprints",
+                     ref=0, notes=[_unread(2, 1, failed=[evil], corporation=[evil])]))
+    html = _result(_authed_client(), "kind=blueprints&ref=0")
+    assert "<script>alert(1)" not in html and "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+    assert "<details" in html
+
+
+def test_an_old_result_with_plain_notes_renders_its_lines(app_db, factory):
+    old = ["Sample Pilot hasn't shared blueprints with Vigilant.",
+           "Couldn't load Sample Pilot B's blueprints."]
+    _run(save_result(factory, USER_ID, [_ok("Sample Hull", TYPE_ID)], kind="blueprints",
+                     ref=0, notes=old))
+    html = _result(_authed_client(), "kind=blueprints&ref=0")
+    assert "<details" not in html
+    assert html.count('<div class="hs-note">') == 2
+    assert "Sample Pilot hasn&#39;t shared blueprints with Vigilant." in html
+
+
+def test_a_record_with_nothing_to_report_shows_nothing(app_db, factory):
+    _run(save_result(factory, USER_ID, [_ok("Sample Hull", TYPE_ID)], kind="blueprints",
+                     ref=0, notes=[_unread(3, 1)]))
+    html = _result(_authed_client(), "kind=blueprints&ref=0")
+    assert "<details" not in html and 'class="hs-note"' not in html
+
+
+def test_unread_summary_css_wraps_and_shows_the_marker():
+    css = source("market_hub_scan.html")
+    block = css[css.index(".hs-unread {"):css.index(".hs-unread-line")]
+    assert "overflow-wrap:anywhere" in block and "min-width:0" in block
+    assert "list-style:none" not in css[css.index(".hs-unread"):css.index(".hs-unread") + 700]
+    assert "overflow-wrap:anywhere" in css[css.index(".hs-unread-line"):][:150]
+
+
+def test_page_without_a_result_says_blueprints_are_counted_at_the_start(app_db):
+    c = _authed_client()
+    for url in ("/market/hub-scan?kind=blueprints",
+                "/market/hub-scan/status?kind=blueprints&ref=0",
+                "/market/hub-scan/status?kind=blueprints&ref=7"):
+        html = c.get(url).text
+        assert '<span id="hs-count">Your blueprints are counted when the scan starts.</span>' in html
+        assert "is-blank" not in _tag(html, 'id="hs-status"')
+
+
 def test_page_escapes_watchlist_names(app_db, factory):
     _run(_add_watchlist(factory, USER_ID, "<script>alert(2)</script>"))
     html = _authed_client().get("/market/hub-scan?kind=watchlist").text

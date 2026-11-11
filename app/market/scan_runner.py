@@ -360,7 +360,11 @@ async def _run(job: Job) -> None:
                 job.label, job.total = listing.label, len(listing.type_ids)
                 logger.info("hub scan started: user %s, %s %s, %d items",
                             job.user_id, job.kind, job.ref, job.total)
-                notes = list(listing.notes)
+                # Plain strings, plus (blueprint lists) one structured record
+                # of the owners that could not be read.
+                notes: list = list(listing.notes)
+                if listing.blueprints:
+                    notes.insert(0, listing.blueprints)
                 if listing.total > len(listing.type_ids):
                     notes.append(f"{len(listing.type_ids)} of {listing.total} scanned; "
                                  "pick a narrower list to cover the rest.")

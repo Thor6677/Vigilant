@@ -111,10 +111,10 @@ def test_blueprints_collapse_duplicates_and_drop_non_market(factory, monkeypatch
     monkeypatch.setattr(scan_lists.owned_blueprints, "character_rows", chars)
     monkeypatch.setattr(scan_lists.owned_blueprints, "corporation_rows", corp)
     e = _run(_expand(factory, USER_ID, "blueprints", 0))
-    assert e.type_ids == [2002, 2001] and e.notes == [] and e.label == "My blueprints"
+    assert e.type_ids == [2002, 2001] and e.notes == [] and e.blueprints is None and e.label == "My blueprints"
 
 
-def test_unreadable_corporation_and_failing_character_become_notes(factory, monkeypatch):
+def test_unreadable_corporation_and_failing_character_are_recorded(factory, monkeypatch):
     async def chars(db, char):
         raise RuntimeError("token")
 
@@ -124,9 +124,10 @@ def test_unreadable_corporation_and_failing_character_become_notes(factory, monk
     monkeypatch.setattr(scan_lists.owned_blueprints, "character_rows", chars)
     monkeypatch.setattr(scan_lists.owned_blueprints, "corporation_rows", corp)
     e = _run(_expand(factory, USER_ID, "blueprints", 0))
-    assert e.type_ids == [] and len(e.notes) == 2
-    assert "Sample Pilot" in e.notes[0]
-    assert "Sample Corp" in e.notes[1]
+    assert e.type_ids == [] and e.notes == []
+    assert e.blueprints == {"kind": "blueprints_unread", "characters": 1, "corporations": 1,
+                            "reasons": {"failed": ["Sample Pilot"],
+                                        "corporation": ["Sample Corp"]}}
 
 
 def test_a_dead_token_is_skipped_with_a_note(factory, monkeypatch):
@@ -144,8 +145,8 @@ def test_a_dead_token_is_skipped_with_a_note(factory, monkeypatch):
     monkeypatch.setattr(scan_lists.owned_blueprints, "corporation_rows", corp)
     e = _run(_expand(factory, USER_ID, "blueprints", 0))
     assert e.type_ids == [2002]
-    assert e.notes == ["Sample Pilot needs to sign in again, so their blueprints "
-                       "aren't counted."]
+    assert e.notes == []
+    assert e.blueprints["reasons"] == {"dead_token": ["Sample Pilot"]}
 
 
 def test_watchlist_must_belong_to_the_user(factory):
@@ -225,7 +226,8 @@ def test_one_failing_character_does_not_stop_the_next(factory, monkeypatch):
     monkeypatch.setattr(scan_lists.owned_blueprints, "corporation_rows", corp)
     e = _run(_expand(factory, USER_ID, "blueprints", 0))
     assert e.type_ids == [2001]
-    assert "Couldn't load Sample Pilot's blueprints." in e.notes
+    assert e.blueprints["reasons"] == {"failed": ["Sample Pilot"]}
+    assert e.blueprints["characters"] == 2
 
 
 def test_a_failing_reload_after_rollback_does_not_raise(factory, monkeypatch):
@@ -245,11 +247,10 @@ def test_a_failing_reload_after_rollback_does_not_raise(factory, monkeypatch):
     monkeypatch.setattr(scan_lists.AsyncSession, "refresh", broken_refresh)
     e = _run(_expand(factory, USER_ID, "blueprints", 0))
     assert e.type_ids == []
-    assert e.notes.count("Couldn't load Sample Pilot's blueprints.") == 1
-    assert e.notes.count("Couldn't load Second Pilot's blueprints.") == 1
+    assert sorted(e.blueprints["reasons"]["failed"]) == ["Sample Pilot", "Second Pilot"]
 
 
-def test_a_full_page_adds_a_may_be_incomplete_note(factory, monkeypatch):
+def test_a_full_page_records_the_owner_as_possibly_incomplete(factory, monkeypatch):
     async def chars(db, char):
         return [{"type_id": 3001}, {"type_id": 3002}], "tok"
 
@@ -260,10 +261,54 @@ def test_a_full_page_adds_a_may_be_incomplete_note(factory, monkeypatch):
     monkeypatch.setattr(scan_lists.owned_blueprints, "character_rows", chars)
     monkeypatch.setattr(scan_lists.owned_blueprints, "corporation_rows", corp)
     e = _run(_expand(factory, USER_ID, "blueprints", 0))
-    assert e.notes == [
-        "Sample Pilot's blueprint list may be incomplete (over 10,000 blueprints).",
-        "Sample Corp's blueprint list may be incomplete (over 10,000 blueprints).",
-    ]
+    assert e.notes == []
+    assert e.blueprints["reasons"] == {"incomplete": ["Sample Pilot", "Sample Corp"]}
+
+
+def test_a_mix_of_outcomes_is_one_record_with_counts(factory, monkeypatch):
+    """No scope, dead token, failed load, over-cap list and an all-fine
+    character, plus an unreadable corporation and a fine one."""
+    async def go():
+        async with factory() as db:
+            for cid, name, corp, scopes in (
+                    (601, "Sample Pilot B", 98000002, ""),
+                    (602, "Sample Pilot C", 98000002, perms.BLUEPRINTS),
+                    (603, "Sample Pilot D", 98000002, perms.BLUEPRINTS),
+                    (604, "Sample Pilot E", 98000002, perms.BLUEPRINTS),
+                    (605, "Sample Pilot F", 98000002, perms.BLUEPRINTS)):
+                db.add(Character(character_id=cid, character_name=name, user_id=USER_ID,
+                                 corporation_id=corp, corporation_name="Other Corp",
+                                 access_token="a", refresh_token="r", token_expiry=NOW,
+                                 scopes=scopes))
+            await db.commit()
+    _run(go())
+
+    async def dead(db, ids):
+        return {602}
+
+    async def chars(db, char):
+        if char.character_name == "Sample Pilot D":
+            raise RuntimeError("token")
+        if char.character_name == "Sample Pilot E":
+            return [{"type_id": 3001}, {"type_id": 3002}], "tok"
+        return [{"type_id": 3001}], "tok"
+
+    async def corp(db, corp_id, holders):
+        return None if corp_id == 98000002 else [{"type_id": 3001}]
+
+    monkeypatch.setattr(scan_lists.owned_blueprints, "PAGE_CAP", 2)
+    monkeypatch.setattr(scan_lists.perm_status, "dead_token_ids", dead)
+    monkeypatch.setattr(scan_lists.owned_blueprints, "character_rows", chars)
+    monkeypatch.setattr(scan_lists.owned_blueprints, "corporation_rows", corp)
+    e = _run(_expand(factory, USER_ID, "blueprints", 0))
+    rec = e.blueprints
+    assert rec["kind"] == "blueprints_unread"
+    assert rec["characters"] == 6 and rec["corporations"] == 2
+    assert rec["reasons"] == {
+        "dead_token": ["Sample Pilot C"], "no_scope": ["Sample Pilot B"],
+        "failed": ["Sample Pilot D"], "corporation": ["Other Corp"],
+        "incomplete": ["Sample Pilot E"]}
+    assert e.notes == []
 
 
 def test_same_name_types_keep_the_lower_id_at_the_cap(factory, monkeypatch):

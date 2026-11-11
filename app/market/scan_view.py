@@ -44,6 +44,78 @@ OLD_RESULT_LINE = ("This result was saved before per-hub figures were kept; resc
                    "every item for {hub}.")
 
 
+UNREAD_TAIL = "so this list may be missing items."
+UNREAD_ALL = "None of your {what}' blueprints could be read."
+INCOMPLETE_SUMMARY = "Some blueprint lists may be incomplete, so this list may be missing items."
+# Reason -> the lead of its detail line, in the order shown.
+UNREAD_REASONS = (
+    ("dead_token", "Need to sign in again"),
+    ("no_scope", "Haven't shared blueprints with Vigilant"),
+    ("failed", "Couldn't be loaded"),
+    ("corporation", "Corporations that couldn't be read"),
+    ("incomplete", "List may be incomplete (over 10,000 blueprints)"),
+)
+UNREAD_KIND = "blueprints_unread"
+
+
+def _count(value) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}" if n == 1 else f"{n} {word}s"
+
+
+def unread_summary(record: dict) -> dict | None:
+    """{"summary": sentence, "lines": [grouped detail lines]} for a stored
+    `blueprints_unread` record, or None when it has nothing to say. Plain text:
+    the template escapes it (names are user-controlled). Reads defensively:
+    a stored record is data, not trusted shape. Names are sorted, ignoring case."""
+    stored = record.get("reasons")
+    stored = stored if isinstance(stored, dict) else {}
+    names = {}
+    for key, _lead in UNREAD_REASONS:
+        raw = stored.get(key)
+        names[key] = sorted({str(n) for n in raw if n is not None}, key=lambda n: (n.lower(), n)) \
+            if isinstance(raw, list) else []
+    lines = [f"{lead}: {', '.join(names[key])}" for key, lead in UNREAD_REASONS if names[key]]
+    if not lines:
+        return None
+    chars, corps = _count(record.get("characters")), _count(record.get("corporations"))
+    bad_chars = len(names["dead_token"]) + len(names["no_scope"]) + len(names["failed"])
+    bad_corps = len(names["corporation"])
+    chars, corps = max(chars, bad_chars), max(corps, bad_corps)
+    if not (bad_chars or bad_corps):
+        summary = INCOMPLETE_SUMMARY
+    elif bad_chars == chars and bad_corps == corps:
+        what = ("characters' or corporations" if chars and corps
+                else "characters" if chars else "corporations")
+        summary = UNREAD_ALL.format(what=what)
+    else:
+        parts = []
+        if bad_chars:
+            parts.append(f"{bad_chars} of {_plural(chars, 'character')}")
+        if bad_corps:
+            parts.append(f"{bad_corps} of {_plural(corps, 'corporation')}")
+        summary = f"Blueprints from {' and '.join(parts)} couldn't be read, {UNREAD_TAIL}"
+    return {"summary": summary, "lines": lines}
+
+
+def notes_view(notes) -> list:
+    """What the result partial prints above the table, in stored order: a
+    plain string stays a line, a `blueprints_unread` record becomes its
+    summary dict (or nothing), anything else is dropped."""
+    out = []
+    for note in notes or []:
+        if isinstance(note, str):
+            out.append(note)
+        elif isinstance(note, dict) and note.get("kind") == UNREAD_KIND:
+            item = unread_summary(note)
+            if item:
+                out.append(item)
+    return out
+
+
 def parse_filters(hub: str, source: str, losers: str, under: str) -> dict:
     """Unknown values mean "no filter". Items with no profit per day are
     hidden unless `losers` is "show"."""
@@ -230,6 +302,7 @@ def build(result: dict, filters: dict, sort: str, direction: str) -> dict:
     else:
         hub_line = HUB_LINE.format(hub=HUB_NAMES[hub])
     return {
+        "notes": notes_view(result.get("notes")),
         "rows": [display_row(r, routes, show_route)
                  for r in _sorted(shown, sort, descending)],
         "show_route": show_route,

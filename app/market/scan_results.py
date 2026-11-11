@@ -109,7 +109,7 @@ def _dumps(value) -> str:
 
 async def save(db: AsyncSession, user_id: int, kind: str, ref: int, *, label: str,
                status: str, item_total: int, item_scanned: int, settings: Settings,
-               notes: list[str], routes: dict, rows: list[dict], now: datetime) -> None:
+               notes: list, routes: dict, rows: list[dict], now: datetime) -> None:
     # Serialise first so a bad value raises before the session is touched.
     settings_json, notes_json = _dumps(settings.as_dict()), _dumps(notes)
     routes_json, rows_json = _dumps(routes), _dumps(rows)

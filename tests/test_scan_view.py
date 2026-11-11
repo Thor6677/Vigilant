@@ -406,3 +406,80 @@ def test_settings_text_says_what_the_result_was_computed_with():
              origin_name="Sample System")
     assert v.settings_text(s) == ("Budget 1.5B per item · market share 12.5% · "
                                   "sales tax 3.37% · broker fee 1.5% · from Sample System")
+
+
+# ── unread blueprint owners ────────────────────────────────────────────────
+
+def rec(chars=0, corps=0, **reasons):
+    return {"kind": "blueprints_unread", "characters": chars, "corporations": corps,
+            "reasons": reasons}
+
+
+def test_summary_for_characters_only():
+    got = v.unread_summary(rec(25, 0, failed=[f"Sample Pilot {i}" for i in range(18)]))
+    assert got["summary"] == ("Blueprints from 18 of 25 characters couldn't be read, "
+                              "so this list may be missing items.")
+
+
+def test_summary_for_corporations_only_even_with_characters_considered():
+    got = v.unread_summary(rec(3, 6, corporation=["Sample Corp A", "Sample Corp B"]))
+    assert got["summary"] == ("Blueprints from 2 of 6 corporations couldn't be read, "
+                              "so this list may be missing items.")
+
+
+def test_summary_for_both():
+    got = v.unread_summary(rec(25, 6, failed=[f"P{i}" for i in range(17)],
+                               dead_token=["Q"], corporation=["A", "B", "C", "D"]))
+    assert got["summary"] == ("Blueprints from 18 of 25 characters and 4 of 6 corporations "
+                              "couldn't be read, so this list may be missing items.")
+
+
+def test_summary_singular():
+    got = v.unread_summary(rec(2, 1, no_scope=["Sample Pilot A"], corporation=["Sample Corp"]))
+    assert got["summary"] == ("Blueprints from 1 of 2 characters and 1 of 1 corporation "
+                              "couldn't be read, so this list may be missing items.")
+
+
+def test_summary_when_everything_failed():
+    both = v.unread_summary(rec(1, 1, failed=["A"], corporation=["Y"]))
+    assert both["summary"] == "None of your characters' or corporations' blueprints could be read."
+    assert both["lines"]       # the detail is kept
+    only = v.unread_summary(rec(2, 0, failed=["A", "B"]))
+    assert only["summary"] == "None of your characters' blueprints could be read."
+
+
+def test_incomplete_owners_are_not_counted_as_unread():
+    mixed = v.unread_summary(rec(5, 1, failed=["A"], incomplete=["Q"]))
+    assert mixed["summary"].startswith("Blueprints from 1 of 5 characters couldn't")
+    assert mixed["lines"][-1] == "List may be incomplete (over 10,000 blueprints): Q"
+    only = v.unread_summary(rec(5, 1, incomplete=["Q"]))
+    assert "couldn't be read" not in only["summary"]
+    assert only["lines"] == ["List may be incomplete (over 10,000 blueprints): Q"]
+
+
+def test_detail_lines_are_grouped_by_reason_with_sorted_names():
+    got = v.unread_summary(rec(
+        9, 2, incomplete=["Q"], corporation=["Sample Corp Z", "Sample Corp Y"],
+        failed=["delta", "Echo", "Foxtrot"], no_scope=["C", "B"], dead_token=["A"]))
+    assert got["lines"] == [
+        "Need to sign in again: A",
+        "Haven't shared blueprints with Vigilant: B, C",
+        "Couldn't be loaded: delta, Echo, Foxtrot",
+        "Corporations that couldn't be read: Sample Corp Y, Sample Corp Z",
+        "List may be incomplete (over 10,000 blueprints): Q",
+    ]
+
+
+def test_nothing_to_report_shows_nothing():
+    assert v.unread_summary(rec(3, 1)) is None
+    assert v.unread_summary({"kind": "blueprints_unread"}) is None
+    assert v.unread_summary({"kind": "blueprints_unread", "reasons": "junk"}) is None
+
+
+def test_notes_view_keeps_plain_lines_and_old_results_as_they_were():
+    assert v.notes_view(["a", "b"]) == ["a", "b"]
+    assert v.notes_view(None) == [] and v.notes_view([]) == []
+    got = v.notes_view([rec(1, 0, failed=["A"]), "cap note", {"kind": "other"}, 5, rec(1, 0)])
+    assert got[1] == "cap note" and len(got) == 2
+    assert got[0]["summary"].startswith("None of your characters'")
+    assert v.build(result([]) | {"notes": ["x"]}, F, "profit_day", "")["notes"] == ["x"]

@@ -76,7 +76,9 @@
     <span id="hs-rescan-msg" class="hs-neg" role="status"></span>
 </div>
 <div class="hs-note hs-settings">{{ settings_text }}</div>
-{% for note in result['notes'] %}<div class="hs-note">{{ note }}</div>{% endfor %}
+{% for note in view['notes'] %}{% if note is string %}<div class="hs-note">{{ note }}</div>{% else %}
+<details class="hs-note hs-unread"><summary>{{ note['summary'] }} <span class="hs-show">Show which</span><span class="hs-hide">Hide</span></summary>
+{% for line in note['lines'] %}<div class="hs-unread-line">{{ line }}</div>{% endfor %}</details>{% endif %}{% endfor %}
 {% if view['routes_note'] %}<div class="hs-note">{{ view['routes_note'] }}</div>{% endif %}
 
 <form id="hs-filters" class="hs-filters" hx-get="/market/hub-scan/result" hx-trigger="change"

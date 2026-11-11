@@ -39,6 +39,9 @@ class Expanded:
     names: dict[int, str]
     total: int
     notes: list[str] = field(default_factory=list)
+    # Blueprint lists only: `blueprint_report`'s record, or None when every
+    # owner was read in full (nothing to say).
+    blueprints: dict | None = None
 
 
 async def _market_types(db: AsyncSession, type_ids) -> list[tuple[int, str]]:
@@ -55,9 +58,11 @@ async def _market_types(db: AsyncSession, type_ids) -> list[tuple[int, str]]:
     return sorted(((t, n) for t, n in out), key=lambda r: ((r[1] or "").lower(), r[0]))
 
 
-def _expanded(label: str, rows: list[tuple[int, str]], notes: list[str]) -> Expanded:
+def _expanded(label: str, rows: list[tuple[int, str]], notes: list[str],
+              blueprints: dict | None = None) -> Expanded:
     kept = rows[:CAP]
-    return Expanded(label, [t for t, _ in kept], {t: n for t, n in kept}, len(rows), notes)
+    return Expanded(label, [t for t, _ in kept], {t: n for t, n in kept}, len(rows), notes,
+                    blueprints)
 
 
 async def _category(db: AsyncSession, group_id: int) -> Expanded:
@@ -87,21 +92,40 @@ class _Snap:
     alive: bool = True
 
 
-def _bp_cap_note(name: str, raw) -> list[str]:
+BLUEPRINTS_UNREAD = "blueprints_unread"
+# Why an owner's blueprints are missing or partial, in the order a reader sees them.
+REASONS = ("dead_token", "no_scope", "failed", "corporation", "incomplete")
+
+
+def _bp_incomplete(report: dict, name: str, raw) -> None:
     if raw is not None and len(raw) >= owned_blueprints.PAGE_CAP:
-        return [f"{name}'s blueprint list may be incomplete (over 10,000 blueprints)."]
-    return []
+        report["reasons"]["incomplete"].append(name)
 
 
-async def blueprint_type_ids(db: AsyncSession, user_id: int) -> tuple[set[int], list[str]]:
-    """(blueprint type ids held by the user's characters and corporations, notes)."""
+def blueprint_record(report: dict) -> dict | None:
+    """The stored form of a blueprint walk: None when there is nothing to
+    report, else {"kind": "blueprints_unread", "characters": N, "corporations":
+    M, "reasons": {reason: [owner names]}} with only the reasons that occur.
+    Plain JSON, kept inside a result's notes list beside its plain-text notes."""
+    reasons = {r: list(report["reasons"][r]) for r in REASONS if report["reasons"][r]}
+    if not reasons:
+        return None
+    return {"kind": BLUEPRINTS_UNREAD, "characters": report["characters"],
+            "corporations": report["corporations"], "reasons": reasons}
+
+
+async def blueprint_type_ids(db: AsyncSession, user_id: int) -> tuple[set[int], dict | None]:
+    """(blueprint type ids held by the user's characters and corporations, the
+    `blueprint_record` of whose could not be read in full, or None)."""
     chars = (await db.execute(
         select(Character).where(Character.user_id == user_id)
     )).scalars().all()
     snaps = [_Snap(c.character_id, c.character_name, c.scopes or "",
                    c.corporation_id, c.corporation_name, c) for c in chars]
     found: set[int] = set()
-    notes: list[str] = []
+    report = {"characters": len(snaps), "corporations": 0,
+              "reasons": {r: [] for r in REASONS}}
+    why = report["reasons"]
     try:
         dead = await perm_status.dead_token_ids(db, [s.character_id for s in snaps])
     except Exception as exc:
@@ -111,18 +135,17 @@ async def blueprint_type_ids(db: AsyncSession, user_id: int) -> tuple[set[int], 
         if not snap.alive:
             continue
         if perms.BLUEPRINTS not in snap.scopes:
-            notes.append(f"{snap.character_name} hasn't shared blueprints with Vigilant.")
+            why["no_scope"].append(snap.character_name)
             continue
         if snap.character_id in dead:
-            notes.append(f"{snap.character_name} needs to sign in again, so "
-                         "their blueprints aren't counted.")
+            why["dead_token"].append(snap.character_name)
             continue
         try:
             raw, _token = await owned_blueprints.character_rows(db, snap.char)
         except Exception:
             logger.warning("hub scan: blueprints for %s failed", snap.character_id,
                            exc_info=True)
-            notes.append(f"Couldn't load {snap.character_name}'s blueprints.")
+            why["failed"].append(snap.character_name)
             try:
                 await db.rollback()
             except Exception:
@@ -139,29 +162,30 @@ async def blueprint_type_ids(db: AsyncSession, user_id: int) -> tuple[set[int], 
                                    exc_info=True)
                     other.alive = False
                     if j > i:
-                        notes.append(f"Couldn't load {other.character_name}'s blueprints.")
+                        why["failed"].append(other.character_name)
             continue
-        notes += _bp_cap_note(snap.character_name, raw)
+        _bp_incomplete(report, snap.character_name, raw)
         found.update(int(r["type_id"]) for r in raw or [] if r.get("type_id"))
     corps: dict[int, list[_Snap]] = {}
     for s in snaps:
         if s.corporation_id and s.corporation_id >= NPC_CORP_CEILING:
             corps.setdefault(s.corporation_id, []).append(s)
+    report["corporations"] = len(corps)
     for corp_id, members in sorted(corps.items()):
         name = members[0].corporation_name or f"Corp {corp_id}"
         holders = [m.char for m in members
                    if m.alive and perms.CORP_BLUEPRINTS in m.scopes]
         raw = await owned_blueprints.corporation_rows(db, corp_id, holders) if holders else None
         if raw is None:
-            notes.append(f"{name}'s blueprints couldn't be read, so they aren't included.")
+            why["corporation"].append(name)
             continue
-        notes += _bp_cap_note(name, raw)
+        _bp_incomplete(report, name, raw)
         found.update(int(r["type_id"]) for r in raw if r.get("type_id"))
-    return found, notes
+    return found, blueprint_record(report)
 
 
 async def _blueprints(db: AsyncSession, user_id: int) -> Expanded:
-    bp_ids, notes = await blueprint_type_ids(db, user_id)
+    bp_ids, record = await blueprint_type_ids(db, user_id)
     products: set[int] = set()
     ids = list(bp_ids)
     for i in range(0, len(ids), 500):
@@ -169,7 +193,7 @@ async def _blueprints(db: AsyncSession, user_id: int) -> Expanded:
             select(SDEBlueprintInfo.product_type_id)
             .where(SDEBlueprintInfo.blueprint_type_id.in_(ids[i:i + 500]))
         )).all() if p)
-    return _expanded("My blueprints", await _market_types(db, products), notes)
+    return _expanded("My blueprints", await _market_types(db, products), [], record)
 
 
 async def _watchlist(db: AsyncSession, user_id: int, watchlist_id: int) -> Expanded:
