@@ -180,6 +180,16 @@ An EVE Online companion dashboard that gives you a unified view of all your char
 - **Price history** — daily price history and traded volume for any published item
 - **Hub comparison** — on any item page, enter a quantity and a cost per unit and compare Jita, Amarr, Dodixie, Hek and Rens side by side: lowest sell, units sold per day (30-day regional rate), competing stock and days of stock, profit and margin for listing a sell order, the price and depth for selling straight to buy orders, and an estimate of how long the batch will take. Each hub gets a plain verdict (Fast / Steady / Slow / Thin market, plus Under-supplied or Saturated). Leave the cost blank to use a benchmark build cost, or enter your own figure to use that instead; Build Finder and the manufacturing calculator link in with theirs. An optional starting system shows jumps along EVE's own "prefer safer" route (the one Gate Check uses) and whether it stays in highsec. After a failed lookup, the market pages wait about 90 seconds before asking EVE's API again.
 
+### Hub Scan (`/market/hub-scan`)
+Hub comparison for a whole list of items at once: which hub is the best place to sell each one, and what that earns per day.
+- **Three kinds of list** — a market category (browse the market tree), your blueprints and your corporations' blueprints (what you could build), or a saved watchlist. Watchlists are yours alone: create, rename and delete them on the Hub Scan page, add items by searching by name, use "Add to watchlist" on any item page, or use "Add all" on a scan result to add every item in it to one of your lists. A list holds at most 300 items; anything beyond that is left out and the page says so.
+- **Budget and market share** — set a budget per item and the share of a hub's daily sales you expect to capture. They size the quantity for each item, and are remembered with your other market settings.
+- **Build or haul** — where a blueprint is known, each hub is priced both ways: build it (the benchmark build cost from the item page) or haul it from Jita (the average price paid walking Jita's sell orders for the quantity, no broker fee; not offered for Jita itself or when Jita has nothing listed). The best hub is the one, across every hub and both sources, with the highest profit per day; ties go to the higher margin, then to hub order (Jita, Amarr, Dodixie, Hek, Rens). The best figure from the other source is shown small beneath.
+- **How profit per day is worked out** — profit each (selling price less sales tax and broker fee, less cost) times the units you would sell per day at that hub. That is your quantity over the typical days to sell it, but never more than your market share of the hub's daily sales (the lower of its 30-day and 7-day rates). The quantity is what the budget covers, limited to 7 days of that share and, for hauls, to what Jita has listed near its lowest price. The selling price is the lowest sell listed, but never more than 1.25 times the highest daily price of the last 30 days (such a row is marked as price capped, so it will not match the item page). When nothing is listed, the median of recent daily averages is used and the row is marked "none listed".
+- **Runs in the background** — a scan keeps going if you leave the page. Each user can run one at a time, two run at once across the whole site and the rest wait their turn; you can cancel at any time. One result is kept per list and shown the next time you open it; scanning again replaces it.
+- **Public data only** — it reads EVE's public market API, and stores compact per-item summaries (not daily history) that are cleaned up daily.
+- **Limits to keep in mind** — sales history is per region and includes sales to buy orders, so the figures lean optimistic. A result is a snapshot of the market when the scan ran, not a live view.
+
 ### Mining Ledger (`/industry/mining-ledger`)
 - **Unified cross-character/corp mining** — aggregated view across all characters and corps
 - **Stacked ore chart** — visual breakdown by ore type over time
@@ -909,6 +919,7 @@ Character-level scopes are always requested. Corporation-level scopes are only u
 | `/intel/gatecheck` | Route safety checker with gatecamp and war target detection |
 | `/intel/dscan` | D-Scan paste parser with ship categorization |
 | `/structure-timers` | Shared structure timer board with ACL |
+| `/market/hub-scan` | Hub Scan: best hub and profit per day for a category, your blueprints or a watchlist |
 | `/industry` | Manufacturing calculator with nested build/buy |
 | `/industry/compression` | Compression calculator with LP solver |
 | `/industry/mining-ledger` | Unified cross-character/corp mining ledger |
