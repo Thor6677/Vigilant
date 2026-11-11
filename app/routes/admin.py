@@ -98,6 +98,7 @@ USER_OWNED_TABLES = (
     "skill_farm_settings",  # T-073
     "skill_farm_pilots",    # T-073 — also in PER_CHARACTER_USER_TABLES (app/auth/purge.py)
     "user_dashboard_prefs",
+    "market_hub_prefs",  # one row per user: the hub comparison's saved inputs
     "held_character_removals",  # the expiry sweep's held removals (app/auth/expiry.py)
 )
 

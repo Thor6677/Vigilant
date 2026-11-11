@@ -71,6 +71,7 @@ from app.routes.fitting import router as fitting_router
 from app.routes.landings import router as landings_router
 from app.routes.palette import router as palette_router
 from app.routes.market import router as market_router
+from app.routes.market_hubs import router as market_hubs_router
 from app.routes.networth import router as networth_router
 from app.routes.stockpiles import router as stockpiles_router
 from app.routes.pnl import router as pnl_router
@@ -266,6 +267,7 @@ app.include_router(fitting_router)
 app.include_router(landings_router)
 app.include_router(palette_router)
 app.include_router(market_router)
+app.include_router(market_hubs_router)
 app.include_router(networth_router)
 app.include_router(stockpiles_router)
 app.include_router(pnl_router)

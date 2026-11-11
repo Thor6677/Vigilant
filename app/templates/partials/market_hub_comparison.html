@@ -1,0 +1,210 @@
+{# htmx partial — the first load swaps all of it into #mk-hubs on
+   market_type.html (innerHTML), so no extends; the .hc-* rules are in that
+   page's <style> block. Context is built by app/routes/market_hubs.py from
+   app/market/hub_view.py.
+
+   The form is rendered only by that first load, and makes no request of
+   its own. #hc-results does: on a change anywhere in the form (Enter in a
+   field fires one when its value has changed) it fetches the same partial
+   with the form's values and swaps in only the new #hc-results
+   (hx-select + outerHTML, which carries these same attributes, so the next
+   change works too). Typing, focus and the save status (#hc-saved, outside
+   the results) survive a refresh, and an HTTP error, which base.html's
+   ISS-007 handler writes into the element that made the request, replaces
+   the results rather than the inputs. Everything that depends on the inputs
+   therefore lives inside #hc-results.
+
+   The form has several text fields and no submit button, so under the HTML
+   implicit-submission rules Enter never submits it natively (which would
+   navigate away). Keep every button type="button"; do not add a submit
+   button.
+
+   hx-sync: a refresh and a retry both sync on #hc-results with replace, so
+   whichever starts second aborts the first, and nothing swaps into a
+   #hc-results that has already been replaced.
+
+   The retry and save buttons carry data-htmx-no-error="1": that handler
+   checks its opt-out on the requesting element and would otherwise write
+   its "couldn't load" pill INSIDE the button, replacing its label. A failed
+   retry leaves the row saying unavailable. A save clears #hc-saved when it
+   starts and a failed one writes "Not saved; try again." there: the page
+   script in market_type.html does both, keyed on the button's id (#hc-save),
+   since htmx swaps nothing for a 401, 403, 5xx or no response. A database
+   error is answered with a 200 "Not saved" line, swapped in like "Saved.".
+
+   Desktop: one table, a row per hub with its verdict underneath (m-hide on
+   phones). Phones: one card per hub (m-only). No inline handlers (CSP). #}
+{% set span = 9 if show_route else 8 %}
+{% macro tags(r) -%}
+<span class="hc-tag hc-{{ r.speed }}">{{ r.speed_label }}</span>
+{%- if r.supply %} <span class="hc-tag hc-{{ r.supply }}">{{ r.supply_label }}</span>{% endif %}
+{%- endmacro %}
+{% macro trend(r) -%}
+{% if r.trend == 'up' %}<span class="hc-pos" title="7-day rate is above the 30-day rate" aria-hidden="true">▲</span><span class="visually-hidden">rising</span>
+{%- elif r.trend == 'down' %}<span class="hc-neg" title="7-day rate is below the 30-day rate" aria-hidden="true">▼</span><span class="visually-hidden">falling</span>{% endif %}
+{%- endmacro %}
+{# retry=1 makes the server forget this item's remembered upstream failures
+   (orders and history, all five hubs) before fetching; only this button
+   sends it, never the refresh on a change in the form. #}
+{% macro retry() -%}
+<button type="button" class="hc-retry" hx-get="/market/type/{{ type_id }}/hubs"
+        hx-include="#hc-form" hx-vals='{"retry": "1"}' hx-target="#hc-results"
+        hx-select="#hc-results" hx-swap="outerHTML"
+        hx-sync="#hc-results:replace" data-htmx-no-error="1">retry</button>
+{%- endmacro %}
+
+<div class="b-section hc">
+    <div class="b-section-head">
+        <span class="b-label">Hub comparison</span>
+    </div>
+
+    <form id="hc-form" class="hc-inputs">
+        <label class="hc-fld" for="hc-qty"><span>Quantity</span>
+            <input class="b-input" id="hc-qty" type="text" inputmode="numeric" name="qty" value="{{ qty }}" style="width:6rem;"></label>
+        {# No inputmode on the cost: a decimal keypad has no letters, so a
+           phone could not type "180m". #}
+        <label class="hc-fld" for="hc-cost"><span>Cost per unit</span>
+            <input class="b-input" id="hc-cost" type="text" name="cost" value="{{ cost_value }}"
+                   placeholder="{{ cost_placeholder }}" style="width:10rem;"></label>
+        {# "build" only when an entry link said the cost is the user's own build;
+           build_cost keeps that link's cost, and the cost-used note says
+           "from your build" only while the cost field still equals it. Both
+           only change how that note names the figure. #}
+        <input type="hidden" id="hc-cost-mode" name="cost_mode" value="{{ cost_mode }}">
+        <input type="hidden" id="hc-build-cost" name="build_cost" value="{{ build_cost }}">
+        <label class="hc-fld" for="hc-origin"><span>Starting system</span>
+            <input class="b-input" id="hc-origin" type="text" name="origin" value="{{ origin_name }}" placeholder="none" style="width:9rem;"></label>
+        <label class="hc-fld" for="hc-tax"><span>Sales tax %</span>
+            <input class="b-input" id="hc-tax" type="text" inputmode="decimal" name="sales_tax" value="{{ sales_tax_pct }}" style="width:5rem;"></label>
+        <label class="hc-fld" for="hc-broker"><span>Broker fee %</span>
+            <input class="b-input" id="hc-broker" type="text" inputmode="decimal" name="broker_fee" value="{{ broker_fee_pct }}" style="width:5rem;"></label>
+        <span class="hc-fld">
+            {# Nothing above this button may carry hx-select (it is inherited,
+               and would filter the "Saved." reply down to nothing). #}
+            <button type="button" id="hc-save" class="b-btn is-ghost" hx-post="/market/hub-prefs"
+                    hx-include="#hc-form" hx-target="#hc-saved"
+                    hx-swap="innerHTML" data-htmx-no-error="1"
+                    aria-label="Save fees and start">{# the full label wraps on a phone #}<span class="m-hide">Save fees and start</span><span class="m-only">Save</span></button>
+        </span>
+        <span id="hc-saved" class="hc-mut" role="status"></span>
+    </form>
+
+    <div id="hc-results" hx-get="/market/type/{{ type_id }}/hubs"
+         hx-trigger="change from:#hc-form" hx-include="#hc-form" hx-target="this"
+         hx-select="#hc-results" hx-swap="outerHTML" hx-sync="this:replace">
+    <div class="hc-age hc-mut">{{ age_str }}</div>
+    {% for note in notes %}<div class="hc-note">{{ note }}</div>{% endfor %}
+
+    {% if picks %}
+    {% if no_cover %}<div class="hc-note hc-neg">{{ no_cover }}</div>{% endif %}
+    <div class="hc-picks">
+        {% for p in picks %}
+        <div class="hc-pick">
+            <div class="hc-pick-k">{{ p.k }}</div>
+            <div class="hc-pick-v">{{ p.v }}</div>
+            <div class="hc-pick-d">{{ p.d }}</div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {# The wrapper scrolls the table sideways in windows too narrow for it
+       (641–1000px) instead of the whole page. #}
+    <div class="hc-scroll">
+    <table class="hc-table m-hide">
+        <thead>
+            <tr>
+                <td></td>
+                <th colspan="3" scope="colgroup" class="hc-grp">Market</th>
+                <th colspan="3" scope="colgroup" class="hc-grp hc-gl">List and wait</th>
+                <th colspan="2" scope="colgroup" class="hc-grp hc-gl">Sell now</th>
+                {% if show_route %}<td class="hc-gl"></td>{% endif %}
+            </tr>
+            <tr>
+                <th scope="col">Hub</th><th scope="col">Lowest sell</th><th scope="col">Sold / day</th><th scope="col">Stock · days</th>
+                <th scope="col" class="hc-gl">Profit each</th><th scope="col">Margin</th><th scope="col">Days to sell {{ qty }}</th>
+                <th scope="col" class="hc-gl">Avg price</th><th scope="col">Profit each</th>
+                {% if show_route %}<th scope="col" class="hc-gl">Route</th>{% endif %}
+            </tr>
+        </thead>
+        <tbody>
+        {% for r in rows %}
+            {% if r.unavailable %}
+            <tr class="hc-r">
+                <td><span class="hc-hub">{{ r.name }}</span></td>
+                <td colspan="{{ span }}" class="hc-unavail">Unavailable — {{ retry() }}</td>
+            </tr>
+            {% else %}
+            <tr class="hc-r">
+                <td><span class="hc-hub">{{ r.name }}</span> {{ tags(r) }}</td>
+                <td>{{ r.lowest_sell }}</td>
+                <td>{{ r.demand_30 }} {{ trend(r) }}<span class="hc-small">7d: {{ r.demand_7 }}</span></td>
+                <td>{{ r.stock }}<span class="hc-small">{{ r.stock_days }}</span></td>
+                <td class="hc-gl hc-{{ r.lw_sign }}">{{ r.lw_profit }}</td>
+                <td>{{ r.lw_margin }}</td>
+                <td>{{ r.lw_days }}</td>
+                <td class="hc-gl">{{ r.now_avg }}<span class="hc-small">{{ r.now_fill }}</span></td>
+                <td class="hc-{{ r.now_sign }}">{{ r.now_profit }}</td>
+                {% if show_route %}<td class="hc-gl">{{ r.route or '—' }}<span class="hc-small">{{ r.route_note }}</span></td>{% endif %}
+            </tr>
+            <tr class="hc-s">
+                <td colspan="{{ span + 1 }}">{{ r.verdict }}{% if r.outlier_note %} <span class="hc-mut">({{ r.outlier_note }})</span>{% endif %}{% if r.history_note %} <span class="hc-mut">({{ r.history_note }})</span>{% endif %}</td>
+            </tr>
+            {% endif %}
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+
+    <div class="hc-cards m-only">
+        {% for r in rows %}
+        {% if r.unavailable %}
+        <div class="hc-card">
+            <div class="hc-ch"><span class="hc-hub">{{ r.name }}</span></div>
+            <div class="hc-say">Unavailable — {{ retry() }}</div>
+        </div>
+        {% else %}
+        <div class="hc-card">
+            <div class="hc-ch"><span class="hc-hub">{{ r.name }}</span><span class="hc-tags">{{ tags(r) }}</span></div>
+            <div class="hc-say">{{ r.verdict }}{% if r.outlier_note %} <span class="hc-mut">({{ r.outlier_note }})</span>{% endif %}{% if r.history_note %} <span class="hc-mut">({{ r.history_note }})</span>{% endif %}</div>
+            <div class="hc-mkt">
+                <div><div class="hc-n">{{ r.lowest_sell }}</div><div class="hc-l">Lowest sell</div></div>
+                <div><div class="hc-n">{{ r.demand_30 }} {{ trend(r) }}</div><div class="hc-l">Sold / day</div></div>
+                {# Days of stock go in the label line (beside the count they wrapped),
+                   unspaced and unbreakable so they fit a third of a phone's width. #}
+                <div><div class="hc-n">{{ r.stock }}</div><div class="hc-l">Stock{% if r.stock_days %} <span class="hc-sd">· {{ r.stock_days }}</span>{% endif %}</div></div>
+            </div>
+            <div class="hc-two">
+                <div>
+                    <h4>List and wait</h4>
+                    <div class="hc-row"><span>Profit each</span><span class="hc-{{ r.lw_sign }}">{{ r.lw_profit }}</span></div>
+                    <div class="hc-row"><span>Margin</span><span>{{ r.lw_margin }}</span></div>
+                    <div class="hc-row"><span>Days to sell {{ qty }}</span><span>{{ r.lw_days }}</span></div>
+                    <div class="hc-row"><span>Batch profit</span><span class="hc-{{ r.lw_sign }}">{{ r.lw_batch }}</span></div>
+                </div>
+                <div>
+                    <h4>Sell now</h4>
+                    <div class="hc-row"><span>Avg price</span><span>{{ r.now_avg }}</span></div>
+                    <div class="hc-row"><span>Profit each</span><span class="hc-{{ r.now_sign }}">{{ r.now_profit }}</span></div>
+                    <div class="hc-row"><span>Buy side</span><span>{{ r.now_fill or '—' }}</span></div>
+                    <div class="hc-row"><span>Batch profit</span><span class="hc-{{ r.now_sign }}">{{ r.now_batch }}</span></div>
+                </div>
+            </div>
+            <div class="hc-cf">
+                <span>{% if show_route and r.route %}{{ r.route }}{% if r.route_note %} · {{ r.route_note }}{% endif %}{% endif %}</span>
+                <span>Highest buy {{ r.highest_buy }}</span>
+            </div>
+        </div>
+        {% endif %}
+        {% endfor %}
+    </div>
+
+    <div class="hc-foot">
+        Sold / day is the 30-day rate for the hub's whole region (the game publishes no
+        per-station history) and includes sales to buy orders, so days to sell leans
+        optimistic. Days to sell: best case (you stay cheapest) – typical (you share
+        buyers with stock priced within 10% of the lowest sell). Stock counts only that
+        nearby stock. Sell-now batch profit covers only the units buy orders can take.
+    </div>
+    </div>{# #hc-results #}
+</div>

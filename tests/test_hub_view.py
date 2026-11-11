@@ -1,0 +1,329 @@
+"""Hub comparison display strings. Pure functions."""
+import math
+
+import pytest
+
+from app.market import hub_cost
+from app.market import hub_view as hv
+
+
+@pytest.mark.parametrize("v, expected", [
+    (None, "—"), (312_000_000, "312.0M"), (1_250_000_000, "1.25B"),
+    (45_000, "45.0K"), (950.5, "950.50"),
+])
+def test_fmt_isk(v, expected):
+    assert hv.fmt_isk(v) == expected
+
+
+@pytest.mark.parametrize("v, expected", [
+    (None, "—"), (43_100_000, "+43.1M"), (-3_500_000, "−3.5M"), (0, "+0.00"),
+])
+def test_fmt_signed(v, expected):
+    assert hv.fmt_signed(v) == expected
+
+
+@pytest.mark.parametrize("best, typical, expected", [
+    (None, None, "—"), (0.24, 7.6, "<1 – 8"), (1.7, 4.0, "2 – 4"), (3.0, 3.2, "3"),
+])
+def test_fmt_days_range(best, typical, expected):
+    assert hv.fmt_days_range(best, typical) == expected
+
+
+@pytest.mark.parametrize("raw, expected", [
+    ("180000000", 180e6), ("180,000,000", 180e6), ("180m", 180e6), ("1.2B", 1.2e9),
+    ("45k", 45e3), (" 12.5 ", 12.5), ("", None), ("abc", None), ("-5", None),
+    ("nan", None), ("inf", None),
+])
+def test_parse_isk(raw, expected):
+    assert hv.parse_isk(raw) == expected
+
+
+@pytest.mark.parametrize("raw, expected", [
+    # Thousands-style commas still read.
+    ("1,500", 1500.0), ("180,000,000", 180e6), ("1,500.5", 1500.5), ("2,500m", 2.5e9),
+    # A comma followed by one or two digits at the end may be a decimal comma.
+    ("1,5", None), ("12,50", None), ("1,5m", None), ("180,00", None), ("1, 5", None),
+    # Above a quadrillion ISK is not a cost anyone means.
+    ("1e15", 1e15), ("1000000000000001", None), ("1e300", None), ("1.7e308", None),
+    ("2000000b", None),
+    # Nothing but separators.
+    (",", None), (",,", None), (" , ", None), ("m", None),
+])
+def test_parse_isk_edges(raw, expected):
+    assert hv.parse_isk(raw) == expected
+
+
+@pytest.mark.parametrize("raw", ["-0", "-0.0", "-0m"])
+def test_parse_isk_negative_zero_is_plain_zero(raw):
+    v = hv.parse_isk(raw)
+    assert v == 0.0 and math.copysign(1.0, v) == 1.0
+    assert hv.fmt_cost_input(v) == "0"
+
+
+@pytest.mark.parametrize("v, expected", [
+    (4.35, "4.35"), (0.4, "0.4"), (268_000_000.0, "268000000"), (1.0, "1"), (0.05, "0.05"),
+    (180e6, "180000000"),
+])
+def test_fmt_cost_input_keeps_up_to_two_decimals(v, expected):
+    assert hv.fmt_cost_input(v) == expected
+    assert hv.parse_isk(hv.fmt_cost_input(v)) == v
+
+
+def test_cost_note_names_the_source():
+    assert hv.cost_note(268e6, "benchmark", 10) == (
+        "Cost used: 268.0M each — benchmark (materials at EVE's average reference "
+        "price, ME 10, no job fees or invention cost).")
+    assert hv.cost_note(180e6, "typed", 10) == "Cost used: 180.0M each — your figure."
+    assert hv.cost_note(181.2e6, "build", 2) == "Cost used: 181.2M each — from your build."
+    assert hv.cost_note(None, None, 10) == (
+        "No blueprint for this item — enter a cost per unit to see profit and margin.")
+
+
+def test_no_cost_note_says_why_there_is_no_benchmark():
+    assert hv.cost_note(None, None, 10, hub_cost.NO_BLUEPRINT) == (
+        "No blueprint for this item — enter a cost per unit to see profit and margin.")
+    assert hv.cost_note(None, None, 10, hub_cost.UNPRICED) == (
+        "No benchmark cost right now (a material has no price) — enter a cost per unit "
+        "to see profit and margin.")
+    # A cost in use is named as before, whatever the benchmark's state.
+    assert hv.cost_note(180e6, "typed", 10, hub_cost.UNPRICED) == (
+        "Cost used: 180.0M each — your figure.")
+
+
+def test_adjusted_input_notes():
+    assert hv.qty_note(1_000_000) == "Quantity used: 1000000."
+    assert hv.qty_note(1) == "Quantity used: 1."
+    assert hv.fee_note("Sales tax", 3.37) == "Sales tax used: 3.37%."
+    assert hv.fee_note("Broker fee", 100.0) == "Broker fee used: 100%."
+    assert hv.fee_note("Broker fee", 0.0) == "Broker fee used: 0%."
+    assert hv.fee_note("Sales tax", 2.5) == "Sales tax used: 2.5%."
+
+
+def test_cost_placeholder():
+    assert hv.cost_placeholder(268e6) == "benchmark 268.0M"
+    assert hv.cost_placeholder(None) == "enter a cost"
+
+
+def _result(**over):
+    r = {"demand_30": 5.0, "demand_7": 6.5, "trade_days": 30, "trend": "up",
+         "reference": 330e6, "lowest_sell": 331e6, "highest_buy": 284e6,
+         "outliers": 1, "stock": 14, "days_of_stock": 2.8, "nothing_listed": False,
+         "list": {"price": 331e6, "profit_each": 46.9e6, "margin": 0.175,
+                  "days_best": 2.0, "days_typical": 4.8, "batch_profit": 469e6},
+         "now": {"fillable": 6, "avg_price": 282.7e6, "profit_each": 5.1e6,
+                 "batch_profit": 30.6e6},
+         "speed": "fast", "supply": "under", "verdict": "Sells about 5 a day."}
+    r.update(over)
+    return r
+
+
+def test_hub_row_for_a_normal_hub():
+    row = hv.hub_row("amarr", "Amarr", _result(), {"jumps": 11, "highsec": True}, qty=10)
+    assert row["unavailable"] is False
+    assert row["speed_label"] == "Fast" and row["supply_label"] == "Under-supplied"
+    assert row["lowest_sell"] == "331.0M"
+    assert row["demand_30"] == "5" and row["demand_7"] == "6.5" and row["trend"] == "up"
+    assert row["stock"] == "14" and row["stock_days"] == "2.8 days"
+    assert row["lw_profit"] == "+46.9M" and row["lw_sign"] == "pos"
+    assert row["lw_margin"] == "17.5%" and row["lw_days"] == "2 – 5"
+    assert row["now_avg"] == "282.7M" and row["now_fill"] == "fills 6 of 10"
+    assert row["outlier_note"] == "1 outlier ignored"
+    assert row["route"] == "11 j" and row["route_note"] == "highsec"
+
+
+def test_hub_row_for_missing_pieces():
+    r = _result(lowest_sell=None, nothing_listed=True, stock=0, days_of_stock=None,
+                outliers=0,
+                now={"fillable": 0, "avg_price": None, "profit_each": None,
+                     "batch_profit": None})
+    r["list"].update(profit_each=None, margin=None, batch_profit=None)
+    row = hv.hub_row("rens", "Rens", r, None, qty=10)
+    assert row["lowest_sell"] == "Nothing listed"
+    assert row["stock_days"] == ""
+    assert row["lw_profit"] == "—" and row["lw_sign"] == ""
+    assert row["now_avg"] == "no buyers" and row["now_fill"] == ""
+    assert row["outlier_note"] == ""
+    assert row["route"] == "" and row["route_note"] == ""
+
+
+def test_hub_row_history_note_only_when_history_is_behind():
+    from datetime import date
+    assert hv.hub_row("amarr", "Amarr", _result(), None, qty=10)["history_note"] == ""
+    row = hv.hub_row("amarr", "Amarr", _result(), None, qty=10,
+                     history_to=date(2026, 11, 7))
+    assert row["history_note"] == "history to 2026-11-07"
+
+
+def test_hub_row_unavailable():
+    assert hv.hub_row("hek", "Hek", None, None, qty=10) == {
+        "key": "hek", "name": "Hek", "unavailable": True}
+
+
+def test_hub_row_tells_no_starting_system_from_no_route():
+    # No starting system: the route cells stay empty (the column is hidden).
+    row = hv.hub_row("amarr", "Amarr", _result(), None, qty=10)
+    assert row["route"] == "" and row["route_note"] == ""
+    # A starting system but no way to the hub: say so.
+    row = hv.hub_row("amarr", "Amarr", _result(), None, qty=10, origin_set=True)
+    assert row["route"] == "no route" and row["route_note"] == ""
+    # A starting system and a route: unchanged.
+    row = hv.hub_row("amarr", "Amarr", _result(), {"jumps": 4, "highsec": True}, qty=10,
+                     origin_set=True)
+    assert row["route"] == "4 j" and row["route_note"] == "highsec"
+
+
+def test_route_that_leaves_highsec():
+    row = hv.hub_row("hek", "Hek", _result(), {"jumps": 19, "highsec": False}, qty=10)
+    assert row["route_note"] == "leaves highsec"
+
+
+NAMES = {"jita": "Jita", "amarr": "Amarr", "rens": "Rens"}
+
+
+def test_pick_boxes_two_hubs():
+    results = {"amarr": _result(),
+               "rens": _result(speed="thin", supply=None,
+                               list={"price": 345e6, "profit_each": 56.3e6, "margin": 0.21,
+                                     "days_best": 16.7, "days_typical": 21.7,
+                                     "batch_profit": 563e6})}
+    boxes = hv.pick_boxes({"fastest": "amarr", "margin": "rens"},
+                          results, NAMES)
+    assert [b["k"] for b in boxes] == ["Fastest sale", "Best margin"]
+    assert boxes[0]["v"] == "Amarr — about 2 – 5 days"
+    assert boxes[1]["v"] == "Rens — +56.3M each (21.0%)"
+    assert "Thin market" in boxes[1]["d"]
+
+
+def test_pick_boxes_same_hub_collapse_to_one():
+    boxes = hv.pick_boxes({"fastest": "amarr", "margin": "amarr"},
+                          {"amarr": _result()}, NAMES)
+    assert [b["k"] for b in boxes] == ["Fastest sale and best margin"]
+
+
+def _losing(profit):
+    return _result(list={"price": 331e6, "profit_each": profit, "margin": profit / 400e6,
+                         "days_best": 2.0, "days_typical": 4.8, "batch_profit": profit * 10})
+
+
+def test_pick_boxes_say_smallest_loss_when_every_hub_loses():
+    results = {"amarr": _losing(-30e6), "rens": _losing(-12e6)}
+    picks = {"fastest": "amarr", "margin": "rens"}
+    assert hv.all_lose(picks, results)
+    boxes = hv.pick_boxes(picks, results, NAMES)
+    assert [b["k"] for b in boxes] == ["Fastest sale", "Smallest loss"]
+    assert boxes[1]["v"].startswith("Rens — −12.0M each")
+    one = hv.pick_boxes({"fastest": "rens", "margin": "rens"}, results, NAMES)
+    assert [b["k"] for b in one] == ["Fastest sale and smallest loss"]
+
+
+def test_break_even_or_no_cost_is_not_a_loss():
+    assert not hv.all_lose({"fastest": "amarr", "margin": "amarr"}, {"amarr": _losing(0.0)})
+    assert not hv.all_lose({"fastest": "amarr", "margin": None}, {"amarr": _result()})
+    assert not hv.all_lose({"fastest": None, "margin": None}, {})
+
+
+def test_a_route_the_planner_could_not_give_is_a_dash():
+    row = hv.hub_row("amarr", "Amarr", _result(), {"unavailable": True}, qty=10,
+                     origin_set=True)
+    assert row["route"] == "—" and row["route_note"] == ""
+
+
+def test_pick_boxes_without_a_cost_or_any_data():
+    boxes = hv.pick_boxes({"fastest": "amarr", "margin": None},
+                          {"amarr": _result()}, NAMES)
+    assert [b["k"] for b in boxes] == ["Fastest sale"]
+    assert hv.pick_boxes({"fastest": None, "margin": None},
+                         {}, NAMES) == []
+
+
+@pytest.mark.parametrize("v, expected", [
+    (999_950, "1.0M"), (999_999_999, "1.00B"), (999.999, "1.0K"), (999_949, "999.9K"),
+])
+def test_fmt_isk_unit_boundaries(v, expected):
+    assert hv.fmt_isk(v) == expected
+
+
+def test_signed_zero_rounding():
+    assert hv.fmt_signed(-0.001) == "+0.00"
+    assert hv._sign(-0.001) == "pos"
+    assert hv.fmt_signed(-3_500_000) == "\u22123.5M"
+    assert hv._sign(-3_500_000) == "neg"
+
+
+@pytest.mark.parametrize("v, expected", [(0.04, "<0.1"), (0.0, "0"), (0.05, "0.1")])
+def test_fmt_rate_small(v, expected):
+    assert hv.fmt_rate(v) == expected
+
+
+# Day rounding itself (half up, "<1" below 0.5) is tested in test_hub_format.py.
+
+def test_pick_box_for_one_day_is_singular():
+    boxes = hv.pick_boxes({"fastest": "amarr", "margin": None},
+                          {"amarr": _mixed(0.8, 1.2)}, NAMES)
+    assert boxes[0]["v"] == "Amarr — about 1 day"
+
+
+@pytest.mark.parametrize("best, typical", [(2.5, 4.5), (0.5, 0.9), (0.4, 4.5), (0.2, 0.4)])
+def test_pick_box_days_match_the_days_column(best, typical):
+    import re
+    boxes = hv.pick_boxes({"fastest": "amarr", "margin": None},
+                          {"amarr": _mixed(best, typical)}, NAMES)
+    column = hv.fmt_days_range(best, typical)
+    assert re.findall(r"\d+", boxes[0]["v"]) == re.findall(r"(?<!<)\b\d+", column)
+
+
+def _subday():
+    return _result(list={"price": 331e6, "profit_each": 46.9e6, "margin": 0.175,
+                         "days_best": 0.2, "days_typical": 0.4, "batch_profit": 469e6})
+
+
+def test_pick_boxes_sub_day_fastest_and_margin():
+    results = {"amarr": _subday(), "rens": _subday()}
+    boxes = hv.pick_boxes({"fastest": "amarr", "margin": "rens"},
+                          results, NAMES)
+    assert boxes[0]["v"] == "Amarr \u2014 under a day"
+    assert boxes[1]["d"].endswith("Under a day.")
+    assert "<1" not in boxes[0]["v"] + boxes[1]["d"]
+    one = hv.pick_boxes({"fastest": "amarr", "margin": "amarr"},
+                        {"amarr": _subday()}, NAMES)
+    assert one[0]["v"] == "Amarr \u2014 under a day"
+
+
+def _mixed(best, typical):
+    return _result(list={"price": 331e6, "profit_each": 46.9e6, "margin": 0.175,
+                         "days_best": best, "days_typical": typical,
+                         "batch_profit": 469e6})
+
+
+def test_pick_boxes_mixed_sub_day_range_reads_up_to():
+    results = {"amarr": _mixed(0.2, 7.6), "rens": _mixed(0.3, 4.4)}
+    boxes = hv.pick_boxes({"fastest": "amarr", "margin": "rens"},
+                          results, NAMES)
+    assert boxes[0]["v"] == "Amarr — up to 8 days"
+    assert boxes[1]["d"].endswith("Up to 4 days.")
+    assert "<1" not in boxes[0]["v"] + boxes[1]["d"]
+    assert "about" not in boxes[0]["v"] and "About" not in boxes[1]["d"]
+
+
+def test_pick_boxes_mixed_sub_day_range_up_to_one_day():
+    results = {"amarr": _mixed(0.2, 0.6), "rens": _mixed(0.3, 0.7)}
+    boxes = hv.pick_boxes({"fastest": "amarr", "margin": "rens"},
+                          results, NAMES)
+    assert boxes[0]["v"] == "Amarr — up to 1 day"
+    assert boxes[1]["d"].endswith("Up to 1 day.")
+
+
+def test_pick_boxes_combined_mixed_sub_day_range():
+    one = hv.pick_boxes({"fastest": "amarr", "margin": "amarr"},
+                        {"amarr": _mixed(0.2, 7.6)}, NAMES)
+    assert one[0]["v"] == "Amarr — up to 8 days"
+
+
+def test_pick_boxes_margin_hub_without_a_days_estimate_has_no_days_sentence():
+    results = {"amarr": _result(),
+               "rens": _result(speed="thin", supply=None, list=_mixed(None, None)["list"])}
+    boxes = hv.pick_boxes({"fastest": "amarr", "margin": "rens"},
+                          results, NAMES)
+    assert boxes[1]["d"] == "Thin market."
+    assert "days" not in boxes[1]["d"]
+    assert "— days" not in boxes[0]["v"] + boxes[1]["v"] + boxes[1]["d"]

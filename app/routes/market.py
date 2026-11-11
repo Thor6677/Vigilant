@@ -20,6 +20,7 @@ idiom (small table, small LIMIT, no new indexes).
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -136,6 +137,10 @@ async def market_type(request: Request, type_id: int, db: AsyncSession = Depends
         )
 
     type_name, group_name = row
+    # Entry links (Build Finder, manufacturing calculator) carry a quantity and
+    # a build cost; pass only those three known keys on to the hub comparison.
+    passthrough = {k: request.query_params[k] for k in ("qty", "cost_mode", "cost")
+                   if k in request.query_params}
     return templates.TemplateResponse(
         request, "market_type.html",
         {
@@ -144,6 +149,7 @@ async def market_type(request: Request, type_id: int, db: AsyncSession = Depends
             "group_name": group_name or "Item",
             "region_id": DEFAULT_REGION_ID,
             "not_found": False,
+            "hubs_query": ("?" + urlencode(passthrough)) if passthrough else "",
         },
     )
 

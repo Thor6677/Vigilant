@@ -42,9 +42,11 @@ def _clear_order_cache():
     refetched?" assertion pass for the wrong reason."""
     orders._cache.clear()
     orders._locks.clear()
+    orders._failed.clear()
     yield
     orders._cache.clear()
     orders._locks.clear()
+    orders._failed.clear()
 
 
 def _run(coro):
@@ -122,6 +124,15 @@ def test_location_name_npc_station_vs_player_structure():
 
 
 # ── cache TTL ────────────────────────────────────────────────────────────────
+
+def test_orders_age_is_time_since_the_last_successful_fetch(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    now = datetime(2026, 11, 10, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(orders, "_now", lambda: now)
+    assert orders.age(REGION, TYPE_ID) is None                  # never fetched
+    orders._cache[(REGION, TYPE_ID)] = (now - timedelta(minutes=7), [])
+    assert orders.age(REGION, TYPE_ID) == timedelta(minutes=7)
+
 
 def test_orders_fetch_once_then_served_from_cache(monkeypatch):
     calls = {"n": 0}
@@ -225,6 +236,143 @@ def test_orders_cache_keyed_per_type_independently(monkeypatch):
         await orders.get_orders(REGION, 34)
         await orders.get_orders(REGION, 35)
         assert calls["n"] == 2  # both still fresh
+
+    _run(scenario())
+
+
+# ── remembered failures ─────────────────────────────────────────────────────
+
+def _clock(monkeypatch):
+    from datetime import datetime, timezone
+    t0 = datetime(2026, 7, 4, 12, 0, 0, tzinfo=timezone.utc)
+    clock = {"t": t0}
+    monkeypatch.setattr(orders, "_now", lambda: clock["t"])
+    return t0, clock
+
+
+def test_orders_failure_is_remembered_for_failure_ttl(monkeypatch):
+    from datetime import timedelta
+    state = {"n": 0, "fail": True}
+
+    async def fake_fetch(region_id, type_id):
+        state["n"] += 1
+        if state["fail"]:
+            raise RuntimeError("ESI down")
+        return _sample_orders()
+
+    monkeypatch.setattr(orders, "_fetch_orders_esi", fake_fetch)
+    t0, clock = _clock(monkeypatch)
+
+    async def scenario():
+        assert await orders.get_orders(REGION, TYPE_ID) == []
+        assert state["n"] == 1
+
+        # Within FAILURE_TTL: no second upstream attempt.
+        clock["t"] = t0 + orders.FAILURE_TTL - timedelta(seconds=1)
+        assert await orders.get_orders(REGION, TYPE_ID) == []
+        assert state["n"] == 1
+
+        # Past it: tried again, and a success clears the stamp.
+        state["fail"] = False
+        clock["t"] = t0 + orders.FAILURE_TTL + timedelta(seconds=1)
+        assert len(await orders.get_orders(REGION, TYPE_ID)) == 6
+        assert state["n"] == 2
+        assert (REGION, TYPE_ID) not in orders._failed
+
+    _run(scenario())
+
+
+def test_orders_recent_failure_serves_the_stale_book_without_a_fetch(monkeypatch):
+    from datetime import timedelta
+    state = {"n": 0, "fail": False}
+
+    async def fake_fetch(region_id, type_id):
+        state["n"] += 1
+        if state["fail"]:
+            raise RuntimeError("ESI down")
+        return _sample_orders()
+
+    monkeypatch.setattr(orders, "_fetch_orders_esi", fake_fetch)
+    t0, clock = _clock(monkeypatch)
+
+    async def scenario():
+        await orders.get_orders(REGION, TYPE_ID)
+        state["fail"] = True
+        clock["t"] = t0 + orders.ORDER_BOOK_TTL + timedelta(minutes=1)
+        assert len(await orders.get_orders(REGION, TYPE_ID)) == 6   # stale-on-error
+        assert state["n"] == 2
+        clock["t"] += timedelta(seconds=30)
+        assert len(await orders.get_orders(REGION, TYPE_ID)) == 6   # stale, no fetch
+        assert state["n"] == 2
+        assert orders.fetched_at(REGION, TYPE_ID) == t0
+
+    _run(scenario())
+
+
+def test_orders_clear_failure_allows_an_immediate_retry(monkeypatch):
+    state = {"n": 0}
+
+    async def fake_fetch(region_id, type_id):
+        state["n"] += 1
+        raise RuntimeError("ESI down")
+
+    monkeypatch.setattr(orders, "_fetch_orders_esi", fake_fetch)
+
+    async def scenario():
+        await orders.get_orders(REGION, TYPE_ID)
+        await orders.get_orders(REGION, TYPE_ID)
+        assert state["n"] == 1
+        assert orders.recently_failed(REGION, TYPE_ID)
+        orders.clear_failure(REGION, TYPE_ID)
+        assert not orders.recently_failed(REGION, TYPE_ID)
+        await orders.get_orders(REGION, TYPE_ID)
+        assert state["n"] == 2
+
+    _run(scenario())
+
+
+def test_orders_failure_is_per_key(monkeypatch):
+    state = {"n": 0}
+
+    async def fake_fetch(region_id, type_id):
+        state["n"] += 1
+        if type_id == 34:
+            raise RuntimeError("ESI down")
+        return _sample_orders()
+
+    monkeypatch.setattr(orders, "_fetch_orders_esi", fake_fetch)
+
+    async def scenario():
+        await orders.get_orders(REGION, 34)
+        assert len(await orders.get_orders(REGION, 35)) == 6
+        assert state["n"] == 2
+
+    _run(scenario())
+
+
+def test_order_cache_drops_entries_older_than_an_hour_on_insert(monkeypatch):
+    from datetime import timedelta
+
+    async def fake_fetch(region_id, type_id):
+        return _sample_orders()
+
+    monkeypatch.setattr(orders, "_fetch_orders_esi", fake_fetch)
+    t0, clock = _clock(monkeypatch)
+    other_region = 10000043
+
+    async def scenario():
+        await orders.get_orders(REGION, 34)
+        await orders.get_orders(REGION, 35)
+        clock["t"] = t0 + timedelta(minutes=30)
+        await orders.get_orders(REGION, 36)
+        assert {k[1] for k in orders._cache} == {34, 35, 36}    # nothing over an hour yet
+
+        clock["t"] = t0 + orders.CACHE_MAX_AGE + timedelta(minutes=1)
+        await orders.get_orders(other_region, 35)
+        # 34 is over an hour old and dropped; 36 is younger. The book for the
+        # type being fetched (35, any region) is kept: a hub comparison may be
+        # serving it stale-on-error in the same request.
+        assert set(orders._cache) == {(REGION, 35), (REGION, 36), (other_region, 35)}
 
     _run(scenario())
 

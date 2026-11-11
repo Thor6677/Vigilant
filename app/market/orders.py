@@ -15,6 +15,20 @@ reasoning in `history._fetch_history_esi`).
 Single ESI call per (region, type): `order_type=all` returns both sides in one
 response; we split on `is_buy_order` rather than firing two requests.
 
+Failed fetches are remembered per key for `FAILURE_TTL` (90 s): within that
+window `get_orders` does not call ESI again for the key and serves the stale
+entry (or [] when there is none). Without this, a page that asks for several
+regions on every input change (the hub comparison) re-attempted every failing
+fetch — each with the client's own retries — on each change while ESI was
+down. A successful fetch clears the stamp; `clear_failure` clears it early
+(the hub comparison's retry button).
+
+The dict is bounded: each insert drops entries older than `CACHE_MAX_AGE`
+(one hour), except books for the type being inserted — the hub comparison
+fetches one type across five regions in one request and may be serving one
+of them stale-on-error while another succeeds. With ESI wholly down nothing is
+inserted, so nothing is dropped and stale books stay available.
+
 Known limitation: `get_public` returns page 1 only (ESI orders aren't
 price-sorted, and X-Pages isn't exposed here). For the small set of
 hyper-liquid types with >1000 open orders in a region, the true best
@@ -37,6 +51,12 @@ DEFAULT_REGION_ID = 10000002
 # minutes keeps us well clear of hammering ESI without feeling stale.
 ORDER_BOOK_TTL = timedelta(minutes=5)
 
+# After a failed fetch, no new attempt for this long (see module docstring).
+FAILURE_TTL = timedelta(seconds=90)
+
+# Entries older than this are dropped whenever a new book is inserted.
+CACHE_MAX_AGE = timedelta(hours=1)
+
 SELL_DEPTH = 15
 BUY_DEPTH = 15
 
@@ -55,6 +75,8 @@ def _now() -> datetime:
 # {(region_id, type_id): (fetched_at, raw_orders)}
 _cache: dict[tuple[int, int], tuple[datetime, list[dict]]] = {}
 _locks: dict[tuple[int, int], asyncio.Lock] = {}
+# {(region_id, type_id): when the last fetch failed}
+_failed: dict[tuple[int, int], datetime] = {}
 
 
 def _get_lock(key: tuple[int, int]) -> asyncio.Lock:
@@ -63,6 +85,30 @@ def _get_lock(key: tuple[int, int]) -> asyncio.Lock:
         lock = asyncio.Lock()
         _locks[key] = lock
     return lock
+
+
+def recently_failed(region_id: int, type_id: int) -> bool:
+    """True when a fetch for this key failed less than FAILURE_TTL ago."""
+    stamp = _failed.get((region_id, type_id))
+    return stamp is not None and (_now() - stamp) < FAILURE_TTL
+
+
+def clear_failure(region_id: int, type_id: int) -> None:
+    """Forget a remembered failure, so the next `get_orders` fetches."""
+    _failed.pop((region_id, type_id), None)
+
+
+def _store(key: tuple[int, int], data: list[dict]) -> None:
+    """Insert a fresh book, dropping entries older than CACHE_MAX_AGE (but
+    not other regions' books for the same type) and expired failure stamps."""
+    now = _now()
+    for k, (stamp, _rows) in list(_cache.items()):
+        if k[1] != key[1] and now - stamp > CACHE_MAX_AGE:
+            del _cache[k]
+    for k, stamp in list(_failed.items()):
+        if now - stamp >= FAILURE_TTL:
+            del _failed[k]
+    _cache[key] = (now, data)
 
 
 async def _fetch_orders_esi(region_id: int, type_id: int) -> list[dict]:
@@ -82,24 +128,49 @@ async def get_orders(region_id: int, type_id: int) -> list[dict]:
     Fresh cache entry → served with no network. Stale/missing → single-flight
     refetch (concurrent callers for the same key collapse onto one ESI
     request). On fetch error, stale-on-error: keep serving the last-known-good
-    entry if one exists, else [].
+    entry if one exists, else []. The failure is remembered for FAILURE_TTL,
+    during which this key is served the same way without calling ESI.
     """
     key = (region_id, type_id)
     cached = _cache.get(key)
     if cached is not None and (_now() - cached[0]) < ORDER_BOOK_TTL:
         return cached[1]
+    if recently_failed(region_id, type_id):
+        return cached[1] if cached is not None else []
 
     async with _get_lock(key):
-        # Re-check after acquiring the lock — another waiter may have refreshed.
+        # Re-check after acquiring the lock — another waiter may have
+        # refreshed, or failed (in which case don't repeat its attempt).
         cached = _cache.get(key)
         if cached is not None and (_now() - cached[0]) < ORDER_BOOK_TTL:
             return cached[1]
+        if recently_failed(region_id, type_id):
+            return cached[1] if cached is not None else []
         try:
             data = await _fetch_orders_esi(region_id, type_id)
         except Exception:
+            _failed[key] = _now()
             return cached[1] if cached is not None else []
-        _cache[key] = (_now(), data)
+        _failed.pop(key, None)
+        _store(key, data)
         return data
+
+
+def fetched_at(region_id: int, type_id: int) -> datetime | None:
+    """When this (region, type) was last fetched successfully, or None if it
+    never has been. `get_orders` returns [] both for "no orders" and for "the
+    fetch failed with nothing cached"; this tells the two apart. After a
+    stale-on-error serve this is still the time of the last SUCCESSFUL fetch,
+    so it can be older than ORDER_BOOK_TTL."""
+    cached = _cache.get((region_id, type_id))
+    return cached[0] if cached is not None else None
+
+
+def age(region_id: int, type_id: int) -> timedelta | None:
+    """How long ago this (region, type) was last fetched successfully, or
+    None if it never has been (see `fetched_at`)."""
+    stamp = fetched_at(region_id, type_id)
+    return _now() - stamp if stamp is not None else None
 
 
 def build_order_book(orders: list[dict]) -> dict:

@@ -106,6 +106,7 @@ COPY_ALL = (
     'killmail_zone_daily_aggregates',
     'market_history',
     'market_history_meta',
+    'market_hub_prefs',
     'mining_ledger_entries',
     'net_worth_snapshots',
     'player_count_daily_aggregates',

@@ -176,6 +176,10 @@ An EVE Online companion dashboard that gives you a unified view of all your char
 - **Full reprocessing yield calculation** — structure, rig, security, implant modifiers
 - **Trade hub selector** — Jita, Amarr, Dodixie, Hek, Rens (labels the output; valuation uses EVE's global average reference price)
 
+### Market (`/market/type/{id}`)
+- **Price history** — daily price history and traded volume for any published item
+- **Hub comparison** — on any item page, enter a quantity and a cost per unit and compare Jita, Amarr, Dodixie, Hek and Rens side by side: lowest sell, units sold per day (30-day regional rate), competing stock and days of stock, profit and margin for listing a sell order, the price and depth for selling straight to buy orders, and an estimate of how long the batch will take. Each hub gets a plain verdict (Fast / Steady / Slow / Thin market, plus Under-supplied or Saturated). Leave the cost blank to use a benchmark build cost, or enter your own figure to use that instead; Build Finder and the manufacturing calculator link in with theirs. An optional starting system shows jumps along EVE's own "prefer safer" route (the one Gate Check uses) and whether it stays in highsec. After a failed lookup, the market pages wait about 90 seconds before asking EVE's API again.
+
 ### Mining Ledger (`/industry/mining-ledger`)
 - **Unified cross-character/corp mining** — aggregated view across all characters and corps
 - **Stacked ore chart** — visual breakdown by ore type over time
