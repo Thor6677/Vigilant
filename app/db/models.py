@@ -1205,6 +1205,22 @@ class MarketHistoryMeta(Base):
     fetched_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
+class MarketHubPrefs(Base):
+    """One row per user: the hub comparison's saved inputs (sales tax, broker
+    fee, starting system). No row means defaults — see app/market/hub_prefs.py,
+    which is the only reader and writer. Rates are percentages, as typed.
+    """
+    __tablename__ = "market_hub_prefs"
+
+    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    # Literals match app.market.pnl's flat rates (kept as literals so this
+    # module does not import app.market); hub_prefs passes the real constants.
+    sales_tax_pct = Column(Float, nullable=False, default=3.37)
+    broker_fee_pct = Column(Float, nullable=False, default=1.5)
+    origin_system_id = Column(Integer, nullable=True)
+    updated_at = Column(DateTime, nullable=True)
+
+
 class UpdateStatus(Base):
     """Single-row record of what the update checker has seen and announced.
 
