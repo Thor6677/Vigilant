@@ -65,7 +65,9 @@ def compute_rows(summaries: dict, type_ids: list[int], names: dict[int, str],
     `hub_cost.Benchmark` (or missing: no build cost). An ok row also says
     whether the best hub's sales history is a few days behind
     (`history_behind`) and whether its sell ladder was cut at
-    scan_fetch.MAX_LEVELS (`stock_truncated`)."""
+    scan_fetch.MAX_LEVELS (`stock_truncated`), and carries `by_hub`
+    (scan_rules.best_for_item) with each hub's row marked the same way from
+    that hub's own figures. `copy_only` is on every one of them."""
     rows = []
     for type_id in type_ids:
         base = {"type_id": type_id, "name": names.get(type_id, str(type_id))}
@@ -82,10 +84,12 @@ def compute_rows(summaries: dict, type_ids: list[int], names: dict[int, str],
             settings.share_pct / 100, settings.sales_tax_pct / 100,
             settings.broker_fee_pct / 100)
         if best["status"] == "ok":
-            best["copy_only"] = bool(bench and bench.copy_only)
-            fig = figs[best["hub"]]
-            best["history_behind"] = bool(fig.get("behind"))
-            best["stock_truncated"] = bool(fig.get("ladder_truncated"))
+            copy_only = bool(bench and bench.copy_only)
+            for row in (best, *best["by_hub"].values()):
+                fig = figs[row["hub"]]
+                row["copy_only"] = copy_only
+                row["history_behind"] = bool(fig.get("behind"))
+                row["stock_truncated"] = bool(fig.get("ladder_truncated"))
         rows.append({**base, **best})
     return rows
 

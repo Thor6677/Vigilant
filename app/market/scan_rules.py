@@ -3,7 +3,8 @@
 Input is, per hub, the market figures `scan_fetch.figures()` builds with phase
 1's `market_figures` (plus `avg_high_30` and `ladder`), a build cost and the
 scan's settings. Output is one row per item: the hub and source (build, or
-haul from Jita) with the highest profit per day.
+haul from Jita) with the highest profit per day, and under `by_hub` the best
+source at each hub, so a view can rank every item for one hub.
 
 Rates are fractions here (0.20, 0.0337), percentages at the edges.
 """
@@ -150,6 +151,35 @@ def _json_safe(row: dict) -> dict:
     return clean(row)
 
 
+def _key(o: dict) -> tuple[float, float]:
+    """How options rank: profit per day, then margin (none ranks lowest)."""
+    return (o["profit_per_day"], o["margin"] if o["margin"] is not None else -math.inf)
+
+
+def _hub_row(hub: str, fig: dict, opts: list[dict]) -> dict:
+    """The hub's row: its best option (build before haul on an exact tie),
+    with the hub's tags and market figures and the other source's figure."""
+    o = None
+    for x in opts:
+        if o is None or _key(x) > _key(o):
+            o = x
+    others = [x for x in opts if x is not o]
+    other = others[0] if others else None
+    speed, supply = tags(fig, o["days_typical"])
+    return {
+        "hub": hub, "source": o["source"],
+        "cost": o["cost"], "cost_basis": "benchmark" if o["source"] == "build" else "jita",
+        "price": o["price"], "price_flag": o["price_flag"],
+        "profit_each": o["profit_each"], "margin": o["margin"],
+        "qty": o["qty"], "qty_limit": o["qty_limit"],
+        "profit_per_day": o["profit_per_day"],
+        "demand_30": fig["demand_30"], "stock": fig["stock"],
+        "days_of_stock": fig["days_of_stock"],
+        "speed": speed, "supply": supply,
+        "other": {"source": other["source"], "profit_each": other["profit_each"]} if other else None,
+    }
+
+
 def best_for_item(figs: dict[str, dict | None], build_cost: float | None, budget: float,
                   share: float, tax: float, broker: float) -> dict:
     """The item's row. `figs[hub]` is None for a hub with no usable data.
@@ -157,6 +187,12 @@ def best_for_item(figs: dict[str, dict | None], build_cost: float | None, budget
     {"status": "no_sales"}  no hub sold any in 30 days (or none has a price)
     {"status": "no_cost"}   neither a build cost nor anything listed in Jita
     {"status": "ok", ...}   the best (hub, source); see the keys below
+
+    An ok row also has `by_hub`: for every hub with at least one source
+    offered, that hub's row (the same keys as the best, without `status`):
+    its best source by profit per day, ties to the higher margin. The best
+    hub is the one whose row ranks highest, ties to hub order, and the
+    top-level keys are a copy of `by_hub[hub]`, so the two cannot disagree.
     """
     jita = figs.get(HAUL_SOURCE_HUB)
     ladder = jita.get("ladder") if jita else None
@@ -168,32 +204,18 @@ def best_for_item(figs: dict[str, dict | None], build_cost: float | None, budget
     if build_cost is None and not ladder:
         return {"status": "no_cost"}
 
-    best = None     # (sort key, hub, option, the hub's other options)
+    by_hub: dict[str, dict] = {}
+    best = None     # (sort key, hub)
     for rank, hub in enumerate(h for h in HUB_ORDER if h in usable):
         fig = usable[hub]
         opts = _options_at(hub, fig, build_cost, ladder, budget, share, tax, broker)
-        for o in opts:
-            key = (o["profit_per_day"],
-                   o["margin"] if o["margin"] is not None else -math.inf,
-                   -rank)
-            if best is None or key > best[0]:
-                best = (key, hub, o, [x for x in opts if x is not o])
+        if not opts:
+            continue
+        row = by_hub[hub] = _hub_row(hub, fig, opts)
+        key = (*_key(row), -rank)
+        if best is None or key > best[0]:
+            best = (key, hub)
     if best is None:
         return {"status": "no_cost"}
 
-    _key, hub, o, others = best
-    fig = usable[hub]
-    speed, supply = tags(fig, o["days_typical"])
-    other = others[0] if others else None
-    return _json_safe({
-        "status": "ok", "hub": hub, "source": o["source"],
-        "cost": o["cost"], "cost_basis": "benchmark" if o["source"] == "build" else "jita",
-        "price": o["price"], "price_flag": o["price_flag"],
-        "profit_each": o["profit_each"], "margin": o["margin"],
-        "qty": o["qty"], "qty_limit": o["qty_limit"],
-        "profit_per_day": o["profit_per_day"],
-        "demand_30": fig["demand_30"], "stock": fig["stock"],
-        "days_of_stock": fig["days_of_stock"],
-        "speed": speed, "supply": supply,
-        "other": {"source": other["source"], "profit_each": other["profit_each"]} if other else None,
-    })
+    return _json_safe({"status": "ok", **by_hub[best[1]], "by_hub": by_hub})

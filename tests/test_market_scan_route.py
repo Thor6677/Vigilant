@@ -1604,6 +1604,98 @@ def test_lagging_figures_carry_a_mark_with_its_words(app_db, factory):
     assert sold_cell and sold_cell.group(1) == behind
 
 
+def _item(name, type_id, best, **hubs):
+    """A row as scans now store it: the best hub's figures at the top and
+    every hub with a source under by_hub. `hubs` maps a hub to overrides."""
+    by_hub = {}
+    for hub, over in hubs.items():
+        figures = _ok(name, type_id, hub=hub, **over)
+        for key in ("type_id", "name", "status"):
+            del figures[key]
+        by_hub[hub] = figures
+    return {"type_id": type_id, "name": name, "status": "ok", **by_hub[best], "by_hub": by_hub}
+
+
+HUB_SCAN = [
+    _item("Jita Hull", TYPE_ID, "jita",
+          jita={"source": "build", "cost": 50.0, "cost_basis": "benchmark", "price": 81.25,
+                "qty": 400, "qty_limit": "budget", "profit_per_day": 900.0, "supply": None,
+                "other": None},
+          rens={"price": 400.0, "cost": 120.0, "qty": 3, "profit_per_day": 30.0}),
+    _item("Rens Hull", 2010, "rens", rens={"profit_per_day": 80.0}),
+    _item("Amarr Hull", 2011, "amarr", amarr={"profit_per_day": 500.0}),
+]
+
+
+def _table_names(html):
+    table = html[html.index('<table class="hs-table">'):html.index("</table>")]
+    return re.findall(r'class="hs-item"[^>]*>([^<]+)<', table)
+
+
+def test_choosing_a_hub_shows_every_item_with_that_hubs_figures(app_db, factory):
+    _run(save_result(factory, USER_ID, HUB_SCAN, routes={
+        "jita": {"jumps": 3, "highsec": True}, "rens": {"jumps": 20, "highsec": True},
+        "amarr": {"jumps": 9, "highsec": False}}))
+    c = _authed_client()
+    html = _result(c, "kind=category&ref=10&hub=rens")
+    # Jita Hull is best in Jita, but appears with its Rens figures, ranked by them.
+    assert _table_names(html) == ["Rens Hull", "Jita Hull"]
+    assert "400.00" in html and "81.25" not in html
+    assert 'href="/market/type/2001?qty=3&amp;cost=120.00#mk-hubs"' in html
+    assert "20 j" in html and "3 j" not in html and "9 j" not in html
+    head = html[html.index("<thead>"):html.index("</thead>")]
+    assert ">Hub<" in head and "Best hub" not in head
+    line = "Showing what each item earns in Rens. Choose All to see each item&#39;s best hub."
+    assert f'<div class="hs-note hs-hubline">{line}</div>' in html
+    # The line is for the table and the cards alike: outside both.
+    assert html.index("hs-hubline") < html.index('<div class="hs-scroll m-hide">')
+    cards = html[html.index('<div class="hs-cards m-only">'):]
+    assert cards.count('<div class="hs-card">') == 2 and "Jita Hull" in cards
+    assert '<div class="hs-cline">Rens ' in cards and '<div class="hs-cline">Jita ' not in cards
+    counts = re.sub(r"\s+", " ", html[html.index('class="hs-counts"'):])
+    assert "Showing 2 of 3 · 1 not sold in Rens" in counts
+    assert "filtered out" not in counts
+    # All is unchanged: best hubs, the "Best hub" header and no line.
+    every = _result(c)
+    assert _table_names(every) == ["Jita Hull", "Amarr Hull", "Rens Hull"]
+    assert "81.25" in every and "400.00" not in every
+    assert "Best hub" in every[every.index("<thead>"):every.index("</thead>")]
+    assert "hs-hubline" not in every and "not sold in" not in every
+
+
+def test_choosing_a_hub_with_under_supplied_uses_that_hubs_tag(app_db, factory):
+    rows = [_item("Short In Rens", TYPE_ID, "jita", jita={"supply": None, "profit_per_day": 90.0},
+                  rens={"supply": "under"}),
+            _item("Short In Jita", 2012, "jita", jita={"supply": "under", "profit_per_day": 90.0},
+                  rens={"supply": None})]
+    _run(save_result(factory, USER_ID, rows))
+    c = _authed_client()
+    assert _table_names(_result(c, "kind=category&ref=10&hub=rens&under=1")) == ["Short In Rens"]
+    assert _table_names(_result(c, "kind=category&ref=10&under=1")) == ["Short In Jita"]
+
+
+def test_an_old_result_with_a_hub_chosen_says_to_rescan(app_db, factory):
+    """Rows saved before per-hub figures were kept: the hub filter keeps the
+    rows whose best hub it is, under the "Best hub" header, and says why."""
+    _run(save_result(factory, USER_ID, ROWS))
+    html = _result(_authed_client(), "kind=category&ref=10&hub=amarr&losers=show")
+    assert _table_names(html) == ["Losing Hull"]
+    assert ('<div class="hs-note hs-hubline">This result was saved before per-hub figures '
+            'were kept; rescan to see every item for Amarr.</div>') in html
+    assert "Best hub" in html[html.index("<thead>"):html.index("</thead>")]
+    assert "Showing what each item earns" not in html and "not sold in" not in html
+
+
+def test_per_hub_rows_are_escaped(app_db, factory):
+    rows = [_item("<script>alert(3)</script>", TYPE_ID, "jita", jita={"profit_per_day": 90.0},
+                  rens={}),
+            _item("<b>Amarr</b> Hull", 2013, "amarr", amarr={})]
+    _run(save_result(factory, USER_ID, rows))
+    html = _result(_authed_client(), "kind=category&ref=10&hub=rens")
+    assert "<script>alert(3)" not in html and "&lt;script&gt;alert(3)&lt;/script&gt;" in html
+    assert "1 not sold in Rens" in html and "<b>Amarr</b>" not in html
+
+
 def test_a_source_not_offered_says_n_a(app_db, factory):
     rows = [_ok("Jita Hull", TYPE_ID, hub="jita", source="build", cost_basis="benchmark",
                 other=None)]

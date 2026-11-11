@@ -36,6 +36,11 @@
    htmx:configRequest. The button sends this result's list by hx-vals and
    the reply, one line of text, goes into #hs-add-msg.
 
+   The Hub filter re-ranks: with a hub chosen every row is that hub's
+   figures (scan_view.build), the column header reads "Hub" not "Best hub",
+   and a line above the rows says so; an older result without per-hub
+   figures keeps the best-hub rows and says to rescan instead.
+
    Desktop: one table in its own sideways scroller (m-hide on phones).
    Phones: one card per row (m-only). Dict keys by subscript throughout. #}
 {% set c = view['counts'] %}
@@ -95,6 +100,9 @@
     <label class="hs-chk"><input type="checkbox" class="b-check" id="hs-losers"{% if filters['hide_losers'] %} checked{% endif %}> Hide items with no profit per day</label>
     <label class="hs-chk"><input type="checkbox" class="b-check" id="hs-f-under" name="under" value="1"{% if filters['under_only'] %} checked{% endif %}> Under-supplied only</label>
 </form>
+{# With a hub chosen the rows are that hub's (scan_view.build): one line says
+   so, for the table and the cards alike, even when nothing is left to show. #}
+{% if view['hub_line'] %}<div class="hs-note hs-hubline">{{ view['hub_line'] }}</div>{% endif %}
 
 {% if view['rows'] %}
 <div class="hs-scroll m-hide">
@@ -102,7 +110,7 @@
     <thead>
         <tr>
             {{ sort_th('item', 'Item', True) }}
-            {{ sort_th('hub', 'Best hub', True) }}
+            {{ sort_th('hub', view['hub_column'], True) }}
             <th scope="col" class="hs-l">Source</th>
             {{ sort_th('cost', 'Cost each') }}
             {{ sort_th('price', 'Sells for') }}
@@ -161,6 +169,7 @@
 {# Every row of the scan is in N, and the parts add up to it (scan_view.build). #}
 <div class="hs-counts">Showing {{ c['shown'] }} of {{ c['total'] }}
     {%- if c['hidden'] %} · {{ c['hidden'] }} hidden: lose money or no sales this week{% endif %}
+    {%- if c['not_sold'] %} · {{ c['not_sold'] }} not sold in {{ view['hub_name'] }}{% endif %}
     {%- if c['filtered'] %} · {{ c['filtered'] }} filtered out{% endif %}
     {%- if c['no_sales'] %} · {{ c['no_sales'] }} skipped: no recent sales{% endif %}
     {%- if c['no_cost'] %} · {{ c['no_cost'] }} skipped: no cost{% endif %}

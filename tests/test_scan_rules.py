@@ -275,3 +275,128 @@ def test_one_spike_day_does_not_lift_the_price_cap():
                             budget=5e8, share=0.2, tax=0, broker=0)
     assert alone["hub"] == "amarr" and alone["price"] == pytest.approx(756_250.0)
     assert alone["price_flag"] == "capped"
+
+
+# ---- by_hub: the best source at each hub, for the Hub filter ----
+
+KW = dict(budget=1e6, share=0.2, tax=0.0, broker=0.0)
+ROW_KEYS = {"hub", "source", "cost", "cost_basis", "price", "price_flag", "profit_each",
+            "margin", "qty", "qty_limit", "profit_per_day", "demand_30", "stock",
+            "days_of_stock", "speed", "supply", "other"}
+
+
+def _best_part(out):
+    return {k: v for k, v in out.items() if k not in ("status", "by_hub")}
+
+
+def test_by_hub_has_a_row_for_every_hub_with_a_source_offered():
+    jita = fig(lowest_sell=100.0, avg_high_30=110.0, ladder=[(100.0, 1000)], stock=1000)
+    rens = fig(lowest_sell=160.0, avg_high_30=170.0, stock=5, demand_30=5, demand_7=5)
+    amarr = fig(lowest_sell=150.0, avg_high_30=150.0)
+    hek = fig(demand_30=0, demand_7=0)                      # no sales: not usable
+    out = r.best_for_item({"jita": jita, "amarr": amarr, "dodixie": None, "hek": hek,
+                           "rens": rens}, build_cost=130.0, **KW)
+    assert set(out["by_hub"]) == {"jita", "amarr", "rens"}
+    for hub, row in out["by_hub"].items():
+        assert set(row) == ROW_KEYS and row["hub"] == hub
+    assert set(_best_part(out)) == ROW_KEYS
+    # Amarr is the best: 50 each x 2/day beats Rens' 60 each x 1/day. Every
+    # hub's row is kept with its own best source and figures: Jita can only
+    # build (and loses money there), Rens hauls at its own price and rate.
+    assert out["hub"] == "amarr" and out["profit_per_day"] == pytest.approx(100.0)
+    j = out["by_hub"]["jita"]
+    assert (j["source"], j["other"], j["price"]) == ("build", None, 100.0)
+    assert j["profit_each"] == pytest.approx(-30.0) and j["profit_per_day"] < 0
+    a = out["by_hub"]["amarr"]
+    assert (a["source"], a["cost_basis"]) == ("haul", "jita")
+    assert a["other"] == {"source": "build", "profit_each": pytest.approx(20.0)}
+    assert (a["demand_30"], a["stock"], a["days_of_stock"]) == (10.0, 20, 2.0)
+    s = out["by_hub"]["rens"]
+    assert (s["source"], s["price"], s["qty"], s["qty_limit"]) == ("haul", 160.0, 7, "hub")
+    assert s["profit_each"] == pytest.approx(60.0) and s["profit_per_day"] == pytest.approx(60.0)
+    assert s["other"] == {"source": "build", "profit_each": pytest.approx(30.0)}
+    assert (s["demand_30"], s["stock"], s["supply"]) == (5, 5, "under")
+
+
+def test_the_best_is_a_copy_of_its_hubs_row():
+    """The top-level row and by_hub[best] come from one code path: they
+    cannot disagree, in any of these cases."""
+    jita = fig(lowest_sell=100.0, avg_high_30=110.0, ladder=[(100.0, 1000)], stock=1000)
+    rens = fig(lowest_sell=160.0, avg_high_30=170.0, stock=5, demand_30=5, demand_7=5)
+    cases = [
+        ({"jita": jita, "rens": rens, "amarr": None}, 130.0),
+        ({"jita": fig(lowest_sell=200.0, avg_high_30=210.0, ladder=[(200.0, 50)])}, 100.0),
+        ({"amarr": fig(lowest_sell=200.0, avg_high_30=200.0, stock=0),
+          "rens": fig(lowest_sell=200.0, avg_high_30=200.0, stock=0)}, 100.0),
+        ({"amarr": fig(lowest_sell=150.0, avg_high_30=150.0, stock=0),
+          "rens": fig(lowest_sell=200.0, avg_high_30=200.0, stock=0, demand_30=5,
+                      demand_7=5)}, 100.0),
+        ({"jita": jita, "rens": rens}, None),
+        ({"jita": fig(lowest_sell=80.0, avg_high_30=90.0, stock=0)}, 100.0),
+    ]
+    for figs, cost in cases:
+        out = r.best_for_item(figs, build_cost=cost, **KW)
+        assert out["status"] == "ok"
+        assert _best_part(out) == out["by_hub"][out["hub"]], figs
+    # The tie rules hold for the per-hub rows too: equal profit per day
+    # goes to the higher margin, then to hub order.
+    out = r.best_for_item(cases[3][0], build_cost=100.0, budget=1e9, share=0.2, tax=0, broker=0)
+    assert out["hub"] == "rens" and out["by_hub"]["amarr"]["profit_per_day"] == pytest.approx(
+        out["profit_per_day"])
+    out = r.best_for_item(cases[2][0], build_cost=100.0, budget=1e9, share=0.2, tax=0, broker=0)
+    assert out["hub"] == "amarr" and set(out["by_hub"]) == {"amarr", "rens"}
+
+
+def test_a_hub_where_only_haul_is_offered():
+    """No build cost: Jita sells the item but offers no source (no haul at
+    Jita), so it has no row; Amarr and Rens have haul rows with no other."""
+    jita = fig(lowest_sell=100.0, avg_high_30=110.0, ladder=[(100.0, 100)])
+    amarr = fig(lowest_sell=130.0, avg_high_30=140.0)
+    rens = fig(lowest_sell=160.0, avg_high_30=170.0)
+    out = r.best_for_item({"jita": jita, "amarr": amarr, "rens": rens}, build_cost=None, **KW)
+    assert set(out["by_hub"]) == {"amarr", "rens"}
+    for hub in ("amarr", "rens"):
+        row = out["by_hub"][hub]
+        assert (row["source"], row["cost_basis"], row["other"]) == ("haul", "jita", None)
+        assert row["cost"] == pytest.approx(100.0)
+    assert out["by_hub"]["amarr"]["price"] == 130.0 and out["hub"] == "rens"
+
+
+def test_jita_has_no_haul_in_its_row():
+    jita = fig(lowest_sell=200.0, avg_high_30=210.0, ladder=[(150.0, 50)])
+    rens = fig(lowest_sell=180.0, avg_high_30=190.0)
+    out = r.best_for_item({"jita": jita, "rens": rens}, build_cost=100.0, **KW)
+    j = out["by_hub"]["jita"]
+    assert (j["source"], j["other"]) == ("build", None)
+    # Rens has both sources; the other one is kept as its figure.
+    assert out["by_hub"]["rens"]["other"]["source"] in ("build", "haul")
+    assert out["by_hub"]["rens"]["other"]["source"] != out["by_hub"]["rens"]["source"]
+
+
+def test_an_item_usable_at_only_one_hub():
+    out = r.best_for_item({"jita": fig(demand_30=0, demand_7=0, ladder=[]), "amarr": fig(),
+                           "dodixie": None, "hek": fig(lowest_sell=None, reference=None),
+                           "rens": None}, build_cost=60.0, **KW)
+    assert out["hub"] == "amarr" and list(out["by_hub"]) == ["amarr"]
+    assert _best_part(out) == out["by_hub"]["amarr"]
+
+
+def test_nested_hub_rows_are_json_safe():
+    """An infinite days of stock and a zero cost on a hub that is not the
+    best reach by_hub as None, never as inf or nan."""
+    import json
+    jita = fig(lowest_sell=200.0, avg_high_30=200.0, days_of_stock=float("inf"),
+               demand_30=1, demand_7=1)
+    rens = fig(lowest_sell=300.0, avg_high_30=300.0, days_of_stock=float("nan"))
+    out = r.best_for_item({"jita": jita, "rens": rens}, build_cost=0.0, **KW)
+    assert out["hub"] == "rens"
+    assert out["by_hub"]["jita"]["days_of_stock"] is None
+    assert out["by_hub"]["jita"]["margin"] is None
+    assert out["days_of_stock"] is None
+    json.dumps(out, allow_nan=False)
+
+
+def test_items_with_nothing_to_show_have_no_by_hub():
+    for out in (r.best_for_item({"jita": fig(demand_30=0, demand_7=0)}, build_cost=1.0, **KW),
+                r.best_for_item({"jita": fig(ladder=[])}, build_cost=None, **KW)):
+        assert "by_hub" not in out

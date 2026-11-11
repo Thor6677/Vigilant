@@ -43,9 +43,11 @@ def test_counts_and_filters():
             {"type_id": 6, "name": "F", "status": "no_cost"}]
     out = v.build(result(rows), F, "profit_day", "")
     assert names(out) == ["Sample Hull", "C"]
-    assert out["counts"] == {"shown": 2, "total": 6, "ok": 3, "hidden": 1, "filtered": 0,
-                             "no_sales": 1, "no_cost": 1, "unavailable": 1}
+    assert out["counts"] == {"shown": 2, "total": 6, "ok": 3, "hidden": 1, "not_sold": 0,
+                             "filtered": 0, "no_sales": 1, "no_cost": 1, "unavailable": 1}
     assert out["type_ids"] == [2001, 2, 3]
+    # These rows have no by_hub (a result saved before per-hub figures were
+    # kept), so choosing a hub keeps the rows whose best hub it is.
     only_amarr = v.build(result(rows), v.parse_filters("amarr", "", "", ""), "profit_day", "")
     assert names(only_amarr) == ["C"]
     # The loser is at Rens: unticking the box would not show it here, so it
@@ -59,27 +61,188 @@ def test_counts_and_filters():
     assert names(haul) == ["Sample Hull"] and haul["counts"]["hidden"] == 1
 
 
+def hub_row(**over):
+    """One hub's figures as by_hub holds them: row() less the item's keys."""
+    r = row(**over)
+    for k in ("type_id", "name", "status"):
+        del r[k]
+    return r
+
+
+def item(type_id, name, best, **hubs):
+    """A row as scans now store it: the best hub's figures at the top and
+    every hub with a source in by_hub. `hubs` maps a hub to its overrides."""
+    by_hub = {h: hub_row(hub=h, **over) for h, over in hubs.items()}
+    return {"type_id": type_id, "name": name, "status": "ok", **by_hub[best], "by_hub": by_hub}
+
+
+SKIPPED = [{"type_id": 4, "name": "D", "status": "no_sales"},
+           {"type_id": 5, "name": "E", "status": "unavailable"},
+           {"type_id": 6, "name": "F", "status": "no_cost"},
+           {"type_id": 9, "name": "I", "status": "no_cost"}]
+
+
 def test_counts_add_up_to_every_row_of_the_scan():
-    """'Showing X of N': N is every row scanned, and shown + hidden +
-    filtered out + skipped + unavailable = N whatever the filters."""
-    rows = [row(), row(type_id=2, name="B", profit_per_day=-1.0, profit_each=-1.0),
-            row(type_id=3, name="C", hub="amarr", source="build", supply=None),
-            row(type_id=7, name="G", hub="amarr", profit_per_day=-3.0, supply=None),
-            row(type_id=8, name="H", profit_per_day=None),
-            {"type_id": 4, "name": "D", "status": "no_sales"},
-            {"type_id": 5, "name": "E", "status": "unavailable"},
-            {"type_id": 6, "name": "F", "status": "no_cost"},
-            {"type_id": 9, "name": "I", "status": "no_cost"}]
-    for hub in ("", "amarr", "rens", "jita"):
-        for source in ("", "build", "haul"):
-            for losers in ("", "show"):
-                for under in ("", "1"):
-                    f = v.parse_filters(hub, source, losers, under)
-                    c = v.build(result(rows), f, "profit_day", "")["counts"]
-                    parts = (c["shown"] + c["hidden"] + c["filtered"] + c["no_sales"]
-                             + c["no_cost"] + c["unavailable"])
-                    assert c["total"] == len(rows) == parts, (f, c)
-                    assert c["ok"] == 5
+    """'Showing X of N': N is every row scanned, and shown + hidden + not
+    sold at the chosen hub + filtered out + skipped + unavailable = N
+    whatever the filters, for All and for each hub, both for a result with
+    per-hub figures and for one saved before them."""
+    old = [row(), row(type_id=2, name="B", profit_per_day=-1.0, profit_each=-1.0),
+           row(type_id=3, name="C", hub="amarr", source="build", supply=None),
+           row(type_id=7, name="G", hub="amarr", profit_per_day=-3.0, supply=None),
+           row(type_id=8, name="H", profit_per_day=None)] + SKIPPED
+    new = [item(1, "A", "jita", jita={"source": "build", "supply": None, "profit_per_day": 90.0},
+                rens={}, amarr={"profit_per_day": -2.0}),
+           item(2, "B", "rens", rens={"profit_per_day": 5.0}),
+           item(3, "C", "amarr", amarr={"source": "build", "supply": None},
+                hek={"profit_per_day": None}, dodixie={"supply": "saturated"}),
+           item(7, "G", "dodixie", dodixie={"profit_per_day": -3.0, "supply": None},
+                jita={"source": "build", "profit_per_day": -4.0}),
+           item(8, "H", "hek", hek={"profit_per_day": 0.0}, rens={"source": "build"})] + SKIPPED
+    for rows in (old, new):
+        for hub in ("", *v.HUB_NAMES):
+            for source in ("", "build", "haul"):
+                for losers in ("", "show"):
+                    for under in ("", "1"):
+                        f = v.parse_filters(hub, source, losers, under)
+                        c = v.build(result(rows), f, "profit_day", "")["counts"]
+                        parts = (c["shown"] + c["hidden"] + c["not_sold"] + c["filtered"]
+                                 + c["no_sales"] + c["no_cost"] + c["unavailable"])
+                        assert c["total"] == len(rows) == parts, (f, c)
+                        assert c["ok"] == 5
+                        if rows is old or not hub:
+                            assert c["not_sold"] == 0
+    # Items with no figures at the hub are the "not sold" part, not "filtered".
+    c = v.build(result(new), v.parse_filters("hek", "", "show", ""), "profit_day", "")["counts"]
+    assert (c["shown"], c["not_sold"], c["filtered"]) == (2, 3, 0)
+
+
+# ---- a hub chosen: every item ranked for that hub ----
+
+def _scan():
+    """Jita Hull is best in Jita (by volume) but also sells in Rens for far
+    more each; Rens Hull is best in Rens; Amarr Hull sells only in Amarr."""
+    return [
+        item(11, "Jita Hull", "jita",
+             jita={"source": "build", "cost": 50.0, "cost_basis": "benchmark", "price": 80.0,
+                   "profit_each": 26.0, "margin": 0.52, "qty": 400, "qty_limit": "budget",
+                   "profit_per_day": 900.0, "demand_30": 300.0, "stock": 9000,
+                   "days_of_stock": 30.0, "speed": "steady", "supply": None,
+                   "other": None},
+             rens={"source": "haul", "cost": 120.0, "price": 400.0, "profit_each": 260.0,
+                   "margin": 2.17, "qty": 3, "qty_limit": "hub", "profit_per_day": 30.0,
+                   "demand_30": 0.5, "stock": 1, "days_of_stock": 2.0, "speed": "slow",
+                   "supply": "under", "history_behind": True,
+                   "other": {"source": "build", "profit_each": 330.0}}),
+        item(12, "Rens Hull", "rens",
+             rens={"profit_per_day": 80.0, "price": 170.0, "margin": 0.6},
+             amarr={"profit_per_day": 40.0}),
+        item(13, "Amarr Hull", "amarr", amarr={"profit_per_day": 500.0}),
+    ]
+
+
+ROUTES = {"jita": {"jumps": 3, "highsec": True}, "rens": {"jumps": 20, "highsec": True},
+          "amarr": {"jumps": 9, "highsec": False}}
+
+
+def test_choosing_a_hub_ranks_every_item_by_that_hubs_figures():
+    rens = v.build(result(_scan(), ROUTES), v.parse_filters("rens", "", "", ""), "profit_day", "")
+    assert names(rens) == ["Rens Hull", "Jita Hull"]           # 80 / day, then 30 / day
+    d = rens["rows"][1]
+    assert (d["hub"], d["source"], d["source_text"]) == ("Rens", "haul", "Haul from Jita")
+    assert (d["price"], d["qty"], d["qty_limit"]) == ("400.00", "3", "hub limit · 7 days")
+    assert (d["profit_each"], d["margin"], d["profit_day"]) == ("+260.00", "217.0%", "+30.00")
+    assert (d["sold"], d["stock"], d["stock_days"]) == ("0.5", "1", "2 days")
+    assert (d["speed"], d["supply"]) == ("slow", "under")
+    assert d["sold_note"] == v.HISTORY_BEHIND_TITLE              # Rens' history lags, not Jita's
+    assert d["other_text"] == "Build: +330.00 each"
+    assert d["route"] == {"text": "20 j", "sub": "highsec"}
+    assert d["link"] == "/market/type/11?qty=3&cost=120.00#mk-hubs"
+    assert rens["counts"]["not_sold"] == 1 and rens["counts"]["shown"] == 2
+    assert rens["hub_name"] == "Rens" and rens["hub_column"] == "Hub"
+    assert rens["hub_line"] == ("Showing what each item earns in Rens. "
+                                "Choose All to see each item's best hub.")
+    # All is unchanged: each item at its best hub, ranked by that.
+    every = v.build(result(_scan(), ROUTES), F, "profit_day", "")
+    assert names(every) == ["Jita Hull", "Amarr Hull", "Rens Hull"]
+    j = every["rows"][0]
+    assert (j["hub"], j["price"], j["route"]["text"]) == ("Jita", "80.00", "3 j")
+    assert j["link"] == "/market/type/11?qty=400#mk-hubs"
+    assert (every["hub_column"], every["hub_line"], every["hub_name"]) == ("Best hub", "", "")
+    assert every["counts"]["not_sold"] == 0
+    # Amarr: Amarr Hull first, Rens Hull's Amarr figures second; Jita Hull is
+    # not sold there.
+    amarr = v.build(result(_scan(), ROUTES), v.parse_filters("amarr", "", "", ""),
+                    "profit_day", "")
+    assert names(amarr) == ["Amarr Hull", "Rens Hull"]
+    assert {r["route"]["text"] for r in amarr["rows"]} == {"9 j"}
+    assert amarr["counts"]["not_sold"] == 1
+
+
+def test_sorting_with_a_hub_uses_that_hubs_figures():
+    f = v.parse_filters("rens", "", "", "")
+    # Best-hub prices are 80 (Jita Hull) and 170 (Rens Hull); in Rens they are
+    # 400 and 170, which reverses the order.
+    assert names(v.build(result(_scan()), f, "price", "")) == ["Jita Hull", "Rens Hull"]
+    assert names(v.build(result(_scan()), F, "price", "")) == ["Rens Hull", "Amarr Hull",
+                                                               "Jita Hull"]
+    assert names(v.build(result(_scan()), f, "margin", "asc")) == ["Rens Hull", "Jita Hull"]
+    assert names(v.build(result(_scan()), f, "qty", "")) == ["Rens Hull", "Jita Hull"]
+    assert names(v.build(result(_scan()), f, "stock", "asc")) == ["Rens Hull", "Jita Hull"]
+
+
+def test_filters_apply_to_the_chosen_hubs_row():
+    rows = [item(21, "Loses In Rens", "jita",
+                 jita={"profit_per_day": 50.0, "source": "build", "supply": None},
+                 rens={"profit_per_day": -5.0, "profit_each": -1.0}),
+            item(22, "Hauls To Rens", "jita", jita={"source": "build", "supply": None},
+                 rens={"source": "haul", "supply": "under"}),
+            item(23, "Under In Jita", "jita", jita={"source": "build", "supply": "under",
+                                                    "profit_per_day": 100.0},
+                 rens={"source": "build", "supply": None, "profit_per_day": 10.0})]
+
+    def rens(source="", losers="", under=""):
+        return v.build(result(rows), v.parse_filters("rens", source, losers, under),
+                       "profit_day", "")
+
+    # Hide no-profit: the Rens row loses, though the item's best makes money.
+    out = rens()
+    assert "Loses In Rens" not in names(out) and out["counts"]["hidden"] == 1
+    assert "Loses In Rens" in names(rens(losers="show"))
+    # Source: the Rens row's source, not the best's (all three build in Jita).
+    assert names(rens(source="haul", losers="show")) == ["Hauls To Rens", "Loses In Rens"]
+    assert names(rens(source="build")) == ["Under In Jita"]
+    assert rens(source="build")["counts"]["filtered"] == 2
+    # Under-supplied: the Rens row's tag. Hauls To Rens and Loses In Rens are
+    # under-supplied in Rens but not at their best hub; Under In Jita the
+    # other way round.
+    under = rens(under="1", losers="show")
+    assert names(under) == ["Hauls To Rens", "Loses In Rens"]
+    assert under["counts"]["filtered"] == 1
+    everywhere = v.build(result(rows), v.parse_filters("", "", "show", "1"), "profit_day", "")
+    assert names(everywhere) == ["Under In Jita"]
+
+
+def test_an_old_result_keeps_best_hub_rows_and_says_to_rescan():
+    """Saved before by_hub: choosing a hub keeps the rows whose best hub it
+    is, as before, with a line saying a rescan would show every item."""
+    rows = [row(name="Rens Best"), row(type_id=2, name="Amarr Best", hub="amarr")]
+    out = v.build(result(rows), v.parse_filters("rens", "", "", ""), "profit_day", "")
+    assert names(out) == ["Rens Best"]
+    assert out["hub_line"] == ("This result was saved before per-hub figures were kept; "
+                               "rescan to see every item for Rens.")
+    assert out["hub_column"] == "Best hub"
+    assert (out["counts"]["filtered"], out["counts"]["not_sold"]) == (1, 0)
+    every = v.build(result(rows), F, "profit_day", "")
+    assert every["hub_line"] == "" and names(every) == ["Rens Best", "Amarr Best"]
+
+
+def test_at_hub_reads_one_hubs_row():
+    r = item(11, "Jita Hull", "jita", jita={"profit_per_day": 9.0}, rens={"qty": 3})
+    here = v.at_hub(r, "rens")
+    assert (here["type_id"], here["name"], here["status"]) == (11, "Jita Hull", "ok")
+    assert (here["hub"], here["qty"]) == ("rens", 3) and "by_hub" not in here
+    assert v.at_hub(r, "hek") is None
 
 
 def test_no_profit_per_day_figure_is_treated_as_zero():

@@ -322,3 +322,57 @@ def test_rows_say_when_the_best_hubs_data_lags(factory):
     assert lag["history_behind"] is True and lag["stock_truncated"] is True
     assert (plain["status"], plain["hub"]) == ("ok", "rens")
     assert plain["history_behind"] is False and plain["stock_truncated"] is False
+
+
+def test_rows_carry_every_hubs_row_marked_from_its_own_data(factory):
+    """Jita's history lags and its ladder was cut; Rens' data is current.
+    The best row (Rens) says neither, Jita's row in by_hub says both, and
+    copy_only is on every hub's row. The best stays a copy of its hub's row."""
+    async def go():
+        days = [[(NOW.date() - timedelta(days=n)).isoformat(), 5, 100.0, 110.0]
+                for n in range(32, 2, -1)]
+        async with factory() as db:
+            lagging = _summary(_region("jita"), 2001, 100.0, 1000, 5,
+                               history_at=NOW - timedelta(days=2))
+            lagging.days_json, lagging.ladder_truncated = json.dumps(days), True
+            db.add_all([lagging, _summary(_region("rens"), 2001, 160.0, 5, 5)])
+            await db.commit()
+        async with factory() as db:
+            summaries = await scan_results.load_summaries(db, [2001])
+        bench = {2001: hub_cost.Benchmark(50.0, 10, None, True)}
+        return scan_results.compute_rows(summaries, [2001], {}, bench, SETTINGS, set(), NOW)
+    (row,) = _run(go())
+    assert row["status"] == "ok" and row["hub"] == "rens"
+    assert set(row["by_hub"]) == {"jita", "rens"}
+    jita, rens = row["by_hub"]["jita"], row["by_hub"]["rens"]
+    assert (jita["history_behind"], jita["stock_truncated"]) == (True, True)
+    assert (rens["history_behind"], rens["stock_truncated"]) == (False, False)
+    assert (row["history_behind"], row["stock_truncated"]) == (False, False)
+    assert row["copy_only"] is jita["copy_only"] is rens["copy_only"] is True
+    assert jita["source"] == "build" and jita["price"] == 100.0
+    best = {k: v for k, v in row.items() if k not in ("type_id", "name", "status", "by_hub")}
+    assert best == rens
+    # It all survives the trip through the stored JSON.
+    json.dumps(row, allow_nan=False)
+    # And the view reads the real shape: with Jita chosen the item shows its
+    # Jita figures and Jita's lag marks.
+    from app.market import scan_view
+    out = scan_view.build({"rows": [row], "routes": {}},
+                          scan_view.parse_filters("jita", "", "show", ""), "profit_day", "")
+    (shown,) = out["rows"]
+    assert (shown["hub"], shown["source"], shown["price"]) == ("Jita", "build", "100.00")
+    assert shown["copy_only"] is True and shown["sold_note"] and shown["stock_note"]
+
+
+def test_by_hub_is_saved_and_loaded(factory):
+    rows = _run(_compute(factory, [2001], failed=set(), bench={}))
+
+    async def go():
+        async with factory() as db:
+            await _save(db, 91, rows=rows)
+        async with factory() as db:
+            return await scan_results.load(db, 91, "category", 10, NOW)
+
+    loaded = _run(go())["rows"]
+    assert loaded == rows and set(loaded[0]["by_hub"]) == {"rens"}
+    assert loaded[0]["by_hub"]["rens"]["copy_only"] is False

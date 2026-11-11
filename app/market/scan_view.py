@@ -21,7 +21,7 @@ PRICE_FLAG_TITLES = {
     "none_listed": "Nothing is listed here; the 30-day typical price is used.",
 }
 COPY_ONLY_TITLE = "Blueprint comes only as a copy; its cost is not in the benchmark."
-# Marks on the best hub's figures when its data lags (scan_results.compute_rows).
+# Marks on the shown hub's figures when its data lags (scan_results.compute_rows).
 HISTORY_BEHIND_TITLE = "Sales history for this hub is a few days behind."
 STOCK_TRUNCATED_TITLE = "More than 300 price levels listed; stock may be understated."
 SORTS = {   # parameter -> row key
@@ -38,6 +38,10 @@ FOOTNOTE = ("Profit / day is profit each × the units you would sell per day at 
             "Quantity is what the budget covers, limited to 7 days of that share and, for "
             "hauls, to what Jita has listed near its lowest price. Sales history is per "
             "region and includes sales to buy orders, so the figures lean optimistic.")
+# Above the table when a hub is chosen: the rows are that hub's, not the best.
+HUB_LINE = "Showing what each item earns in {hub}. Choose All to see each item's best hub."
+OLD_RESULT_LINE = ("This result was saved before per-hub figures were kept; rescan to see "
+                   "every item for {hub}.")
 
 
 def parse_filters(hub: str, source: str, losers: str, under: str) -> dict:
@@ -164,19 +168,54 @@ def routes_unavailable(routes: dict) -> bool:
     return any(isinstance(r, dict) and r.get("unavailable") for r in routes.values())
 
 
+def at_hub(row: dict, hub: str) -> dict | None:
+    """An ok row as it reads at `hub`: the item with that hub's own best
+    source and figures (scan_rules.best_for_item's `by_hub`), or None when
+    nothing is offered there (no sales in 30 days, no price, or no source)."""
+    figures = row["by_hub"].get(hub)
+    if figures is None:
+        return None
+    return {"type_id": row["type_id"], "name": row["name"], "status": row["status"], **figures}
+
+
+def _rows_for(ok: list[dict], hub: str) -> tuple[list[dict], int]:
+    """(the rows the filters work on, how many items are not sold at `hub`).
+    With no hub chosen: every item's best row. With one: every item ranked
+    for that hub. A row saved before `by_hub` was kept stays its best row,
+    which the hub filter in _passes then keeps only when its best hub is the
+    one chosen (the old behaviour)."""
+    if not hub:
+        return ok, 0
+    out, not_sold = [], 0
+    for r in ok:
+        if "by_hub" not in r:
+            out.append(r)
+        elif (here := at_hub(r, hub)) is not None:
+            out.append(here)
+        else:
+            not_sold += 1
+    return out, not_sold
+
+
 def build(result: dict, filters: dict, sort: str, direction: str) -> dict:
     """Everything the result partial needs.
 
-    The counts add up to `total`, every row of the scan ("Showing X of N"):
-    shown + hidden + filtered + no_sales + no_cost + unavailable. `hidden`
-    counts the priced rows that the "hide" box alone keeps out (they pass
-    every other filter); `filtered` the priced rows the hub, source or
-    under-supplied filters keep out, whether or not they make money. `ok` is
-    every priced row, whatever the filters."""
+    With a hub chosen, every item is ranked for that hub (`at_hub`); with
+    All, by its best hub. The counts add up to `total`, every row of the scan
+    ("Showing X of N"): shown + hidden + not_sold + filtered + no_sales +
+    no_cost + unavailable. `hidden` counts the priced rows that the "hide"
+    box alone keeps out (they pass every other filter); `not_sold` the priced
+    items with no figures at the chosen hub; `filtered` the rest that the
+    source or under-supplied filters keep out (and, for a result saved
+    before per-hub figures were kept, the hub filter), whether or not they
+    make money. `ok` is every priced row, whatever the filters."""
     rows = result["rows"]
     routes = result.get("routes") or {}
     ok = [r for r in rows if r["status"] == "ok"]
-    candidates = [r for r in ok if _passes(r, filters)]
+    hub = filters["hub"]
+    for_hub, not_sold = _rows_for(ok, hub)
+    old_shape = bool(hub) and any("by_hub" not in r for r in ok)
+    candidates = [r for r in for_hub if _passes(r, filters)]
     if filters["hide_losers"]:
         shown = [r for r in candidates if not _loser(r)]
     else:
@@ -184,16 +223,27 @@ def build(result: dict, filters: dict, sort: str, direction: str) -> dict:
     sort = sort if sort in SORTS else DEFAULT_SORT
     descending = direction == "desc" if sort in TEXT_SORTS else direction != "asc"
     show_route = bool(routes)
+    if not hub:
+        hub_line = ""
+    elif old_shape:
+        hub_line = OLD_RESULT_LINE.format(hub=HUB_NAMES[hub])
+    else:
+        hub_line = HUB_LINE.format(hub=HUB_NAMES[hub])
     return {
         "rows": [display_row(r, routes, show_route)
                  for r in _sorted(shown, sort, descending)],
         "show_route": show_route,
         "routes_note": (hub_view.ROUTES_UNAVAILABLE_NOTE
                         if show_route and routes_unavailable(routes) else ""),
+        "hub_name": HUB_NAMES.get(hub, ""),
+        # The rows are for the chosen hub, not each item's best: say so.
+        "hub_column": "Hub" if hub and not old_shape else "Best hub",
+        "hub_line": hub_line,
         "counts": {
             "shown": len(shown), "total": len(rows), "ok": len(ok),
             "hidden": len(candidates) - len(shown),
-            "filtered": len(ok) - len(candidates),
+            "not_sold": not_sold,
+            "filtered": len(for_hub) - len(candidates),
             "no_sales": sum(1 for r in rows if r["status"] == "no_sales"),
             "no_cost": sum(1 for r in rows if r["status"] == "no_cost"),
             "unavailable": sum(1 for r in rows if r["status"] == "unavailable"),
