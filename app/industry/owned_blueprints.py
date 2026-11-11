@@ -6,7 +6,10 @@ Sequential by design: `refresh_token(char, db)` commits on the caller's
 session, which must never be shared by concurrent coroutines.
 
 The ESI callables default to the real ones; a caller may pass its own (Copy
-Packs passes the names bound in its module so its tests can fake them there)."""
+Packs passes the names bound in its module so its tests can fake them there).
+The `refresh=`, `fetch_pages=` and `fallback=` defaults are bound at import
+time, so tests and callers that need different functions must pass them as
+arguments rather than patching this module's names."""
 from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession

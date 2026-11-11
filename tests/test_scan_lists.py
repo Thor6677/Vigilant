@@ -160,3 +160,90 @@ def test_count_is_none_for_blueprints(factory):
             return await scan_lists.count(db, USER_ID, kind, ref)
     assert _run(go("blueprints", 0)) is None
     assert _run(go("category", 10)) == 2
+
+
+def _add_second_pilot(factory):
+    async def go():
+        async with factory() as db:
+            db.add(Character(
+                character_id=502, character_name="Second Pilot", user_id=USER_ID,
+                corporation_id=98000001, corporation_name="Sample Corp",
+                access_token="a", refresh_token="r", token_expiry=NOW,
+                scopes=perms.BLUEPRINTS))
+            await db.commit()
+    _run(go())
+
+
+def test_one_failing_character_does_not_stop_the_next(factory, monkeypatch):
+    _add_second_pilot(factory)
+
+    async def chars(db, char):
+        if char.character_name == "Sample Pilot":
+            raise RuntimeError("token")
+        return [{"type_id": 3001}], "tok"
+
+    async def corp(db, corp_id, holders):
+        return []
+
+    monkeypatch.setattr(scan_lists.owned_blueprints, "character_rows", chars)
+    monkeypatch.setattr(scan_lists.owned_blueprints, "corporation_rows", corp)
+    e = _run(_expand(factory, USER_ID, "blueprints", 0))
+    assert e.type_ids == [2001]
+    assert "Couldn't load Sample Pilot's blueprints." in e.notes
+
+
+def test_a_failing_reload_after_rollback_does_not_raise(factory, monkeypatch):
+    _add_second_pilot(factory)
+
+    async def chars(db, char):
+        raise RuntimeError("token")
+
+    async def corp(db, corp_id, holders):
+        raise AssertionError("no holder survived, so it must not be asked")
+
+    async def broken_refresh(self, *a, **k):
+        raise RuntimeError("row gone")
+
+    monkeypatch.setattr(scan_lists.owned_blueprints, "character_rows", chars)
+    monkeypatch.setattr(scan_lists.owned_blueprints, "corporation_rows", corp)
+    monkeypatch.setattr(scan_lists.AsyncSession, "refresh", broken_refresh)
+    e = _run(_expand(factory, USER_ID, "blueprints", 0))
+    assert e.type_ids == []
+    assert e.notes.count("Couldn't load Sample Pilot's blueprints.") == 1
+    assert e.notes.count("Couldn't load Second Pilot's blueprints.") == 1
+
+
+def test_a_full_page_adds_a_may_be_incomplete_note(factory, monkeypatch):
+    async def chars(db, char):
+        return [{"type_id": 3001}, {"type_id": 3002}], "tok"
+
+    async def corp(db, corp_id, holders):
+        return [{"type_id": 3001}, {"type_id": 3002}]
+
+    monkeypatch.setattr(scan_lists.owned_blueprints, "PAGE_CAP", 2)
+    monkeypatch.setattr(scan_lists.owned_blueprints, "character_rows", chars)
+    monkeypatch.setattr(scan_lists.owned_blueprints, "corporation_rows", corp)
+    e = _run(_expand(factory, USER_ID, "blueprints", 0))
+    assert e.notes == [
+        "Sample Pilot's blueprint list may be incomplete (over 10,000 blueprints).",
+        "Sample Corp's blueprint list may be incomplete (over 10,000 blueprints).",
+    ]
+
+
+def test_same_name_types_keep_the_lower_id_at_the_cap(factory, monkeypatch):
+    async def add():
+        async with factory() as db:
+            db.add_all([
+                SDEType(type_id=2102, type_name="Twin Hull", published=True,
+                        market_group_id=12, group_id=1),
+                SDEType(type_id=2101, type_name="Twin Hull", published=True,
+                        market_group_id=12, group_id=1),
+            ])
+            await db.commit()
+    _run(add())
+    monkeypatch.setattr(scan_lists, "CAP", 3)
+    e = _run(_expand(factory, USER_ID, "category", 10))
+    # Alpha Hull, Beta Hull, then the twin with the lower id.
+    assert e.type_ids == [2002, 2001, 2101] and e.total == 4
+    e = _run(_expand(factory, USER_ID, "watchlist", 1))
+    assert e.type_ids == [2001]

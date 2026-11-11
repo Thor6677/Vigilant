@@ -52,7 +52,7 @@ async def _market_types(db: AsyncSession, type_ids) -> list[tuple[int, str]]:
                 SDEType.published.is_(True),
                 SDEType.market_group_id.is_not(None))
         )).all()
-    return sorted(((t, n) for t, n in out), key=lambda r: (r[1] or "").lower())
+    return sorted(((t, n) for t, n in out), key=lambda r: ((r[1] or "").lower(), r[0]))
 
 
 def _expanded(label: str, rows: list[tuple[int, str]], notes: list[str]) -> Expanded:
@@ -69,9 +69,28 @@ async def _category(db: AsyncSession, group_id: int) -> Expanded:
         select(SDEType.type_id, SDEType.type_name).where(
             SDEType.market_group_id.in_(groups), SDEType.published.is_(True))
     )).all()
-    rows = sorted(((t, n) for t, n in rows), key=lambda r: (r[1] or "").lower())
+    rows = sorted(((t, n) for t, n in rows), key=lambda r: ((r[1] or "").lower(), r[0]))
     label = " › ".join(p["market_group_name"] for p in path)
     return _expanded(label, rows, [])
+
+
+@dataclass
+class _Snap:
+    """What the blueprint walk needs from a Character, copied out up front so a
+    rollback (which expires every ORM row) can't break later reads."""
+    character_id: int
+    character_name: str
+    scopes: str
+    corporation_id: int | None
+    corporation_name: str | None
+    char: Character
+    alive: bool = True
+
+
+def _bp_cap_note(name: str, raw) -> list[str]:
+    if raw is not None and len(raw) >= owned_blueprints.PAGE_CAP:
+        return [f"{name}'s blueprint list may be incomplete (over 10,000 blueprints)."]
+    return []
 
 
 async def blueprint_type_ids(db: AsyncSession, user_id: int) -> tuple[set[int], list[str]]:
@@ -79,45 +98,64 @@ async def blueprint_type_ids(db: AsyncSession, user_id: int) -> tuple[set[int], 
     chars = (await db.execute(
         select(Character).where(Character.user_id == user_id)
     )).scalars().all()
+    snaps = [_Snap(c.character_id, c.character_name, c.scopes or "",
+                   c.corporation_id, c.corporation_name, c) for c in chars]
     found: set[int] = set()
     notes: list[str] = []
     try:
-        dead = await perm_status.dead_token_ids(db, [c.character_id for c in chars])
+        dead = await perm_status.dead_token_ids(db, [s.character_id for s in snaps])
     except Exception as exc:
         logger.info("hub scan: dead-token lookup failed: %s", exc)
         dead = set()
-    for char in chars:
-        if perms.BLUEPRINTS not in (char.scopes or ""):
-            notes.append(f"{char.character_name} hasn't shared blueprints with Vigilant.")
+    for i, snap in enumerate(snaps):
+        if not snap.alive:
             continue
-        if char.character_id in dead:
-            notes.append(f"{char.character_name} needs to sign in again, so "
+        if perms.BLUEPRINTS not in snap.scopes:
+            notes.append(f"{snap.character_name} hasn't shared blueprints with Vigilant.")
+            continue
+        if snap.character_id in dead:
+            notes.append(f"{snap.character_name} needs to sign in again, so "
                          "their blueprints aren't counted.")
             continue
-        char_name, char_id = char.character_name, char.character_id
         try:
-            raw, _token = await owned_blueprints.character_rows(db, char)
+            raw, _token = await owned_blueprints.character_rows(db, snap.char)
         except Exception:
-            logger.warning("hub scan: blueprints for %s failed", char_id, exc_info=True)
-            await db.rollback()
-            # A rollback expires every loaded row; reload them so the loop's
-            # later attribute reads don't lazy-load outside a greenlet.
-            for c in chars:
-                await db.refresh(c)
-            notes.append(f"Couldn't load {char_name}'s blueprints.")
+            logger.warning("hub scan: blueprints for %s failed", snap.character_id,
+                           exc_info=True)
+            notes.append(f"Couldn't load {snap.character_name}'s blueprints.")
+            try:
+                await db.rollback()
+            except Exception:
+                logger.warning("hub scan: rollback failed", exc_info=True)
+            # A rollback expires every loaded row. Reload the ones still needed
+            # as ORM objects; one that can't be reloaded is dropped, not fatal.
+            for j, other in enumerate(snaps):
+                if not other.alive:
+                    continue
+                try:
+                    await db.refresh(other.char)
+                except Exception:
+                    logger.warning("hub scan: reloading %s failed", other.character_id,
+                                   exc_info=True)
+                    other.alive = False
+                    if j > i:
+                        notes.append(f"Couldn't load {other.character_name}'s blueprints.")
             continue
+        notes += _bp_cap_note(snap.character_name, raw)
         found.update(int(r["type_id"]) for r in raw or [] if r.get("type_id"))
-    corps: dict[int, list[Character]] = {}
-    for c in chars:
-        if c.corporation_id and c.corporation_id >= NPC_CORP_CEILING:
-            corps.setdefault(c.corporation_id, []).append(c)
+    corps: dict[int, list[_Snap]] = {}
+    for s in snaps:
+        if s.corporation_id and s.corporation_id >= NPC_CORP_CEILING:
+            corps.setdefault(s.corporation_id, []).append(s)
     for corp_id, members in sorted(corps.items()):
         name = members[0].corporation_name or f"Corp {corp_id}"
-        holders = [c for c in members if perms.CORP_BLUEPRINTS in (c.scopes or "")]
+        holders = [m.char for m in members
+                   if m.alive and perms.CORP_BLUEPRINTS in m.scopes]
         raw = await owned_blueprints.corporation_rows(db, corp_id, holders) if holders else None
         if raw is None:
             notes.append(f"{name}'s blueprints couldn't be read, so they aren't included.")
             continue
+        notes += _bp_cap_note(name, raw)
         found.update(int(r["type_id"]) for r in raw if r.get("type_id"))
     return found, notes
 
