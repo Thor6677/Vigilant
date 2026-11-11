@@ -120,11 +120,16 @@
 
     .hs-scroll { overflow-x:auto; border-top:1px solid var(--border); }
     .hs-table { width:100%; border-collapse:collapse; min-width:1080px; font-size:12px; }
-    .hs-table th { font-size:9px; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted); font-weight:600; text-align:right; padding:0.6rem 0.6rem; border-bottom:1px solid var(--border); white-space:nowrap; vertical-align:bottom; }
-    .hs-table td { padding:0.6rem 0.6rem; text-align:right; vertical-align:top; white-space:nowrap; border-bottom:1px solid var(--border); }
+    /* Text columns wrap, numbers do not: item names and the hub's tags wrap
+       so Profit / day and Route stay inside the scroller on a desktop window. */
+    .hs-table th { font-size:9px; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted); font-weight:600; text-align:right; padding:0.6rem 0.45rem; border-bottom:1px solid var(--border); vertical-align:bottom; }
+    .hs-table td { padding:0.6rem 0.45rem; text-align:right; vertical-align:top; white-space:nowrap; border-bottom:1px solid var(--border); }
     .hs-table .hs-l { text-align:left; }
-    .hs-table td small { display:block; font-size:10px; color:var(--muted); }
-    .hs-sort { background:none; border:none; padding:0; margin:0; font:inherit; letter-spacing:inherit; text-transform:inherit; color:inherit; cursor:pointer; white-space:nowrap; }
+    .hs-table td.hs-name { min-width:10rem; max-width:15rem; white-space:normal; overflow-wrap:anywhere; }
+    .hs-table td.hs-hub { white-space:normal; }
+    .hs-table .hs-tags { display:block; margin-top:2px; }
+    .hs-table td small { display:block; font-size:10px; color:var(--muted); white-space:normal; }
+    .hs-sort { background:none; border:none; padding:0; margin:0; font:inherit; letter-spacing:inherit; text-transform:inherit; color:inherit; cursor:pointer; text-align:inherit; }
     .hs-sort:hover, .hs-sort.is-on { color:var(--accent); }
     .hs-item { color:var(--text); font-weight:600; text-decoration:none; border-bottom:1px dotted var(--muted); }
     .hs-item:hover { color:var(--accent); }

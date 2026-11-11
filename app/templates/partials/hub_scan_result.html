@@ -128,8 +128,8 @@
     <tbody>
     {% for r in view['rows'] %}
         <tr>
-            <td class="hs-l"><a class="hs-item" href="{{ r['link'] }}">{{ r['name'] }}</a></td>
-            <td class="hs-l">{{ r['hub'] }} {{ tags(r) }}</td>
+            <td class="hs-l hs-name"><a class="hs-item" href="{{ r['link'] }}">{{ r['name'] }}</a></td>
+            <td class="hs-l hs-hub">{{ r['hub'] }}<span class="hs-tags">{{ tags(r) }}</span></td>
             <td class="hs-l"><span class="hs-src hs-src-{{ r['source'] }}">{{ r['source_text'] }}</span>{{ copy_mark(r) }}{% if r['other_text'] %}<small>{{ r['other_text'] }}</small>{% endif %}</td>
             <td>{{ r['cost'] }}<small>{{ r['cost_basis'] }}</small></td>
             <td>{{ r['price'] }}{% if r['price_flag'] %}<small title="{{ r['price_flag_title'] }}">{{ r['price_flag'] }}</small>{% endif %}</td>
