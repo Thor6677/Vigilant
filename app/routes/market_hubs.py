@@ -1,0 +1,208 @@
+"""Market → hub comparison (item page section).
+
+  * `GET  /market/type/{type_id}/hubs` — htmx partial: the five trade hubs
+    compared for one item, quantity and cost.
+  * `POST /market/hub-prefs`           — save fees and starting system.
+
+All maths is in `app.market.hub_analysis`; all strings in
+`app.market.hub_view`. This module only gathers data: regional history and
+hub orders through the existing cached fetchers, at most ten upstream requests
+for a first view and none while the caches are warm.
+
+History is read on the request's own session, one hub after another, because
+`get_history` writes — sharing a session across concurrent writers is unsafe.
+Orders have no database side and are fetched concurrently.
+"""
+from __future__ import annotations
+
+import asyncio
+from datetime import date, datetime, timezone
+
+from fastapi import APIRouter, Depends, Form, Request
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.models import get_db
+from app.esi.market import APPRAISAL_HUBS
+from app.market import history as market_history
+from app.market import hub_cost, hub_prefs, hub_route, hub_view
+from app.market import orders as market_orders
+from app.market.hub_analysis import analyse_hub, best_picks
+from app.routes.market import _is_market_type
+from app.sde import lookup as sde
+
+router = APIRouter(tags=["market"])
+# MUST be named `templates` — see the note in app/routes/market.py.
+templates = Jinja2Templates(directory="app/templates")
+
+HUB_ORDER = ("jita", "amarr", "dodixie", "hek", "rens")
+HUB_NAMES = {"jita": "Jita", "amarr": "Amarr", "dodixie": "Dodixie",
+             "hek": "Hek", "rens": "Rens"}
+MAX_QTY = 1_000_000
+COST_MODES = ("benchmark", "build", "typed")
+
+
+def _today() -> date:
+    """Clock seam — monkeypatched in tests."""
+    return datetime.now(timezone.utc).date()
+
+
+def _parse_qty(raw) -> int:
+    try:
+        n = int(float(str(raw).replace(",", "").strip()))
+    except (TypeError, ValueError, OverflowError):
+        return 1
+    return max(1, min(MAX_QTY, n))
+
+
+async def _resolve_origin(db: AsyncSession, raw: str | None, saved_id: int | None):
+    """(system_id | None, display name, error). `raw` None means the field was
+    not submitted (first load), so the saved system applies; '' means none."""
+    if raw is None:
+        if saved_id is None:
+            return None, "", ""
+        names = await sde.system_ids_to_names(db, [saved_id])
+        return saved_id, names.get(saved_id, ""), ""
+    name = raw.strip()[:64]
+    if not name:
+        return None, "", ""
+    system_id = await sde.system_name_to_id(db, name)
+    if system_id is None:
+        return None, name, f"Unknown system: {name}."
+    names = await sde.system_ids_to_names(db, [system_id])
+    return system_id, names.get(system_id, name), ""
+
+
+def _age_str(type_id: int, latest_day: date | None) -> str:
+    stamps = [market_orders.fetched_at(APPRAISAL_HUBS[k]["region_id"], type_id)
+              for k in HUB_ORDER]
+    stamps = [s for s in stamps if s is not None]
+    parts = []
+    if stamps:
+        minutes = int((market_orders._now() - min(stamps)).total_seconds() // 60)
+        parts.append(f"Orders {minutes} min old" if minutes >= 1 else "Orders just fetched")
+    if latest_day is not None:
+        parts.append(f"history to {latest_day.isoformat()}")
+    return " · ".join(parts)
+
+
+@router.get("/market/type/{type_id}/hubs", response_class=HTMLResponse)
+async def market_type_hubs(
+    request: Request,
+    type_id: int,
+    qty: str = "1",
+    cost_mode: str = "benchmark",
+    cost: str = "",
+    origin: str | None = None,
+    sales_tax: str | None = None,
+    broker_fee: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("", status_code=401)
+    # Not a market item: nothing to compare, and no upstream calls (ISS-178).
+    if not await _is_market_type(db, type_id):
+        return HTMLResponse("")
+
+    prefs = await hub_prefs.get_prefs(db, user_id)
+    quantity = _parse_qty(qty)
+    tax_pct = hub_prefs.clamp_pct(sales_tax, prefs.sales_tax_pct)
+    broker_pct = hub_prefs.clamp_pct(broker_fee, prefs.broker_fee_pct)
+    origin_id, origin_name, origin_error = await _resolve_origin(
+        db, origin, prefs.origin_system_id)
+
+    bench, bench_me = await hub_cost.benchmark(db, type_id)
+    mode = cost_mode if cost_mode in COST_MODES else "benchmark"
+    notes = []
+    if mode == "benchmark" and bench is None:
+        mode = "typed"
+    if mode == "benchmark":
+        unit_cost = bench
+        notes.append(hub_cost.BENCHMARK_NOTE.format(me=bench_me))
+    else:
+        unit_cost = hub_view.parse_isk(cost)
+        if unit_cost is None:
+            notes.append("No cost set — enter a cost per unit to see profit and margin."
+                         if bench is not None else
+                         "No blueprint for this item — enter a cost per unit to see "
+                         "profit and margin.")
+    if origin_error:
+        notes.append(origin_error)
+
+    hubs = [APPRAISAL_HUBS[k] for k in HUB_ORDER]
+    order_lists = await asyncio.gather(
+        *(market_orders.get_orders(h["region_id"], type_id) for h in hubs))
+
+    today = _today()
+    results: dict[str, dict | None] = {}
+    latest_day = None
+    for key, hub, raw_orders in zip(HUB_ORDER, hubs, order_lists):
+        rows = await market_history.get_history(hub["region_id"], type_id, db)
+        history_ok = await market_history.fetched_at(db, hub["region_id"], type_id) is not None
+        orders_ok = market_orders.fetched_at(hub["region_id"], type_id) is not None
+        if not (history_ok and orders_ok):
+            results[key] = None
+            continue
+        days = [{"date": r.date, "volume": r.volume, "average": r.average} for r in rows]
+        if days:
+            newest = max(d["date"] for d in days)
+            latest_day = newest if latest_day is None else max(latest_day, newest)
+        results[key] = analyse_hub(
+            days, raw_orders, hub["station_id"], quantity, unit_cost,
+            tax_pct / 100, broker_pct / 100, today)
+
+    routes: dict[str, dict | None] = {}
+    if origin_id is not None:
+        stations = await sde.stations_by_ids(db, [h["station_id"] for h in hubs])
+        hub_systems = {
+            key: stations[hub["station_id"]]["system_id"]
+            for key, hub in zip(HUB_ORDER, hubs) if hub["station_id"] in stations
+        }
+        routes = await hub_route.hub_routes(db, origin_id, hub_systems)
+
+    picks = best_picks(results, HUB_ORDER)
+    return templates.TemplateResponse(request, "partials/market_hub_comparison.html", {
+        "type_id": type_id,
+        "qty": quantity,
+        "cost_mode": mode,
+        "cost_value": f"{unit_cost:.0f}" if unit_cost is not None else "",
+        "has_benchmark": bench is not None,
+        "notes": notes,
+        "origin_name": origin_name,
+        "sales_tax_pct": tax_pct,
+        "broker_fee_pct": broker_pct,
+        "age_str": _age_str(type_id, latest_day),
+        "show_route": origin_id is not None,
+        "picks": hub_view.pick_boxes(picks, results, HUB_NAMES),
+        "rows": [hub_view.hub_row(k, HUB_NAMES[k], results[k], routes.get(k), quantity)
+                 for k in HUB_ORDER],
+    })
+
+
+@router.post("/market/hub-prefs", response_class=HTMLResponse)
+async def market_hub_prefs_save(
+    request: Request,
+    sales_tax: str = Form(""),
+    broker_fee: str = Form(""),
+    origin: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+):
+    """Save fees and starting system. Returns a short status line that htmx
+    swaps in beside the button."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return HTMLResponse("", status_code=401)
+    prefs = await hub_prefs.get_prefs(db, user_id)
+    origin_id, _name, error = await _resolve_origin(db, origin, None)
+    if error:
+        # Keep the previously saved system rather than clearing it on a typo.
+        origin_id = prefs.origin_system_id
+    await hub_prefs.save_prefs(
+        db, user_id,
+        hub_prefs.clamp_pct(sales_tax, prefs.sales_tax_pct),
+        hub_prefs.clamp_pct(broker_fee, prefs.broker_fee_pct),
+        origin_id,
+    )
+    return HTMLResponse("Fees saved; starting system not recognised." if error else "Saved.")

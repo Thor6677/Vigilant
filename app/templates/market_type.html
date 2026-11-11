@@ -27,6 +27,62 @@
        min-width:0 lets both columns share the width; the location cell then
        ellipsises as it was always meant to. Phones already stack (site.css). */
     .mk-book > .b-section { min-width: 0; }
+    /* Hub comparison (partials/market_hub_comparison.html). Desktop is the
+       table; phones get the cards (m-hide / m-only switch them at 640px). */
+    .hc-mut { color:var(--muted); font-size:10px; }
+    .hc-inputs { display:flex; flex-wrap:wrap; gap:0.75rem 1.25rem; align-items:flex-end; padding:0.9rem 0; border-bottom:1px solid var(--border); }
+    .hc-fld { display:flex; flex-direction:column; gap:3px; }
+    .hc-fld > span:first-child { font-size:9px; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted); }
+    .hc-note { font-size:10px; color:var(--muted); padding:0.4rem 0 0; }
+    .hc-picks { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:0.75rem; margin:1rem 0; }
+    .hc-pick { border:1px solid var(--accent-dim); border-left:3px solid var(--accent); background:var(--accent-faint); padding:0.6rem 0.85rem; }
+    .hc-pick-k { font-size:9px; letter-spacing:0.18em; text-transform:uppercase; color:var(--accent); }
+    .hc-pick-v { font-size:14px; color:var(--text); margin-top:2px; }
+    .hc-pick-d { font-size:11px; color:var(--muted); }
+    .hc-tag { display:inline-block; font-size:9px; letter-spacing:0.14em; text-transform:uppercase; padding:1px 7px; border:1px solid; white-space:nowrap; }
+    .hc-fast { color:var(--success); border-color:var(--success); }
+    .hc-steady { color:var(--info); border-color:var(--info); }
+    .hc-slow { color:#c97a20; border-color:#c97a20; }
+    .hc-thin { color:var(--muted); border-color:var(--muted); }
+    .hc-under { color:var(--accent); border-color:var(--accent); background:var(--accent-faint); }
+    .hc-saturated { color:var(--danger); border-color:var(--danger); }
+    .hc-pos { color:var(--success); }
+    .hc-neg { color:var(--danger); }
+    .hc-hub { font-size:13px; font-weight:600; color:var(--text); }
+    .hc-retry { background:none; border:none; padding:0; font:inherit; color:var(--accent); cursor:pointer; text-decoration:underline; }
+    .hc-table { width:100%; border-collapse:collapse; font-size:12px; }
+    .hc-table th { font-size:9px; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted); font-weight:600; text-align:right; padding:0.5rem 0.6rem; border-bottom:1px solid var(--border); vertical-align:bottom; }
+    .hc-table th:first-child, .hc-table td:first-child { text-align:left; }
+    .hc-table th.hc-grp { text-align:center; color:var(--accent); border-bottom:1px solid var(--accent-dim); }
+    .hc-table td { padding:0.55rem 0.6rem; text-align:right; vertical-align:top; white-space:nowrap; }
+    .hc-table tr.hc-r td { border-top:1px solid var(--border); }
+    .hc-table tr.hc-s td { padding-top:0; text-align:left; color:var(--muted); font-size:11px; white-space:normal; }
+    .hc-table td.hc-unavail { text-align:left; color:var(--muted); }
+    .hc-small { display:block; font-size:10px; color:var(--muted); }
+    .hc-gl { border-left:1px solid var(--border); }
+    .hc-foot { font-size:10px; color:var(--muted); margin-top:1rem; padding-top:0.6rem; border-top:1px solid var(--border); }
+    .hc-cards { margin-top:0.75rem; }
+    .hc-card { border:1px solid var(--border); background:var(--surface); margin-bottom:0.75rem; }
+    .hc-ch { display:flex; align-items:center; justify-content:space-between; gap:0.5rem; padding:0.6rem 0.8rem; border-bottom:1px solid var(--border); }
+    .hc-tags { display:flex; gap:0.3rem; flex-wrap:wrap; justify-content:flex-end; }
+    .hc-say { padding:0.6rem 0.8rem; font-size:12px; color:var(--text); border-bottom:1px solid var(--border); }
+    .hc-mkt { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); border-bottom:1px solid var(--border); }
+    .hc-mkt > div { padding:0.5rem 0.8rem; border-right:1px solid var(--border); min-width:0; }
+    .hc-mkt > div:last-child { border-right:none; }
+    .hc-n { font-size:13px; color:var(--text); overflow-wrap:anywhere; }
+    .hc-l { font-size:9px; letter-spacing:0.12em; text-transform:uppercase; color:var(--muted); }
+    .hc-two { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .hc-two > div { padding:0.6rem 0.8rem; min-width:0; }
+    .hc-two > div:first-child { border-right:1px solid var(--border); }
+    .hc-two h4 { margin:0 0 0.35rem; font-size:9px; letter-spacing:0.18em; text-transform:uppercase; color:var(--accent); font-weight:600; }
+    .hc-row { display:flex; justify-content:space-between; gap:0.5rem; font-size:12px; }
+    .hc-row > span:first-child { color:var(--muted); }
+    .hc-cf { display:flex; justify-content:space-between; gap:0.5rem; padding:0.4rem 0.8rem; border-top:1px solid var(--border); font-size:10px; color:var(--muted); }
+    @media (max-width: 640px) {
+        .hc-inputs { gap:0.6rem; }
+        .hc-fld { flex:1 1 45%; }
+        .hc-fld .b-input { width:100% !important; }
+    }
 </style>
 {% endblock %}
 
@@ -79,6 +135,17 @@
     <div class="b-section">
         <div class="b-section-head"><span class="b-label">Order book — The Forge</span></div>
         <div class="b-empty">Loading order book…</div>
+    </div>
+</div>
+
+<div id="mk-hubs"
+     hx-get="/market/type/{{ type_id }}/hubs{{ hubs_query|default('') }}"
+     hx-trigger="load"
+     hx-swap="innerHTML"
+     style="margin-top:0.75rem;">
+    <div class="b-section">
+        <div class="b-section-head"><span class="b-label">Hub comparison</span></div>
+        <div class="b-empty">Comparing trade hubs…</div>
     </div>
 </div>
 
