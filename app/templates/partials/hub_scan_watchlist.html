@@ -1,0 +1,95 @@
+{# Hub Scan's watchlist manager. Drawn under the scan form by
+   market_hub_scan.html (shown when the list kind is Watchlist) as the
+   content of the page's #hs-wl-box, which is never replaced: every
+   /market/watchlists reply goes into that box (innerHTML), so no extends;
+   the .hs-* rules and every script live in the page (a partial must not
+   carry or redefine page JS). A stable target matters: htmx 1.9.12 drops a
+   reply whose target was replaced while it was in flight, after the
+   reply's out-of-band picker has already been swapped, which left the
+   picker on one list and the manager on another. Context `m` from
+   app/routes/market_scan.py _manager_ctx: lists, current (the list being
+   edited: the one the page's picker shows), items [(type_id, name)],
+   message, q, found, on_list, and the limits. `oob` is set on a route's
+   reply: the page's picker (partials/hub_scan_wl_pick.html) comes with it
+   out of band.
+
+   data-current is the list now edited and data-count its item count. After
+   each swap the page script copies data-current into the form's hidden ref,
+   and asks for a new status line only when the list changed (create,
+   delete, another list picked), or when the count changed and no result of
+   this list is showing (the count line is then the status). Renaming, or
+   adding and removing items under a shown result, leaves that result, its
+   filters and its sort alone. 0 means no list.
+
+   Every control opts out of base.html's error pill (it would replace a
+   button's label or a field's contents); the page script writes what failed
+   into #hs-wl-msg, or into #hs-wl-found for the search. The root opts out
+   too. The page script's reloads (a list picked) come from its own source
+   element, which syncs them on the box newest-first; the buttons here keep
+   htmx's default (each syncs on itself), so two quick edits are both sent
+   rather than one aborting the other.
+
+   No <form> elements: inputs travel by hx-include, ids by hx-vals (integers
+   only). There is no form to submit, so Enter does nothing natively; the
+   page script presses Create or Rename for it. List and item names are the
+   user's and the SDE's text: autoescaped everywhere, attributes included. #}
+{% set cur = m['current'] %}
+<div id="hs-watchlists" class="hs-wl" data-current="{{ cur['id'] if cur else 0 }}"
+     data-count="{{ m['items']|length if cur else 0 }}" data-htmx-no-error="1">
+    <div class="hs-wl-bar">
+        <label class="hs-fld hs-wl-grow" for="hs-wl-new"><span class="hs-lbl">New list</span>
+            <input class="b-input hs-wl-in" id="hs-wl-new" type="text" name="name"
+                   maxlength="{{ m['max_name'] }}" placeholder="List name" autocomplete="off"></label>
+        <span class="hs-fld"><button type="button" id="hs-wl-create" class="b-btn"
+                hx-post="/market/watchlists" hx-include="#hs-wl-new"
+                hx-vals='{"current": {{ cur['id'] if cur else 0 }}}'
+                hx-target="#hs-wl-box" hx-swap="innerHTML" data-htmx-no-error="1">Create</button></span>
+        <span class="hs-mut hs-wl-count">{{ m['lists']|length }} of {{ m['max_lists'] }} lists</span>
+    </div>
+    <div id="hs-wl-msg" class="hs-wl-msg" role="status">{{ m['message'] }}</div>
+    {% if cur %}
+    <div class="hs-wl-head">
+        <b class="hs-label">{{ cur['name'] }}</b>
+        <span class="hs-mut">{{ m['items']|length }} of {{ m['max_items'] }} items</span>
+    </div>
+    <div class="hs-wl-bar">
+        <label class="hs-fld hs-wl-grow" for="hs-wl-rename"><span class="hs-lbl">Rename</span>
+            <input class="b-input hs-wl-in" id="hs-wl-rename" type="text" name="name"
+                   value="{{ cur['name'] }}" maxlength="{{ m['max_name'] }}" autocomplete="off"></label>
+        <span class="hs-fld"><button type="button" id="hs-wl-rename-btn" class="b-btn"
+                hx-post="/market/watchlists/{{ cur['id'] }}/rename" hx-include="#hs-wl-rename"
+                hx-target="#hs-wl-box" hx-swap="innerHTML" data-htmx-no-error="1">Rename</button></span>
+        <span class="hs-fld"><button type="button" class="b-btn is-danger"
+                hx-post="/market/watchlists/{{ cur['id'] }}/delete"
+                hx-confirm="Delete {{ cur['name'] }} and its saved scan?"
+                hx-target="#hs-wl-box" hx-swap="innerHTML" data-htmx-no-error="1">Delete list</button></span>
+    </div>
+    <div class="hs-wl-bar">
+        <label class="hs-fld hs-wl-grow" for="hs-wl-q"><span class="hs-lbl">Add an item</span>
+            <input class="b-input hs-wl-in" id="hs-wl-q" type="text" name="q" value="{{ m['q'] }}"
+                   maxlength="{{ m['search_max'] }}" autocomplete="off"
+                   placeholder="Search items ({{ m['search_min'] }}+ letters)"
+                   hx-get="/market/watchlists/search?wid={{ cur['id'] }}"
+                   hx-trigger="input changed delay:300ms" hx-target="#hs-wl-found"
+                   hx-swap="innerHTML" data-htmx-no-error="1"></label>
+    </div>
+    <div id="hs-wl-found" class="hs-wl-found">
+        {%- with found=m['found'], found_q=m['q'], found_wid=cur['id'], on_list=m['on_list'], search_min=m['search_min'] %}{% include "partials/hub_scan_wl_found.html" %}{% endwith -%}
+    </div>
+    {% if m['items'] %}
+    <ul class="hs-wl-list hs-wl-items">
+        {% for type_id, name in m['items'] %}
+        <li class="hs-wl-li"><a class="hs-item hs-wl-name" href="/market/type/{{ type_id }}">{{ name }}</a>
+            <button type="button" class="b-btn is-ghost hs-wl-btn"
+                    hx-post="/market/watchlists/{{ cur['id'] }}/items/{{ type_id }}/delete"
+                    hx-include="#hs-wl-q" hx-target="#hs-wl-box" hx-swap="innerHTML"
+                    data-htmx-no-error="1" aria-label="Remove {{ name }}">Remove</button></li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <div class="hs-hint">No items yet. Search above, use “Add to watchlist” on an item's market
+        page, or add a scan result's items from under its table.</div>
+    {% endif %}
+    {% endif %}
+</div>
+{% if oob %}{% with wl_lists=m['lists'], wl_pick=(cur['id'] if cur else 0), wl_oob=True %}{% include "partials/hub_scan_wl_pick.html" %}{% endwith %}{% endif %}

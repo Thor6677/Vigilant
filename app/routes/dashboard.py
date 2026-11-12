@@ -2239,6 +2239,22 @@ async def _run_cache_gc() -> None:
         logger.warning("Cache GC error: %s", e)
 
 
+async def _cleanup_hub_scan() -> None:
+    """Daily Hub Scan cleanup (old summaries, idle category results) on its
+    own session. Never raises: a failure here must not stop the other daily
+    jobs or the scheduler loop."""
+    try:
+        from app.market import scan_results
+        async with AsyncSessionLocal() as scan_db:
+            gone_summaries, gone_results = await scan_results.cleanup(
+                scan_db, datetime.now(timezone.utc))
+        if gone_summaries or gone_results:
+            logger.info("Hub Scan cleanup: %s summaries, %s results removed",
+                        gone_summaries, gone_results)
+    except Exception:
+        logger.warning("Hub Scan cleanup failed", exc_info=True)
+
+
 async def _background_scheduler():
     """Runs forever. Every 60s, find all characters with stale fields and sync them.
 
@@ -2599,6 +2615,7 @@ async def _background_scheduler():
                             logger.info("Cleaned up %d expired hosted image(s)", removed)
                 except Exception as e:
                     logger.warning("Hosted image cleanup error: %s", e)
+                await _cleanup_hub_scan()
 
             await asyncio.sleep(60)
     except Exception as e:

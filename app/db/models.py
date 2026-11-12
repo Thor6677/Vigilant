@@ -1218,7 +1218,76 @@ class MarketHubPrefs(Base):
     sales_tax_pct = Column(Float, nullable=False, default=3.37)
     broker_fee_pct = Column(Float, nullable=False, default=1.5)
     origin_system_id = Column(Integer, nullable=True)
+    # Hub Scan. server_default as well, so a row inserted without them (raw
+    # SQL, or a table made by create_all) gets the same defaults as the
+    # ALTER TABLE in main.py gives existing rows.
+    scan_budget_isk = Column(Float, nullable=False, default=500_000_000.0,
+                             server_default=text("500000000"))
+    market_share_pct = Column(Float, nullable=False, default=20.0,
+                              server_default=text("20"))
     updated_at = Column(DateTime, nullable=True)
+
+
+class MarketScanSummary(Base):
+    """Hub Scan's compact market data for one (region, type): the last ~40
+    daily history rows and the hub station's sell ladder, each with its own
+    freshness stamp. Written only by app/market/scan_fetch.py. This is what
+    lets a scan cover hundreds of items without writing `market_history`."""
+    __tablename__ = "market_scan_summary"
+
+    region_id = Column(Integer, primary_key=True)
+    type_id = Column(Integer, primary_key=True)
+    days_json = Column(Text, nullable=True)        # [[iso date, volume, average, highest], ...]
+    history_fetched_at = Column(DateTime, nullable=True)
+    ladder_json = Column(Text, nullable=True)      # [[price, units], ...] cheapest first
+    ladder_truncated = Column(Boolean, nullable=False, default=False)
+    orders_fetched_at = Column(DateTime, nullable=True)
+
+
+class MarketScanResult(Base):
+    """One saved Hub Scan result per (user, list). Rows are stored computed so
+    the result stays viewable after its summaries are cleaned up. Written only
+    by app/market/scan_results.py."""
+    __tablename__ = "market_scan_result"
+    __table_args__ = (UniqueConstraint("user_id", "list_kind", "list_ref",
+                                       name="uq_market_scan_result_list"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    list_kind = Column(String(12), nullable=False)   # category | blueprints | watchlist
+    list_ref = Column(Integer, nullable=False, default=0)
+    label = Column(String(200), nullable=False, default="")
+    status = Column(String(12), nullable=False)      # complete | incomplete
+    scanned_at = Column(DateTime, nullable=False)
+    opened_at = Column(DateTime, nullable=False)
+    item_total = Column(Integer, nullable=False, default=0)    # in the list, before the cap
+    item_scanned = Column(Integer, nullable=False, default=0)
+    settings_json = Column(Text, nullable=False, default="{}")
+    notes_json = Column(Text, nullable=False, default="[]")
+    routes_json = Column(Text, nullable=False, default="{}")
+    rows_json = Column(Text, nullable=False, default="[]")
+
+
+class MarketWatchlist(Base):
+    """A user's named list of items for Hub Scan. Only app/market/watchlists.py
+    reads or writes this and its items."""
+    __tablename__ = "market_watchlist"
+    # A deleted list's id is never reused: a saved scan result is keyed by it.
+    __table_args__ = (UniqueConstraint("user_id", "name", name="uq_market_watchlist_name"),
+                      {"sqlite_autoincrement": True})
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    name = Column(String(60), nullable=False)
+    created_at = Column(DateTime, nullable=False)
+
+
+class MarketWatchlistItem(Base):
+    __tablename__ = "market_watchlist_item"
+
+    watchlist_id = Column(Integer, ForeignKey("market_watchlist.id"), primary_key=True)
+    type_id = Column(Integer, primary_key=True)
+    added_at = Column(DateTime, nullable=False)
 
 
 class UpdateStatus(Base):

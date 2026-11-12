@@ -22,10 +22,10 @@ from app.auth import scopes as perms, status as perm_status
 from app.character_skills import skill_levels, skill_summary
 from app.db.models import AsyncSessionLocal, Character, CharacterDashboardCache, get_db
 from app.esi import assets as esi_assets
-from app.esi import character as esi_char
 from app.esi import corporation as esi_corp
 from app.esi.client import ESIClient, refresh_token
 from app.industry import copy_pack as cp
+from app.industry import owned_blueprints as owned_bp
 from app.industry import copy_pack_view as view
 from app.industry.copy_pack_form import parse_plan_form
 from app.industry.manufacturing import RIGS, SEC_STATUS, STRUCTURES, format_time
@@ -35,9 +35,6 @@ from app.routes.industry_jobs import NPC_CORP_CEILING, _resolve_location_names
 from app.sde import lookup as sde
 
 logger = logging.getLogger(__name__)
-
-# _fetch_all_pages stops after 10 pages of 1000; a list that long may be cut off.
-_PAGE_CAP = 10 * 1000
 
 router = APIRouter(tags=["copy-packs"])
 templates = Jinja2Templates(directory="app/templates")
@@ -222,15 +219,14 @@ async def _owned_blueprints(db: AsyncSession, chars: list[Character],
                          "their blueprints aren't counted.")
             continue
         try:
-            token = await refresh_token(char, db)
-            raw = await _fetch_all_pages(esi_char.get_blueprints,
-                                         ESIClient(token, db=db), char.character_id)
+            raw, token = await owned_bp.character_rows(
+                db, char, refresh=refresh_token, fetch_pages=_fetch_all_pages)
         except Exception as exc:
             logger.warning("Copy packs: blueprints for %s failed: %s",
                            char.character_id, exc)
             notes.append(f"Couldn't load {char.character_name}'s blueprints.")
             continue
-        if len(raw) >= _PAGE_CAP:
+        if len(raw) >= owned_bp.PAGE_CAP:
             notes.append(f"{char.character_name}'s blueprint list may be incomplete "
                          "(over 10,000 blueprints).")
         assets_by_id = await _char_assets_by_id(raw, char, token, db)
@@ -241,9 +237,6 @@ async def _owned_blueprints(db: AsyncSession, chars: list[Character],
         if c.corporation_id and c.corporation_id >= NPC_CORP_CEILING:
             corps.setdefault(c.corporation_id, []).append(c)
 
-    async def fetch_corp(client, corp_id):
-        return await _fetch_all_pages(esi_corp.get_corporation_blueprints, client, corp_id)
-
     for corp_id, members in sorted(corps.items()):
         holders = [c for c in members if perms.CORP_BLUEPRINTS in (c.scopes or "")]
         corp_name = members[0].corporation_name or f"Corp {corp_id}"
@@ -252,12 +245,13 @@ async def _owned_blueprints(db: AsyncSession, chars: list[Character],
                 notes.append(f"No character in {corp_name} shares corp blueprints, "
                              "so its hangars aren't counted.")
             continue
-        raw, _err = await _try_api_call_with_fallback(
-            "blueprints", {"blueprints": holders}, fetch_corp, corp_id, db)
+        raw = await owned_bp.corporation_rows(
+            db, corp_id, holders, fallback=_try_api_call_with_fallback,
+            fetch_pages=_fetch_all_pages)
         if raw is None:
             notes.append(f"{corp_name}'s blueprints couldn't be loaded.")
             continue
-        if len(raw) >= _PAGE_CAP:
+        if len(raw) >= owned_bp.PAGE_CAP:
             notes.append(f"{corp_name}'s blueprint list may be incomplete "
                          "(over 10,000 blueprints).")
         office_map, asset_holders, assets_by_id = await _office_map(raw, members, corp_id, db)

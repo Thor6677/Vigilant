@@ -252,14 +252,16 @@ def test_market_group_shape():
     assert market["landing"] is False
     assert market["items"][0]["url"] == market["url"] == "/market"
     labels = [i["label"] for i in market["items"]]
-    assert labels == ["Prices", "LP Store ROI", "Trading & Industry P&L",
+    assert labels == ["Prices", "Hub Scan", "LP Store ROI", "Trading & Industry P&L",
                       "Appraisal", "Net Worth"]
-    # Prices' broad /market prefix steps aside for LP / P&L sub-pages.
+    # Prices' broad /market prefix steps aside for LP / P&L / Hub Scan sub-pages.
     prices = _find("Prices")
     assert item_active(prices, "/market") is True
     assert item_active(prices, "/market/type/34") is True
     assert item_active(prices, "/market/lp") is False
     assert item_active(prices, "/market/pnl") is False
+    assert item_active(prices, "/market/hub-scan") is False
+    assert item_active(_find("Hub Scan"), "/market/hub-scan") is True
 
 
 def test_corporations_lives_in_dashboard_group():

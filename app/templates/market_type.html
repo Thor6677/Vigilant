@@ -89,10 +89,18 @@
     .hc-row { display:flex; justify-content:space-between; gap:0.5rem; font-size:12px; }
     .hc-row > span:first-child { color:var(--muted); }
     .hc-cf { display:flex; justify-content:space-between; gap:0.5rem; padding:0.4rem 0.8rem; border-top:1px solid var(--border); font-size:10px; color:var(--muted); }
+    /* Hub Scan's "Add to watchlist", above the hub comparison. */
+    .mk-wl { display:flex; flex-wrap:wrap; align-items:center; gap:0.4rem 0.6rem; margin-top:0.75rem; font-size:11px; }
+    .mk-wl-lbl { font-size:9px; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted); }
+    .mk-wl-pick { min-width:0; max-width:100%; }
+    .mk-wl-link { color:var(--accent); }
+    .mk-wl-msg { color:var(--muted); }
     @media (max-width: 640px) {
         .hc-inputs { gap:0.6rem; }
         .hc-fld { flex:1 1 45%; }
         .hc-fld .b-input { width:100% !important; }
+        .mk-wl-pick { flex:1 1 10rem; }
+        .mk-wl-link { display:inline-flex; align-items:center; min-height:44px; }
     }
 </style>
 {% endblock %}
@@ -149,6 +157,32 @@
     </div>
 </div>
 
+{# Hub Scan's "Add to watchlist" (app/routes/market_scan.py, add-item): a
+   sibling of #mk-hubs, never inside it (that section's first load replaces
+   everything in it) and never around it (nothing above #mk-hubs may carry
+   an htmx attribute). Only for a market type (`watchlists` is None
+   otherwise, and undefined where a test renders the page bare). The button
+   opts out of base.html's error pill, which would replace its label; the
+   script below says when an add fails. List names are autoescaped. #}
+{% if watchlists is defined and watchlists is not none %}
+<div class="mk-wl" id="mk-wl">
+    {% if watchlists %}
+    <label class="mk-wl-lbl" for="mk-wl-pick">Add to watchlist</label>
+    <select class="b-input mk-wl-pick" id="mk-wl-pick" name="watchlist_id">
+        {% for w in watchlists %}<option value="{{ w['id'] }}">{{ w['name'] }}</option>{% endfor %}
+    </select>
+    <input type="hidden" id="mk-wl-type" name="type_id" value="{{ type_id }}">
+    <button type="button" class="b-btn" id="mk-wl-add" hx-post="/market/watchlists/add-item"
+            hx-include="#mk-wl-pick, #mk-wl-type" hx-target="#mk-wl-msg" hx-swap="innerHTML"
+            data-htmx-no-error="1">Add</button>
+    <span class="mk-wl-msg" id="mk-wl-msg" role="status"></span>
+    {% else %}
+    <a class="mk-wl-link" href="/market/hub-scan?kind=watchlist">Create a watchlist</a>
+    <span class="mk-wl-msg">to scan this item with others across the trade hubs.</span>
+    {% endif %}
+</div>
+{% endif %}
+
 <div id="mk-hubs"
      hx-get="/market/type/{{ type_id }}/hubs{{ hubs_query|default('') }}"
      hx-trigger="load"
@@ -176,6 +210,24 @@
     document.body.addEventListener('htmx:beforeRequest', function (e) { status(e, ''); });
     ['htmx:responseError', 'htmx:sendError', 'htmx:timeout'].forEach(function (name) {
         document.body.addEventListener(name, function (e) { status(e, 'Not saved; try again.'); });
+    });
+})();
+/* Hub Scan's "Add to watchlist" (#mk-wl-add): the same for its line,
+   #mk-wl-msg. An earlier "Added." must not stay over a failed add. */
+(function () {
+    function added(evt, text) {
+        var el = evt.detail && evt.detail.elt;
+        if (!el || el.id !== 'mk-wl-add') return;
+        var line = document.getElementById('mk-wl-msg');
+        if (line) line.textContent = text;
+    }
+    document.body.addEventListener('htmx:beforeRequest', function (e) { added(e, ''); });
+    ['htmx:responseError', 'htmx:sendError', 'htmx:timeout'].forEach(function (name) {
+        document.body.addEventListener(name, function (e) {
+            var status = e.detail && e.detail.xhr ? e.detail.xhr.status : 0;
+            added(e, status === 404 ? 'That list no longer exists. Refresh the page.'
+                                    : 'Not added; try again.');
+        });
     });
 })();
 </script>

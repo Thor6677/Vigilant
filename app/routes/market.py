@@ -3,7 +3,8 @@
 Surfaces, all auth-gated:
 
   * `/market`                          — type search browser (htmx live search).
-  * `/market/type/{type_id}`           — chart page for one type in The Forge.
+  * `/market/type/{type_id}`           — chart page for one type in The Forge,
+                                         with Hub Scan's "Add to watchlist".
   * `/market/type/{type_id}/history.json` — JSON feed for the chart, range-sliced.
   * `/market/type/{type_id}/orders`    — htmx partial: hub order-book (Task 2).
   * `/market/lp`                       — LP store ROI calculator landing (Task 3).
@@ -31,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import MarketHistory, get_db
 from app.db.sde_models import SDEGroup, SDEType
 from app.market import lp as market_lp
+from app.market import watchlists
 from app.market.history import DEFAULT_REGION_ID, get_history
 from app.market.orders import (
     STATION_ID_CEILING,
@@ -141,6 +143,12 @@ async def market_type(request: Request, type_id: int, db: AsyncSession = Depends
     # a build cost; pass only those three known keys on to the hub comparison.
     passthrough = {k: request.query_params[k] for k in ("qty", "cost_mode", "cost")
                    if k in request.query_params}
+    # "Add to watchlist" (Hub Scan): the user's lists as plain dicts, or None
+    # for a type that is not on the market (no control at all).
+    lists = None
+    if await _is_market_type(db, type_id):
+        lists = [{"id": w.id, "name": w.name}
+                 for w in await watchlists.all_for(db, request.session["user_id"])]
     return templates.TemplateResponse(
         request, "market_type.html",
         {
@@ -150,6 +158,7 @@ async def market_type(request: Request, type_id: int, db: AsyncSession = Depends
             "region_id": DEFAULT_REGION_ID,
             "not_found": False,
             "hubs_query": ("?" + urlencode(passthrough)) if passthrough else "",
+            "watchlists": lists,
         },
     )
 

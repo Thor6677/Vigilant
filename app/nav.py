@@ -244,12 +244,23 @@ NAV_GROUPS = [
             _item(
                 "Prices", "/market",
                 [("prefix", "/market")],
-                # LP Store ROI (/market/lp) and Trading P&L (/market/pnl) live
-                # under the /market prefix too; keep them out of Prices' broad
-                # prefix so the items don't light up together (same pattern as
-                # Kill Feed / Kill Search).
-                exclude=["/market/lp", "/market/pnl"],
+                # LP Store ROI (/market/lp), Trading P&L (/market/pnl) and Hub
+                # Scan (/market/hub-scan) live under the /market prefix too;
+                # keep them out of Prices' broad prefix so the items don't
+                # light up together (same pattern as Kill Feed / Kill Search).
+                exclude=["/market/lp", "/market/pnl", "/market/hub-scan"],
                 in_landing=False,
+            ),
+            _item(
+                "Hub Scan", "/market/hub-scan",
+                [("prefix", "/market/hub-scan")],
+                desc="Scan a market category, your blueprints or a watchlist across Jita, Amarr, Dodixie, Hek and Rens, and see where each item earns the most per day, building it or hauling it from Jita.",
+                features=[
+                    "Best hub and source per item, ranked by profit per day",
+                    "Budget per item and your share of the market",
+                    "Under-supplied hubs flagged",
+                    "Saved result per list, rescan on demand",
+                ],
             ),
             _item(
                 "LP Store ROI", "/market/lp",

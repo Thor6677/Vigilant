@@ -100,6 +100,18 @@ USER_OWNED_TABLES = (
     "user_dashboard_prefs",
     "market_hub_prefs",  # one row per user: the hub comparison's saved inputs
     "held_character_removals",  # the expiry sweep's held removals (app/auth/expiry.py)
+    "market_scan_result",  # Hub Scan's saved results
+    "market_watchlist",    # Hub Scan watchlists; their items via USER_OWNED_CHILD_TABLES
+)
+
+# Rows a user owns through a parent row in USER_OWNED_TABLES, with no user_id
+# of their own: (child table, column holding the parent's id, parent table).
+# admin_remove_user deletes these BEFORE the parents, since the subquery that
+# finds them reads the parent rows. tests/test_admin_remove_user_cleanup.py
+# fails on a table with a foreign key into USER_OWNED_TABLES that has no
+# user_id column and is not listed here.
+USER_OWNED_CHILD_TABLES = (
+    ("market_watchlist_item", "watchlist_id", "market_watchlist"),
 )
 
 # Where the FK is metadata rather than ownership, null it out instead of
@@ -882,6 +894,11 @@ async def admin_remove_user(user_id: int, request: Request, background_tasks: Ba
     if manager_blocked(admin.role, user.role):
         return HTMLResponse('<div class="b-empty" style="color:var(--danger);">Managers cannot delete admin users.</div>')
 
+    # A Hub Scan job saves its result when it ends: cancel the user's before
+    # their rows go, so a scan cannot write one back for a removed account.
+    from app.market import scan_runner
+    scan_runner.forget(user_id)
+
     # Delete all characters belonging to this user
     chars_result = await db.execute(select(Character).where(Character.user_id == user_id))
     # Revoked at EVE after the commit below, so a removed account's tokens do
@@ -903,6 +920,11 @@ async def admin_remove_user(user_id: int, request: Request, background_tasks: Ba
     )).scalars().all()
     for plan in owned_plans:
         await db.delete(plan)
+
+    for child, key, parent in USER_OWNED_CHILD_TABLES:
+        await db.execute(text(
+            f"DELETE FROM {child} WHERE {key} IN (SELECT id FROM {parent} WHERE user_id = :uid)"),
+            {"uid": user_id})
 
     for tbl in USER_OWNED_TABLES:
         await db.execute(text(f"DELETE FROM {tbl} WHERE user_id = :uid"), {"uid": user_id})

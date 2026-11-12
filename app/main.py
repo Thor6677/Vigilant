@@ -72,6 +72,7 @@ from app.routes.landings import router as landings_router
 from app.routes.palette import router as palette_router
 from app.routes.market import router as market_router
 from app.routes.market_hubs import router as market_hubs_router
+from app.routes.market_scan import router as market_scan_router
 from app.routes.networth import router as networth_router
 from app.routes.stockpiles import router as stockpiles_router
 from app.routes.pnl import router as pnl_router
@@ -268,6 +269,7 @@ app.include_router(landings_router)
 app.include_router(palette_router)
 app.include_router(market_router)
 app.include_router(market_hubs_router)
+app.include_router(market_scan_router)
 app.include_router(networth_router)
 app.include_router(stockpiles_router)
 app.include_router(pnl_router)
@@ -422,6 +424,9 @@ async def startup():
             "ALTER TABLE update_policy ADD COLUMN observed_window VARCHAR(10)",
             # Structure age user anchor points: where each calibration point came from
             "ALTER TABLE structure_age_calibration ADD COLUMN source VARCHAR(8) NOT NULL DEFAULT 'triff'",
+            # Hub Scan: budget per item and market share, beside the hub comparison's fees
+            "ALTER TABLE market_hub_prefs ADD COLUMN scan_budget_isk FLOAT NOT NULL DEFAULT 500000000",
+            "ALTER TABLE market_hub_prefs ADD COLUMN market_share_pct FLOAT NOT NULL DEFAULT 20",
         ]:
             try:
                 await db.execute(text(stmt))

@@ -1,0 +1,16 @@
+{# Hub Scan's watchlist picker: the select that chooses the list to scan (and
+   to edit in the manager below the form). Drawn inside #hs-form by
+   market_hub_scan.html, and sent again out of band (wl_oob) with every
+   manager reply (partials/hub_scan_watchlist.html), so it always lists the
+   user's lists as they now are. Context: wl_lists (plain dicts), wl_pick (the
+   id to select, 0 for none), wl_oob. Names are autoescaped. The select has no
+   name: the page script copies its value into the form's hidden ref. #}
+<div id="hs-wl-pick"{% if wl_oob %} hx-swap-oob="true"{% endif %}>
+{% if wl_lists %}
+<select id="hs-watchlist" class="b-input">
+    {% for w in wl_lists %}<option value="{{ w['id'] }}"{% if wl_pick == w['id'] %} selected{% endif %}>{{ w['name'] }}</option>{% endfor %}
+</select>
+{% else %}
+<div class="hs-hint">You have no watchlists yet. Make one below.</div>
+{% endif %}
+</div>
