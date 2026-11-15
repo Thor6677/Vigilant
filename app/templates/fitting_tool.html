@@ -3144,13 +3144,14 @@ function addModuleFromBrowser(typeId, typeName, slotType, volume) {
         _noteBrowserAdd('✖ Not added · ' + _rackFill(slotType) + ' full');
         return;
     }
-    // Browser already checked fit restrictions, skip the wrapper
     if (slotType === 'drone') {
         if (!addDrone(typeId, typeName, volume)) return;
-    } else {
-        _origAddModule(typeId, typeName, slotType);
+        _noteBrowserAdd(_browserAddNoteText(typeId, typeName, slotType));
+        return;
     }
-    _noteBrowserAdd(_browserAddNoteText(typeId, typeName, slotType));
+    // Browser already checked fit restrictions, so the wrapper's check-fit is
+    // skipped; the hardpoint and fitted limits are not.
+    _addOneWithCaps(typeId, typeName, slotType, true);
 }
 
 function updateBreadcrumbs() {
@@ -3204,14 +3205,14 @@ addModule = function(typeId, typeName, slot) {
         typeName = this.dataset.typeName;
         slot = this.dataset.slotType;
     }
-    if (!state.shipTypeId) { _origAddModule(typeId, typeName, slot); return; }
+    if (!state.shipTypeId) { _addOneWithCaps(typeId, typeName, slot, false); return; }
     fetch('/tools/fitting/check-fit?module_type_id=' + typeId + '&ship_type_id=' + state.shipTypeId)
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (!data.can_fit) {
                 if (!confirm(typeName + ' may not be compatible with this ship. Add anyway?')) return;
             }
-            _origAddModule(typeId, typeName, slot);
+            _addOneWithCaps(typeId, typeName, slot, false);
         });
 };
 
@@ -3312,20 +3313,52 @@ function _fillPush(typeId, typeName, slot, fromBrowser) {
     return n;
 }
 
-/* Make sure the module and every fitted rack type has caps, then fill. */
-function _fillWithCaps(typeId, typeName, slot, fromBrowser) {
-    if (FILL_SLOTS.indexOf(slot) < 0) return;
+/* Make sure the module and every fitted rack type has caps, then run `then`.
+   A type with no cache entry counts as unlimited in _fillLimits, so anything
+   that counts limits has to come through here first. A failed fetch still
+   runs `then`: a network error must never block fitting. */
+function _withRackCaps(typeId, then) {
     var need = [typeId];
     state.items.forEach(function(i) {
         if (FILL_SLOTS.indexOf(i.slot) >= 0 && need.indexOf(i.type_id) < 0) need.push(i.type_id);
     });
     need = need.filter(function(t) { return overheatCache[t] === undefined; });
-    if (!need.length) { _fillPush(typeId, typeName, slot, fromBrowser); return; }
+    if (!need.length) { then(); return; }
     fetch('/tools/fitting/module-caps?type_ids=' + need.join(','))
         .then(function(r) { return r.json(); })
         .then(function(data) { for (var k in data) overheatCache[parseInt(k, 10)] = data[k]; })
         .catch(function() {})
-        .then(function() { _fillPush(typeId, typeName, slot, fromBrowser); });
+        .then(then);
+}
+
+function _fillWithCaps(typeId, typeName, slot, fromBrowser) {
+    if (FILL_SLOTS.indexOf(slot) < 0) return;
+    _withRackCaps(typeId, function() { _fillPush(typeId, typeName, slot, fromBrowser); });
+}
+
+/* A single add: ONE module, and only when Fill would add at least one. The
+   limits are read at push time, after the caps arrive, so two quick clicks
+   cannot both take the last hardpoint. Slots outside FILL_SLOTS (subsystem)
+   have no hardpoint or fitted limits and go straight through. */
+function _addOnePush(typeId, typeName, slot, fromBrowser) {
+    if (FILL_SLOTS.indexOf(slot) >= 0) {
+        var lim = _fillLimits(typeId, slot);
+        if (lim.n <= 0) {
+            var text = _fillNoteText(typeName, slot, 0, lim);
+            // The browser panel is collapsed on phones: show the note beside the legend too.
+            _limitNote(text, true);
+            if (fromBrowser) _noteBrowserAdd(text);
+            return false;
+        }
+    }
+    _origAddModule(typeId, typeName, slot);
+    if (fromBrowser) _noteBrowserAdd(_browserAddNoteText(typeId, typeName, slot));
+    return true;
+}
+
+function _addOneWithCaps(typeId, typeName, slot, fromBrowser) {
+    if (FILL_SLOTS.indexOf(slot) < 0) { _addOnePush(typeId, typeName, slot, fromBrowser); return; }
+    _withRackCaps(typeId, function() { _addOnePush(typeId, typeName, slot, fromBrowser); });
 }
 
 function fillRack(typeId, typeName, slot) {

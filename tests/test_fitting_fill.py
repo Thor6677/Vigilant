@@ -148,7 +148,7 @@ def result(page, tmp_path_factory):
              "var FILL_SLOTS = ['high', 'med', 'low', 'rig'];"]
     parts += [_fn(script, n) for n in (
         "getSlotCount", "getSlotLimit", "_rackFill", "_fillLimits", "fillCount",
-        "_fillNoteText", "_fillPush", "_fillWithCaps", "fillRack")]
+        "_fillNoteText", "_fillPush", "_withRackCaps", "_fillWithCaps", "fillRack")]
     src = "\n".join(parts)
     path = tmp_path_factory.mktemp("node") / "harness.js"
     ids = dict(GUN=GUN, GUN2=GUN2, MISSILE=MISSILE, PLATE=PLATE, RIGGY=RIGGY, SUBSYS=SUBSYS)

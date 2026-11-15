@@ -65,10 +65,11 @@
         {{ res_row('Powergrid',   stats.pg_used,          stats.pg_total,          'MW') }}
         {{ res_row('Calibration', stats.calibration_used, stats.calibration_total, '',  value_pad=0) }}
 
-        {# Hardpoints #}
+        {# Hardpoints. A fit can arrive over the limit (EFT import, saved fit,
+           subsystem swap): it loads as-is and the count turns red. #}
         <div style="display:flex;gap:1.5rem;font-size:10px;color:var(--text);">
-            <span><span class="b-muted">Turrets:</span> {{ stats.turrets_used }}/{{ stats.turrets_total }}</span>
-            <span><span class="b-muted">Launchers:</span> {{ stats.launchers_used }}/{{ stats.launchers_total }}</span>
+            <span><span class="b-muted">Turrets:</span> <span data-hardpoint="turret"{% if stats.turrets_used > stats.turrets_total %} data-over="1" style="color:var(--danger);" title="More turrets fitted than this hull has hardpoints"{% endif %}>{{ stats.turrets_used }}/{{ stats.turrets_total }}</span></span>
+            <span><span class="b-muted">Launchers:</span> <span data-hardpoint="launcher"{% if stats.launchers_used > stats.launchers_total %} data-over="1" style="color:var(--danger);" title="More launchers fitted than this hull has hardpoints"{% endif %}>{{ stats.launchers_used }}/{{ stats.launchers_total }}</span></span>
         </div>
     </div>
 </div>
